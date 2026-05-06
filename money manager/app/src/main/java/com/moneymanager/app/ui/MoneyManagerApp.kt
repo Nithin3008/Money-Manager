@@ -175,15 +175,18 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
                     onMonthSelected = viewModel::selectMonth,
                     onOpenSummary = viewModel::selectTab,
                     onAcceptDraft = viewModel::acceptDetectedTransaction,
-                    onIgnoreDraft = viewModel::ignoreDetectedTransaction
+                    onIgnoreDraft = viewModel::ignoreDetectedTransaction,
+                    onDeleteTransaction = viewModel::deleteTransaction
                 )
-                ScreenTab.Activity -> activityContent(state)
-                ScreenTab.Budget -> budgetContent(state, viewModel::setBudgetSheet)
+                ScreenTab.Activity -> activityContent(state, viewModel::deleteTransaction)
+                ScreenTab.Budget -> budgetContent(state, viewModel::setBudgetSheet, viewModel::deleteBudget)
                 ScreenTab.Summary -> summaryContent(state, viewModel::selectMonth)
                 ScreenTab.Settings -> settingsContent(
                     state = state,
                     onAddCategory = viewModel::setCategorySheet,
-                    onCurrencySelected = viewModel::selectCurrency
+                    onCurrencySelected = viewModel::selectCurrency,
+                    onDeleteAccount = viewModel::deleteAccount,
+                    onDeleteCategory = viewModel::deleteCategory
                 )
             }
         }
@@ -240,7 +243,8 @@ private fun androidx.compose.foundation.lazy.LazyListScope.dashboardContent(
     onMonthSelected: (YearMonth) -> Unit,
     onOpenSummary: (ScreenTab) -> Unit,
     onAcceptDraft: (Long, Long) -> Unit,
-    onIgnoreDraft: (Long) -> Unit
+    onIgnoreDraft: (Long) -> Unit,
+    onDeleteTransaction: (Long) -> Unit
 ) {
     item {
         HeroMetricCard(
@@ -293,24 +297,28 @@ private fun androidx.compose.foundation.lazy.LazyListScope.dashboardContent(
     }
     item { SectionHeader("Recent Transactions", "Latest") }
     items(state.transactions.take(5), key = { it.id }) {
-        TransactionRow(transaction = it, state = state)
+        TransactionRow(transaction = it, state = state, onDelete = onDeleteTransaction)
     }
 }
 
-private fun androidx.compose.foundation.lazy.LazyListScope.activityContent(state: FinanceUiState) {
+private fun androidx.compose.foundation.lazy.LazyListScope.activityContent(
+    state: FinanceUiState,
+    onDeleteTransaction: (Long) -> Unit
+) {
     item { LargeTitle("Activity", "Add and review income or expenses by category.") }
     if (state.transactions.isEmpty()) {
         item { EmptyPanel("No transactions yet. Tap + to add your first income or expense.") }
     } else {
         items(state.transactions, key = { it.id }) {
-            TransactionRow(transaction = it, state = state)
+            TransactionRow(transaction = it, state = state, onDelete = onDeleteTransaction)
         }
     }
 }
 
 private fun androidx.compose.foundation.lazy.LazyListScope.budgetContent(
     state: FinanceUiState,
-    onCreateBudget: (Boolean) -> Unit
+    onCreateBudget: (Boolean) -> Unit,
+    onDeleteBudget: (Long) -> Unit
 ) {
     item {
         HeroMetricCard(
@@ -332,7 +340,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.budgetContent(
         item { EmptyPanel("No budgets yet. Example: Grocery 5000, or Essentials for Grocery + Food + Fuel.") }
     } else {
         items(state.activeBudgets, key = { it.id }) {
-            BudgetRow(budget = it, state = state)
+            BudgetRow(budget = it, state = state, onDelete = onDeleteBudget)
         }
     }
 }
@@ -364,16 +372,15 @@ private fun androidx.compose.foundation.lazy.LazyListScope.summaryContent(
 private fun androidx.compose.foundation.lazy.LazyListScope.settingsContent(
     state: FinanceUiState,
     onAddCategory: (Boolean) -> Unit,
-    onCurrencySelected: (CurrencyOption) -> Unit
+    onCurrencySelected: (CurrencyOption) -> Unit,
+    onDeleteAccount: (Long) -> Unit,
+    onDeleteCategory: (Long) -> Unit
 ) {
     item {
         ProfileHeader(state)
     }
     item {
-        SettingsGroup(
-            title = "BANK ACCOUNTS",
-            rows = state.accounts.map { "${it.name}  ${state.money(it.balance)}" }.ifEmpty { listOf("No accounts added") }
-        )
+        AccountSettingsGroup(state = state, onDelete = onDeleteAccount)
     }
     item {
         CurrencySelector(
@@ -382,10 +389,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.settingsContent(
         )
     }
     item {
-        SettingsGroup(
-            title = "CATEGORIES",
-            rows = state.categories.map { if (it.isDefault) "${it.name}  Default" else "${it.name}  Custom" }
-        )
+        CategorySettingsGroup(categories = state.categories, onDelete = onDeleteCategory)
     }
     item {
         Button(
@@ -705,12 +709,12 @@ private fun DetectedDraftRow(
                 IconTile(Icons.Rounded.Sms, MoneyGreen)
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(draft.name, color = TextPrimary, style = MaterialTheme.typography.titleMedium)
-                    Text("Detected from SMS", color = TextDim, style = MaterialTheme.typography.bodyMedium)
+                    Text(draft.bankName, color = TextPrimary, style = MaterialTheme.typography.titleMedium)
+                    Text(draft.type.bankVerb(), color = TextDim, style = MaterialTheme.typography.bodyMedium)
                 }
-                    Text(draft.signedAmount(state.currency), color = draft.type.amountColor(), style = MaterialTheme.typography.titleLarge)
+                Text(draft.signedAmount(state.currency), color = draft.type.amountColor(), style = MaterialTheme.typography.titleLarge)
             }
-            Text(draft.rawMessage, color = TextMuted, style = MaterialTheme.typography.bodyMedium)
+            Text(draft.counterparty, color = TextPrimary, style = MaterialTheme.typography.headlineMedium)
             LabelText("CATEGORY")
             ChipRow {
                 state.categories.forEach {
@@ -846,7 +850,11 @@ private fun ActionPanel(title: String, subtitle: String, icon: ImageVector, acti
 }
 
 @Composable
-private fun TransactionRow(transaction: LedgerTransaction, state: FinanceUiState) {
+private fun TransactionRow(
+    transaction: LedgerTransaction,
+    state: FinanceUiState,
+    onDelete: (Long) -> Unit
+) {
     val category = state.categories.firstOrNull { it.id == transaction.categoryId }
     ElevatedPanel {
         Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -862,13 +870,18 @@ private fun TransactionRow(transaction: LedgerTransaction, state: FinanceUiState
                     overflow = TextOverflow.Ellipsis
                 )
             }
-            Text(transaction.signedAmount(state.currency), color = transaction.type.amountColor(), style = MaterialTheme.typography.titleMedium)
+            Column(horizontalAlignment = Alignment.End) {
+                Text(transaction.signedAmount(state.currency), color = transaction.type.amountColor(), style = MaterialTheme.typography.titleMedium)
+                TextButton(onClick = { onDelete(transaction.id) }) {
+                    Text("Delete", color = LossRed, style = MaterialTheme.typography.labelMedium)
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun BudgetRow(budget: BudgetPlan, state: FinanceUiState) {
+private fun BudgetRow(budget: BudgetPlan, state: FinanceUiState, onDelete: (Long) -> Unit) {
     val spent = state.transactions
         .filter { it.type == TransactionType.Expense && it.month() == budget.month && it.categoryId in budget.categoryIds }
         .sumOf { it.amount }
@@ -896,6 +909,9 @@ private fun BudgetRow(budget: BudgetPlan, state: FinanceUiState) {
                 color = if (over) LossRed else PrimarySoft,
                 trackColor = Navy800
             )
+            TextButton(onClick = { onDelete(budget.id) }, modifier = Modifier.align(Alignment.End)) {
+                Text("Delete", color = LossRed)
+            }
         }
     }
 }
@@ -991,6 +1007,70 @@ private fun SettingsGroup(title: String, rows: List<String>) {
                 rows.forEachIndexed { index, row ->
                     Text(row, color = TextPrimary, modifier = Modifier.fillMaxWidth().padding(16.dp), style = MaterialTheme.typography.bodyLarge)
                     if (index != rows.lastIndex) HorizontalDivider(color = Color(0xFF283044), modifier = Modifier.padding(horizontal = 16.dp))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AccountSettingsGroup(state: FinanceUiState, onDelete: (Long) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        LabelText("BANK ACCOUNTS")
+        ElevatedPanel {
+            if (state.accounts.isEmpty()) {
+                Text("No accounts added", color = TextDim, modifier = Modifier.padding(16.dp))
+            } else {
+                Column {
+                    state.accounts.forEachIndexed { index, account ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(start = 16.dp, top = 10.dp, end = 8.dp, bottom = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(account.name, color = TextPrimary, style = MaterialTheme.typography.titleMedium)
+                                Text(state.money(account.balance), color = TextDim, style = MaterialTheme.typography.bodyMedium)
+                            }
+                            TextButton(onClick = { onDelete(account.id) }) {
+                                Text("Delete", color = LossRed)
+                            }
+                        }
+                        if (index != state.accounts.lastIndex) {
+                            HorizontalDivider(color = Color(0xFF283044), modifier = Modifier.padding(horizontal = 16.dp))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CategorySettingsGroup(categories: List<CategoryItem>, onDelete: (Long) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        LabelText("CATEGORIES")
+        ElevatedPanel {
+            Column {
+                categories.forEachIndexed { index, category ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, top = 10.dp, end = 8.dp, bottom = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "${category.name}  ${if (category.isDefault) "Default" else "Custom"}",
+                            color = TextPrimary,
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+                        if (!category.isDefault) {
+                            TextButton(onClick = { onDelete(category.id) }) {
+                                Text("Delete", color = LossRed)
+                            }
+                        }
+                    }
+                    if (index != categories.lastIndex) {
+                        HorizontalDivider(color = Color(0xFF283044), modifier = Modifier.padding(horizontal = 16.dp))
+                    }
                 }
             }
         }
@@ -1151,6 +1231,10 @@ private fun DetectedTransactionDraft.signedAmount(currency: CurrencyOption): Str
 
 private fun TransactionType.amountColor(): Color {
     return if (this == TransactionType.Income) MoneyGreen else LossRed
+}
+
+private fun TransactionType.bankVerb(): String {
+    return if (this == TransactionType.Income) "credited" else "debited"
 }
 
 private fun categoryColor(category: String, type: TransactionType): Color {

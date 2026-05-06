@@ -2,7 +2,13 @@ package com.moneymanager.app.service
 
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
+import com.moneymanager.app.data.FinanceDatabase
+import com.moneymanager.app.data.FinanceRepository
 import com.moneymanager.app.data.TransactionMessageParser
+import com.moneymanager.app.model.DetectedTransactionDraft
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 class TransactionNotificationListener : NotificationListenerService() {
     override fun onNotificationPosted(sbn: StatusBarNotification) {
@@ -11,10 +17,20 @@ class TransactionNotificationListener : NotificationListenerService() {
         val text = extras.getCharSequence("android.text")?.toString().orEmpty()
         val parsed = TransactionMessageParser.parse("$title $text") ?: return
 
-        // Next step: persist this as a DetectedTransactionDraft in Room, then show it in the app.
-        android.util.Log.d(
-            "MoneyManager",
-            "Detected transaction from notification: ${parsed.name} ${parsed.amount} ${parsed.type}"
-        )
+        CoroutineScope(Dispatchers.IO).launch {
+            FinanceRepository(FinanceDatabase.get(applicationContext).dao()).saveDraft(
+                DetectedTransactionDraft(
+                    id = 0,
+                    bankName = parsed.bankName,
+                    name = parsed.counterparty,
+                    amount = parsed.amount,
+                    type = parsed.type,
+                    counterparty = parsed.counterparty,
+                    rawMessage = parsed.rawMessage,
+                    suggestedCategoryId = null,
+                    detectedAtMillis = System.currentTimeMillis()
+                )
+            )
+        }
     }
 }

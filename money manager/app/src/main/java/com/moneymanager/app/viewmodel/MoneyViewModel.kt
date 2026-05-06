@@ -6,13 +6,14 @@ import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.moneymanager.app.data.FinanceDatabase
+import com.moneymanager.app.data.FinanceRepository
 import com.moneymanager.app.data.TodaySmsScanner
 import com.moneymanager.app.model.BankAccount
 import com.moneymanager.app.model.BudgetPlan
 import com.moneymanager.app.model.BudgetWarning
 import com.moneymanager.app.model.CategoryItem
 import com.moneymanager.app.model.CurrencyOption
-import com.moneymanager.app.model.DefaultCategories
 import com.moneymanager.app.model.DetectedTransactionDraft
 import com.moneymanager.app.model.FinanceUiState
 import com.moneymanager.app.model.LedgerTransaction
@@ -20,7 +21,6 @@ import com.moneymanager.app.model.MoneyIcons
 import com.moneymanager.app.model.ScreenTab
 import com.moneymanager.app.model.TransactionType
 import com.moneymanager.app.model.month
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -28,34 +28,24 @@ import kotlinx.coroutines.launch
 import java.time.YearMonth
 
 class MoneyViewModel(application: Application) : AndroidViewModel(application) {
-    private var nextAccountId = 1L
-    private var nextCategoryId = DefaultCategories.items.maxOf { it.id } + 1
-    private var nextTransactionId = 1L
-    private var nextBudgetId = 1L
-    private var nextDraftId = 1L
+    private val repository = FinanceRepository(FinanceDatabase.get(application).dao())
 
     private val _uiState = MutableStateFlow(FinanceUiState())
     val uiState: StateFlow<FinanceUiState> = _uiState
 
+    init {
+        reload()
+    }
+
     fun completeRegistration(name: String, accounts: List<Pair<String, Double>>) {
-        val cleanAccounts = accounts
-            .filter { it.first.isNotBlank() && it.second >= 0.0 }
-            .map {
-                BankAccount(
-                    id = nextAccountId++,
-                    name = it.first.trim(),
-                    balance = it.second
-                )
-            }
-
-        _uiState.update {
-            it.copy(
-                userName = name.trim(),
-                accounts = cleanAccounts
-            )
+        viewModelScope.launch {
+            repository.saveSettings(name.trim(), _uiState.value.currency)
+            accounts
+                .filter { it.first.isNotBlank() && it.second >= 0.0 }
+                .forEach { repository.addAccount(it.first.trim(), it.second) }
+            reloadState()
+            scanTodayMessages()
         }
-
-        scanTodayMessages()
     }
 
     fun selectTab(tab: ScreenTab) {
@@ -67,7 +57,10 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun selectCurrency(currency: CurrencyOption) {
-        _uiState.update { it.copy(currency = currency) }
+        viewModelScope.launch {
+            repository.saveSettings(_uiState.value.userName, currency)
+            _uiState.update { it.copy(currency = currency) }
+        }
     }
 
     fun setTransactionSheet(open: Boolean) {
@@ -88,17 +81,16 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
 
     fun addCategory(name: String) {
         if (name.isBlank()) return
-        val category = CategoryItem(
-            id = nextCategoryId++,
-            name = name.trim(),
-            icon = MoneyIcons.Category,
-            isDefault = false
-        )
-        _uiState.update {
-            it.copy(
-                categories = it.categories + category,
-                showCategorySheet = false
+        viewModelScope.launch {
+            repository.addCategory(
+                CategoryItem(
+                    id = System.currentTimeMillis(),
+                    name = name.trim(),
+                    icon = MoneyIcons.Category,
+                    isDefault = false
+                )
             )
+            reloadState { it.copy(showCategorySheet = false) }
         }
     }
 
@@ -112,42 +104,65 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
         isAutoDetected: Boolean = false
     ) {
         if (name.isBlank() || amount <= 0.0) return
-        val transaction = LedgerTransaction(
-            id = nextTransactionId++,
-            name = name.trim(),
-            amount = amount,
-            type = type,
-            categoryId = categoryId,
-            accountId = accountId,
-            timestampMillis = System.currentTimeMillis(),
-            isAutoDetected = isAutoDetected,
-            rawMessage = rawMessage
-        )
-
-        _uiState.update { current ->
-            val updatedTransactions = listOf(transaction) + current.transactions
-            current.copy(
-                transactions = updatedTransactions,
-                showTransactionSheet = false,
-                budgetWarning = findBudgetWarning(current.copy(transactions = updatedTransactions), transaction)
+        viewModelScope.launch {
+            val transaction = LedgerTransaction(
+                id = 0,
+                name = name.trim(),
+                amount = amount,
+                type = type,
+                categoryId = categoryId,
+                accountId = accountId,
+                timestampMillis = System.currentTimeMillis(),
+                isAutoDetected = isAutoDetected,
+                rawMessage = rawMessage
             )
+            repository.addTransaction(transaction)
+            val warning = findBudgetWarning(_uiState.value, transaction)
+            reloadState { it.copy(showTransactionSheet = false, budgetWarning = warning) }
         }
     }
 
     fun addBudget(name: String, limitAmount: Double, categoryIds: Set<Long>) {
         if (name.isBlank() || limitAmount <= 0.0 || categoryIds.isEmpty()) return
-        val budget = BudgetPlan(
-            id = nextBudgetId++,
-            name = name.trim(),
-            limitAmount = limitAmount,
-            categoryIds = categoryIds,
-            month = _uiState.value.selectedMonth
-        )
-        _uiState.update {
-            it.copy(
-                budgets = it.budgets + budget,
-                showBudgetSheet = false
+        viewModelScope.launch {
+            repository.addBudget(
+                BudgetPlan(
+                    id = 0,
+                    name = name.trim(),
+                    limitAmount = limitAmount,
+                    categoryIds = categoryIds,
+                    month = _uiState.value.selectedMonth
+                )
             )
+            reloadState { it.copy(showBudgetSheet = false) }
+        }
+    }
+
+    fun deleteTransaction(id: Long) {
+        viewModelScope.launch {
+            repository.deleteTransaction(id)
+            reloadState()
+        }
+    }
+
+    fun deleteBudget(id: Long) {
+        viewModelScope.launch {
+            repository.deleteBudget(id)
+            reloadState()
+        }
+    }
+
+    fun deleteAccount(id: Long) {
+        viewModelScope.launch {
+            repository.deleteAccount(id)
+            reloadState()
+        }
+    }
+
+    fun deleteCategory(id: Long) {
+        viewModelScope.launch {
+            repository.deleteCustomCategory(id)
+            reloadState()
         }
     }
 
@@ -156,35 +171,79 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
 
         viewModelScope.launch {
             _uiState.update { it.copy(isScanningMessages = true) }
-            delay(900)
-
-            val categories = _uiState.value.categories
             val parsedMessages = if (hasSmsPermission()) {
                 TodaySmsScanner(getApplication()).scanToday()
             } else {
                 emptyList()
             }
-            val drafts = parsedMessages.map {
-                DetectedTransactionDraft(
-                    id = nextDraftId++,
-                    name = it.name,
-                    amount = it.amount,
-                    type = it.type,
-                    rawMessage = it.rawMessage,
-                    suggestedCategoryId = suggestCategoryId(it.name),
-                    detectedAtMillis = System.currentTimeMillis()
-                )
-            }.ifEmpty {
-                demoDetectedDrafts(categories)
-            }
 
-            _uiState.update {
-                it.copy(
-                    detectedDrafts = drafts,
-                    isScanningMessages = false
-                )
-            }
+            val existingRawMessages = _uiState.value.detectedDrafts.map { it.rawMessage }.toSet()
+            parsedMessages
+                .filterNot { it.rawMessage in existingRawMessages }
+                .forEach {
+                    repository.saveDraft(
+                        DetectedTransactionDraft(
+                            id = 0,
+                            bankName = it.bankName,
+                            name = it.counterparty,
+                            amount = it.amount,
+                            type = it.type,
+                            counterparty = it.counterparty,
+                            rawMessage = it.rawMessage,
+                            suggestedCategoryId = suggestCategoryId(it.counterparty),
+                            detectedAtMillis = System.currentTimeMillis()
+                        )
+                    )
+                }
+
+            reloadState { it.copy(isScanningMessages = false) }
         }
+    }
+
+    fun acceptDetectedTransaction(draftId: Long, categoryId: Long) {
+        viewModelScope.launch {
+            val draft = _uiState.value.detectedDrafts.firstOrNull { it.id == draftId } ?: return@launch
+            repository.addTransaction(
+                LedgerTransaction(
+                    id = 0,
+                    name = draft.counterparty,
+                    amount = draft.amount,
+                    type = draft.type,
+                    categoryId = categoryId,
+                    accountId = _uiState.value.accounts.firstOrNull()?.id,
+                    timestampMillis = System.currentTimeMillis(),
+                    isAutoDetected = true,
+                    rawMessage = draft.rawMessage
+                )
+            )
+            repository.deleteDraft(draftId)
+            reloadState()
+        }
+    }
+
+    fun ignoreDetectedTransaction(draftId: Long) {
+        viewModelScope.launch {
+            repository.deleteDraft(draftId)
+            reloadState()
+        }
+    }
+
+    private fun reload() {
+        viewModelScope.launch { reloadState() }
+    }
+
+    private suspend fun reloadState(transform: (FinanceUiState) -> FinanceUiState = { it }) {
+        val current = _uiState.value
+        val loaded = repository.loadState(current).copy(
+            selectedTab = current.selectedTab,
+            selectedMonth = current.selectedMonth,
+            showTransactionSheet = current.showTransactionSheet,
+            showBudgetSheet = current.showBudgetSheet,
+            showCategorySheet = current.showCategorySheet,
+            isScanningMessages = current.isScanningMessages,
+            budgetWarning = current.budgetWarning
+        )
+        _uiState.value = transform(loaded)
     }
 
     private fun hasSmsPermission(): Boolean {
@@ -198,55 +257,10 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
         val lower = name.lowercase()
         val categories = _uiState.value.categories
         return when {
-            listOf("amazon", "store", "shop").any { it in lower } -> categories.find { it.name == "Shopping" }?.id
-            listOf("food", "cafe", "restaurant", "swiggy", "zomato").any { it in lower } -> categories.find { it.name == "Food" }?.id
+            listOf("amazon", "store", "shop", "mall").any { it in lower } -> categories.find { it.name == "Shopping" }?.id
+            listOf("food", "cafe", "restaurant", "hotel", "swiggy", "zomato").any { it in lower } -> categories.find { it.name == "Food" }?.id
             listOf("fuel", "petrol", "diesel").any { it in lower } -> categories.find { it.name == "Fuel" }?.id
             else -> categories.firstOrNull()?.id
-        }
-    }
-
-    private fun demoDetectedDrafts(categories: List<CategoryItem>): List<DetectedTransactionDraft> {
-        return listOf(
-            DetectedTransactionDraft(
-                id = nextDraftId++,
-                name = "Amazon UPI",
-                amount = 45.00,
-                type = TransactionType.Expense,
-                rawMessage = "Rs.45 debited via UPI to Amazon today",
-                suggestedCategoryId = categories.find { it.name == "Shopping" }?.id,
-                detectedAtMillis = System.currentTimeMillis()
-            ),
-            DetectedTransactionDraft(
-                id = nextDraftId++,
-                name = "Salary Credit",
-                amount = 6450.00,
-                type = TransactionType.Income,
-                rawMessage = "INR 6450 credited through NEFT",
-                suggestedCategoryId = categories.firstOrNull()?.id,
-                detectedAtMillis = System.currentTimeMillis()
-            )
-        )
-    }
-
-    fun acceptDetectedTransaction(draftId: Long, categoryId: Long) {
-        val draft = _uiState.value.detectedDrafts.firstOrNull { it.id == draftId } ?: return
-        addTransaction(
-            name = draft.name,
-            amount = draft.amount,
-            type = draft.type,
-            categoryId = categoryId,
-            accountId = _uiState.value.accounts.firstOrNull()?.id,
-            rawMessage = draft.rawMessage,
-            isAutoDetected = true
-        )
-        _uiState.update {
-            it.copy(detectedDrafts = it.detectedDrafts.filterNot { item -> item.id == draftId })
-        }
-    }
-
-    fun ignoreDetectedTransaction(draftId: Long) {
-        _uiState.update {
-            it.copy(detectedDrafts = it.detectedDrafts.filterNot { item -> item.id == draftId })
         }
     }
 
@@ -263,7 +277,7 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
                     it.month() == matchingBudget.month &&
                     it.categoryId in matchingBudget.categoryIds
             }
-            .sumOf { it.amount }
+            .sumOf { it.amount } + transaction.amount
 
         return if (spent > matchingBudget.limitAmount) {
             BudgetWarning(

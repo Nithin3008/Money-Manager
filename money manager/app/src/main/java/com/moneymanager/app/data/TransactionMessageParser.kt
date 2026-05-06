@@ -3,9 +3,11 @@ package com.moneymanager.app.data
 import com.moneymanager.app.model.TransactionType
 
 data class ParsedTransactionMessage(
+    val bankName: String,
     val name: String,
     val amount: Double,
     val type: TransactionType,
+    val counterparty: String,
     val rawMessage: String
 )
 
@@ -17,6 +19,9 @@ object TransactionMessageParser {
     private val creditWords = listOf("credited", "credit", "received", "deposited", "neft", "rtgs")
     private val merchantRegex = Regex(
         pattern = """(?i)(?:to|at|for|towards)\s+([a-z0-9 .&_-]{3,40})"""
+    )
+    private val bankRegex = Regex(
+        pattern = """(?i)\b(hdfc|icici|sbi|axis|kotak|yes bank|idfc|indusind|canara|union bank|pnb|bank of baroda|bob)\b"""
     )
 
     fun parse(message: String): ParsedTransactionMessage? {
@@ -37,17 +42,28 @@ object TransactionMessageParser {
             else -> TransactionType.Expense
         }
 
-        val merchant = merchantRegex.find(normalized)
+        val bankName = bankRegex.find(normalized)
+            ?.value
+            ?.trim()
+            ?.uppercase()
+            ?: "Bank"
+
+        val counterparty = merchantRegex.find(normalized)
             ?.groupValues
             ?.getOrNull(1)
             ?.trim()
+            ?.substringBefore(" on ")
+            ?.substringBefore(" ref")
+            ?.substringBefore(" using")
             ?.take(28)
             ?: if (type == TransactionType.Income) "Bank Credit" else "Bank Transaction"
 
         return ParsedTransactionMessage(
-            name = merchant.replaceFirstChar { it.uppercase() },
+            bankName = bankName,
+            name = counterparty.replaceFirstChar { it.uppercase() },
             amount = amount,
             type = type,
+            counterparty = counterparty.replaceFirstChar { it.uppercase() },
             rawMessage = message
         )
     }

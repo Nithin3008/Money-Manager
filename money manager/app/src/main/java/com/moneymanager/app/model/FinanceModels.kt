@@ -76,9 +76,11 @@ data class BudgetPlan(
 
 data class DetectedTransactionDraft(
     val id: Long,
+    val bankName: String,
     val name: String,
     val amount: Double,
     val type: TransactionType,
+    val counterparty: String,
     val rawMessage: String,
     val suggestedCategoryId: Long?,
     val detectedAtMillis: Long
