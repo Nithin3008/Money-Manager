@@ -3,6 +3,7 @@
     <style name="Theme.MoneyManager" parent="android:style/Theme.Material.NoActionBar">
         <item name="android:windowNoTitle">true</item>
         <item name="android:windowActionBar">false</item>
+        <item name="android:windowBackground">#FFFFFF</item>
         <item name="android:windowLightStatusBar">false</item>
         <item name="android:navigationBarColor">#131B2E</item>
         <item name="android:statusBarColor">#0B1326</item>

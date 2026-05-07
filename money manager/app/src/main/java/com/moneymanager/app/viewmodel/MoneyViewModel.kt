@@ -49,7 +49,19 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun selectTab(tab: ScreenTab) {
-        _uiState.update { it.copy(selectedTab = tab) }
+        _uiState.update {
+            it.copy(
+                selectedTab = tab,
+                activityTransactionPage = if (tab == ScreenTab.Activity) 1 else it.activityTransactionPage
+            )
+        }
+    }
+
+    fun loadMoreTransactions() {
+        _uiState.update { state ->
+            if (!state.hasMoreTransactions) state
+            else state.copy(activityTransactionPage = state.activityTransactionPage + 1)
+        }
     }
 
     fun selectMonth(month: YearMonth) {
@@ -229,14 +241,21 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun reload() {
-        viewModelScope.launch { reloadState() }
+        viewModelScope.launch {
+            runCatching { reloadState() }
+                .onFailure {
+                    _uiState.update { state -> state.copy(isAppInitializing = false) }
+                }
+        }
     }
 
     private suspend fun reloadState(transform: (FinanceUiState) -> FinanceUiState = { it }) {
         val current = _uiState.value
         val loaded = repository.loadState(current).copy(
+            isAppInitializing = false,
             selectedTab = current.selectedTab,
             selectedMonth = current.selectedMonth,
+            activityTransactionPage = current.activityTransactionPage,
             showTransactionSheet = current.showTransactionSheet,
             showBudgetSheet = current.showBudgetSheet,
             showCategorySheet = current.showCategorySheet,

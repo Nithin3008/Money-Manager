@@ -17,6 +17,8 @@ import androidx.compose.material.icons.rounded.ShoppingBag
 import androidx.compose.ui.graphics.vector.ImageVector
 import java.time.YearMonth
 
+private const val TRANSACTIONS_PER_PAGE = 10
+
 enum class TransactionType {
     Income,
     Expense
@@ -99,6 +101,7 @@ data class MonthlyCategoryTotal(
 )
 
 data class FinanceUiState(
+    val isAppInitializing: Boolean = true,
     val userName: String = "",
     val currency: CurrencyOption = CurrencyOption.INR,
     val selectedTab: ScreenTab = ScreenTab.Dashboard,
@@ -108,6 +111,7 @@ data class FinanceUiState(
     val transactions: List<LedgerTransaction> = emptyList(),
     val budgets: List<BudgetPlan> = emptyList(),
     val detectedDrafts: List<DetectedTransactionDraft> = emptyList(),
+    val activityTransactionPage: Int = 1,
     val isScanningMessages: Boolean = false,
     val showTransactionSheet: Boolean = false,
     val showBudgetSheet: Boolean = false,
@@ -139,6 +143,12 @@ data class FinanceUiState(
 
     val activeBudgets: List<BudgetPlan>
         get() = budgets.filter { it.month == selectedMonth }
+
+    val pagedTransactions: List<LedgerTransaction>
+        get() = transactions.take((activityTransactionPage.coerceAtLeast(1)) * TRANSACTIONS_PER_PAGE)
+
+    val hasMoreTransactions: Boolean
+        get() = pagedTransactions.size < transactions.size
 }
 
 object DefaultCategories {

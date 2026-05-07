@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -121,6 +122,11 @@ import java.util.Locale
 fun MoneyManagerApp(viewModel: MoneyViewModel) {
     val state by viewModel.uiState.collectAsState()
 
+    if (state.isAppInitializing) {
+        InitialLoadingScreen()
+        return
+    }
+
     if (!state.hasCompletedRegistration) {
         RegistrationScreen(onComplete = viewModel::completeRegistration)
         return
@@ -178,7 +184,11 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
                     onIgnoreDraft = viewModel::ignoreDetectedTransaction,
                     onDeleteTransaction = viewModel::deleteTransaction
                 )
-                ScreenTab.Activity -> activityContent(state, viewModel::deleteTransaction)
+                ScreenTab.Activity -> activityContent(
+                    state = state,
+                    onDeleteTransaction = viewModel::deleteTransaction,
+                    onLoadMore = viewModel::loadMoreTransactions
+                )
                 ScreenTab.Budget -> budgetContent(state, viewModel::setBudgetSheet, viewModel::deleteBudget)
                 ScreenTab.Summary -> summaryContent(state, viewModel::selectMonth)
                 ScreenTab.Settings -> settingsContent(
@@ -237,6 +247,15 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
     }
 }
 
+@Composable
+private fun InitialLoadingScreen() {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.White)
+    )
+}
+
 private fun androidx.compose.foundation.lazy.LazyListScope.dashboardContent(
     state: FinanceUiState,
     onScan: () -> Unit,
@@ -286,7 +305,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.dashboardContent(
     }
     if (state.detectedDrafts.isNotEmpty()) {
         item { SectionHeader("Detected Transactions", "Review") }
-        items(state.detectedDrafts, key = { it.id }) {
+        items(state.detectedDrafts, key = { "draft_${it.id}" }) {
             DetectedDraftRow(
                 state = state,
                 draft = it,
@@ -296,21 +315,40 @@ private fun androidx.compose.foundation.lazy.LazyListScope.dashboardContent(
         }
     }
     item { SectionHeader("Recent Transactions", "Latest") }
-    items(state.transactions.take(5), key = { it.id }) {
+    items(state.transactions.take(5), key = { "recent_txn_${it.id}" }) {
         TransactionRow(transaction = it, state = state, onDelete = onDeleteTransaction)
     }
 }
 
 private fun androidx.compose.foundation.lazy.LazyListScope.activityContent(
     state: FinanceUiState,
-    onDeleteTransaction: (Long) -> Unit
+    onDeleteTransaction: (Long) -> Unit,
+    onLoadMore: () -> Unit
 ) {
     item { LargeTitle("Activity", "Add and review income or expenses by category.") }
     if (state.transactions.isEmpty()) {
         item { EmptyPanel("No transactions yet. Tap + to add your first income or expense.") }
     } else {
-        items(state.transactions, key = { it.id }) {
-            TransactionRow(transaction = it, state = state, onDelete = onDeleteTransaction)
+        itemsIndexed(
+            items = state.pagedTransactions,
+            key = { index, transaction -> "${transaction.id}_${transaction.timestampMillis}_$index" }
+        ) { _, transaction ->
+            TransactionRow(transaction = transaction, state = state, onDelete = onDeleteTransaction)
+        }
+        if (state.hasMoreTransactions) {
+            item {
+                Button(
+                    onClick = onLoadMore,
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = PrimaryBlue,
+                        contentColor = Color(0xFF001A42)
+                    )
+                ) {
+                    Text("Load more", fontWeight = FontWeight.Bold)
+                }
+            }
         }
     }
 }
@@ -339,7 +377,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.budgetContent(
     if (state.activeBudgets.isEmpty()) {
         item { EmptyPanel("No budgets yet. Example: Grocery 5000, or Essentials for Grocery + Food + Fuel.") }
     } else {
-        items(state.activeBudgets, key = { it.id }) {
+        items(state.activeBudgets, key = { "budget_${it.id}" }) {
             BudgetRow(budget = it, state = state, onDelete = onDeleteBudget)
         }
     }
