@@ -91,14 +91,15 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(budgetWarning = null) }
     }
 
-    fun addCategory(name: String) {
+    fun addCategory(name: String, iconKey: String) {
         if (name.isBlank()) return
         viewModelScope.launch {
             repository.addCategory(
                 CategoryItem(
                     id = System.currentTimeMillis(),
                     name = name.trim(),
-                    icon = MoneyIcons.Category,
+                    iconKey = iconKey,
+                    icon = MoneyIcons.resolveCategoryIcon(iconKey),
                     isDefault = false
                 )
             )

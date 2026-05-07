@@ -4,6 +4,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,14 +17,19 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -39,6 +45,7 @@ import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PieChart
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Sms
 import androidx.compose.material.icons.rounded.TrendingUp
 import androidx.compose.material.icons.rounded.Warning
@@ -62,6 +69,7 @@ import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -72,6 +80,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -95,6 +104,7 @@ import com.moneymanager.app.model.DetectedTransactionDraft
 import com.moneymanager.app.model.FinanceUiState
 import com.moneymanager.app.model.LedgerTransaction
 import com.moneymanager.app.model.MonthlyCategoryTotal
+import com.moneymanager.app.model.MoneyIcons
 import com.moneymanager.app.model.ScreenTab
 import com.moneymanager.app.model.TransactionType
 import com.moneymanager.app.model.month
@@ -693,11 +703,37 @@ private fun AddBudgetSheet(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun AddCategorySheet(onDismiss: () -> Unit, onAdd: (String) -> Unit) {
+private fun AddCategorySheet(onDismiss: () -> Unit, onAdd: (String, String) -> Unit) {
     var name by remember { mutableStateOf("") }
+    var selectedIconKey by remember { mutableStateOf(MoneyIcons.frequentCategoryIcons.first().key) }
+    var iconQuery by remember { mutableStateOf("") }
+    val filteredIcons by remember(iconQuery) { derivedStateOf {
+        val query = iconQuery.trim().lowercase()
+        if (query.isBlank()) {
+            emptyList()
+        } else {
+            MoneyIcons.allCategoryIcons.filter {
+                it.label.lowercase().contains(query) || it.key.contains(query)
+            }
+        }
+    } }
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
-    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = Navy900, contentColor = TextPrimary) {
-        SheetContent(title = "Create Category") {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = Navy900,
+        contentColor = TextPrimary
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 12.dp)
+                .verticalScroll(rememberScrollState())
+                .imePadding(),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Text("Create Category", color = TextPrimary, style = MaterialTheme.typography.headlineMedium)
             OutlinedTextField(
                 value = name,
                 onValueChange = { name = it },
@@ -707,8 +743,63 @@ private fun AddCategorySheet(onDismiss: () -> Unit, onAdd: (String) -> Unit) {
                 colors = inputColors(),
                 shape = RoundedCornerShape(12.dp)
             )
+            LabelText("FREQUENT ICONS")
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(
+                    items = MoneyIcons.frequentCategoryIcons,
+                    key = { it.key }
+                ) { option ->
+                    CategoryIconChip(
+                        option = option,
+                        selected = selectedIconKey == option.key,
+                        onClick = { selectedIconKey = option.key }
+                    )
+                }
+            }
+            OutlinedTextField(
+                value = iconQuery,
+                onValueChange = { iconQuery = it },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Search more icons") },
+                leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
+                singleLine = true,
+                colors = inputColors(),
+                shape = RoundedCornerShape(12.dp)
+            )
+            LabelText("ALL ICONS")
+            if (iconQuery.isBlank()) {
+                Text(
+                    "Type to search more icons",
+                    color = TextDim,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            } else if (filteredIcons.isEmpty()) {
+                Text(
+                    "No matching icons found",
+                    color = TextDim,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            } else {
+                LazyVerticalGrid(
+                    columns = GridCells.Adaptive(minSize = 128.dp),
+                    modifier = Modifier.fillMaxWidth().height(220.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    gridItems(
+                        items = filteredIcons,
+                        key = { it.key }
+                    ) { option ->
+                        CategoryIconChip(
+                            option = option,
+                            selected = selectedIconKey == option.key,
+                            onClick = { selectedIconKey = option.key }
+                        )
+                    }
+                }
+            }
             Button(
-                onClick = { onAdd(name) },
+                onClick = { onAdd(name, selectedIconKey) },
                 enabled = name.isNotBlank(),
                 modifier = Modifier.fillMaxWidth().height(56.dp),
                 shape = RoundedCornerShape(12.dp),
@@ -716,8 +807,32 @@ private fun AddCategorySheet(onDismiss: () -> Unit, onAdd: (String) -> Unit) {
             ) {
                 Text("Create Category", fontWeight = FontWeight.Bold)
             }
+            Spacer(Modifier.height(24.dp))
         }
     }
+}
+
+@Composable
+private fun CategoryIconChip(
+    option: MoneyIcons.CategoryIconOption,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        label = { Text(option.label) },
+        leadingIcon = {
+            Icon(option.icon, contentDescription = null, modifier = Modifier.size(18.dp))
+        },
+        colors = FilterChipDefaults.filterChipColors(
+            selectedContainerColor = PrimaryBlue,
+            selectedLabelColor = Color(0xFF001A42),
+            selectedLeadingIconColor = Color(0xFF001A42),
+            containerColor = Navy800,
+            labelColor = TextMuted
+        )
+    )
 }
 
 @Composable

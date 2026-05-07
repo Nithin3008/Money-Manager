@@ -2,18 +2,35 @@ package com.moneymanager.app.model
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ReceiptLong
+import androidx.compose.material.icons.automirrored.rounded.TrendingUp
 import androidx.compose.material.icons.rounded.AccountBalance
 import androidx.compose.material.icons.rounded.BarChart
 import androidx.compose.material.icons.rounded.Category
 import androidx.compose.material.icons.rounded.Dining
 import androidx.compose.material.icons.rounded.DirectionsCar
+import androidx.compose.material.icons.rounded.ElectricBolt
+import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.Flight
+import androidx.compose.material.icons.rounded.Forum
+import androidx.compose.material.icons.rounded.FitnessCenter
 import androidx.compose.material.icons.rounded.GridView
 import androidx.compose.material.icons.rounded.Home
+import androidx.compose.material.icons.rounded.LocalCafe
 import androidx.compose.material.icons.rounded.LocalGasStation
 import androidx.compose.material.icons.rounded.LocalGroceryStore
+import androidx.compose.material.icons.rounded.LocalHospital
+import androidx.compose.material.icons.rounded.Movie
+import androidx.compose.material.icons.rounded.MusicNote
+import androidx.compose.material.icons.rounded.Pets
+import androidx.compose.material.icons.rounded.Payments
 import androidx.compose.material.icons.rounded.PieChart
+import androidx.compose.material.icons.rounded.Public
+import androidx.compose.material.icons.rounded.School
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.ShoppingBag
+import androidx.compose.material.icons.rounded.SportsEsports
+import androidx.compose.material.icons.rounded.Subscriptions
+import androidx.compose.material.icons.rounded.Work
 import androidx.compose.ui.graphics.vector.ImageVector
 import java.time.YearMonth
 
@@ -52,6 +69,7 @@ data class BankAccount(
 data class CategoryItem(
     val id: Long,
     val name: String,
+    val iconKey: String,
     val icon: ImageVector,
     val isDefault: Boolean
 )
@@ -153,16 +171,61 @@ data class FinanceUiState(
 
 object DefaultCategories {
     val items = listOf(
-        CategoryItem(1, "Grocery", Icons.Rounded.LocalGroceryStore, true),
-        CategoryItem(2, "Food", Icons.Rounded.Dining, true),
-        CategoryItem(3, "Shopping", Icons.Rounded.ShoppingBag, true),
-        CategoryItem(4, "Fuel", Icons.Rounded.LocalGasStation, true),
-        CategoryItem(5, "Rent", Icons.Rounded.Home, true)
+        CategoryItem(1, "Grocery", "grocery", Icons.Rounded.LocalGroceryStore, true),
+        CategoryItem(2, "Food", "food", Icons.Rounded.Dining, true),
+        CategoryItem(3, "Shopping", "shopping", Icons.Rounded.ShoppingBag, true),
+        CategoryItem(4, "Fuel", "fuel", Icons.Rounded.LocalGasStation, true),
+        CategoryItem(5, "Rent", "rent", Icons.Rounded.Home, true)
     )
 }
 
 object MoneyIcons {
-    val Account = Icons.Rounded.AccountBalance
-    val Category = Icons.Rounded.Category
-    val Transport = Icons.Rounded.DirectionsCar
+    data class CategoryIconOption(val key: String, val label: String, val icon: ImageVector)
+
+    val Account: ImageVector = Icons.Rounded.AccountBalance
+    val Category: ImageVector = Icons.Rounded.Category
+    val Transport: ImageVector = Icons.Rounded.DirectionsCar
+
+    val allCategoryIcons = listOf(
+        CategoryIconOption("category", "General", Icons.Rounded.Category),
+        CategoryIconOption("grocery", "Grocery", Icons.Rounded.LocalGroceryStore),
+        CategoryIconOption("food", "Food", Icons.Rounded.Dining),
+        CategoryIconOption("coffee", "Coffee", Icons.Rounded.LocalCafe),
+        CategoryIconOption("shopping", "Shopping", Icons.Rounded.ShoppingBag),
+        CategoryIconOption("fuel", "Fuel", Icons.Rounded.LocalGasStation),
+        CategoryIconOption("rent", "Home", Icons.Rounded.Home),
+        CategoryIconOption("gym", "Gym", Icons.Rounded.FitnessCenter),
+        CategoryIconOption("transport", "Transport", Icons.Rounded.DirectionsCar),
+        CategoryIconOption("work", "Work", Icons.Rounded.Work),
+        CategoryIconOption("account", "Bank", Icons.Rounded.AccountBalance),
+        CategoryIconOption("health", "Health", Icons.Rounded.LocalHospital),
+        CategoryIconOption("education", "Study", Icons.Rounded.School),
+        CategoryIconOption("travel", "Travel", Icons.Rounded.Flight),
+        CategoryIconOption("world", "International", Icons.Rounded.Public),
+        CategoryIconOption("investment", "Investment", Icons.AutoMirrored.Rounded.TrendingUp),
+        CategoryIconOption("bills", "Bills", Icons.Rounded.Payments),
+        CategoryIconOption("utilities", "Utilities", Icons.Rounded.ElectricBolt),
+        CategoryIconOption("games", "Games", Icons.Rounded.SportsEsports),
+        CategoryIconOption("movie", "Movies", Icons.Rounded.Movie),
+        CategoryIconOption("music", "Music", Icons.Rounded.MusicNote),
+        CategoryIconOption("subscription", "Subscriptions", Icons.Rounded.Subscriptions),
+        CategoryIconOption("pets", "Pets", Icons.Rounded.Pets),
+        CategoryIconOption("social", "Social", Icons.Rounded.Forum),
+        CategoryIconOption("care", "Care", Icons.Rounded.Favorite)
+    )
+
+    val frequentCategoryIcons = listOf(
+        "category",
+        "food",
+        "shopping",
+        "fuel",
+        "rent",
+        "gym",
+        "transport",
+        "bills"
+    ).mapNotNull { key -> allCategoryIcons.firstOrNull { it.key == key } }
+
+    private val iconByKey = allCategoryIcons.associate { it.key to it.icon }
+
+    fun resolveCategoryIcon(key: String): ImageVector = iconByKey[key] ?: Category
 }

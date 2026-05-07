@@ -219,21 +219,15 @@ private fun AccountEntity.toModel() = BankAccount(id = id, name = name, balance 
 private fun CategoryEntity.toModel() = CategoryItem(
     id = id,
     name = name,
-    icon = when (name) {
-        "Grocery" -> DefaultCategories.items[0].icon
-        "Food" -> DefaultCategories.items[1].icon
-        "Shopping" -> DefaultCategories.items[2].icon
-        "Fuel" -> DefaultCategories.items[3].icon
-        "Rent" -> DefaultCategories.items[4].icon
-        else -> MoneyIcons.Category
-    },
+    iconKey = iconKey,
+    icon = MoneyIcons.resolveCategoryIcon(iconKey),
     isDefault = isDefault
 )
 
 private fun CategoryItem.toEntity() = CategoryEntity(
     id = id,
     name = name,
-    iconKey = name.lowercase(),
+    iconKey = iconKey,
     isDefault = isDefault
 )
 
