@@ -41,6 +41,13 @@ enum class TransactionType {
     Expense
 }
 
+enum class MessageScanRange(val label: String) {
+    Today("Today"),
+    Yesterday("Yesterday"),
+    Week("Last 7 Days"),
+    Custom("Custom Range")
+}
+
 enum class ScreenTab(val label: String, val icon: ImageVector) {
     Dashboard("Dashboard", Icons.Rounded.GridView),
     Activity("Activity", Icons.AutoMirrored.Rounded.ReceiptLong),

@@ -11,6 +11,8 @@ import com.moneymanager.app.data.FinanceRepository
 import com.moneymanager.app.data.TodaySmsScanner
 import com.moneymanager.app.model.BankAccount
 import com.moneymanager.app.model.BudgetPlan
+import com.moneymanager.app.model.MessageScanRange
+import java.time.LocalDate
 import com.moneymanager.app.model.BudgetWarning
 import com.moneymanager.app.model.CategoryItem
 import com.moneymanager.app.model.CurrencyOption
@@ -180,12 +182,30 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun scanTodayMessages() {
+        scanMessages(MessageScanRange.Today)
+    }
+
+    fun scanMessages(range: MessageScanRange, startDate: LocalDate? = null, endDate: LocalDate? = null) {
         if (_uiState.value.isScanningMessages) return
 
         viewModelScope.launch {
             _uiState.update { it.copy(isScanningMessages = true) }
             val parsedMessages = if (hasSmsPermission()) {
-                TodaySmsScanner(getApplication()).scanToday()
+                when (range) {
+                    MessageScanRange.Today -> TodaySmsScanner(getApplication()).scanToday()
+                    MessageScanRange.Yesterday -> TodaySmsScanner(getApplication()).scanYesterday()
+                    MessageScanRange.Week -> TodaySmsScanner(getApplication()).scanLast7Days()
+                    MessageScanRange.Custom -> {
+                        val today = LocalDate.now()
+                        val start = startDate ?: today
+                        val end = endDate?.coerceAtMost(today) ?: today
+                        if (start > end) {
+                            emptyList()
+                        } else {
+                            TodaySmsScanner(getApplication()).scanRange(start, end)
+                        }
+                    }
+                }
             } else {
                 emptyList()
             }

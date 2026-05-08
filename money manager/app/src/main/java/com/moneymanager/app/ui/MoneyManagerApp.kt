@@ -103,6 +103,7 @@ import com.moneymanager.app.model.CurrencyOption
 import com.moneymanager.app.model.DetectedTransactionDraft
 import com.moneymanager.app.model.FinanceUiState
 import com.moneymanager.app.model.LedgerTransaction
+import com.moneymanager.app.model.MessageScanRange
 import com.moneymanager.app.model.MonthlyCategoryTotal
 import com.moneymanager.app.model.MoneyIcons
 import com.moneymanager.app.model.ScreenTab
@@ -123,6 +124,7 @@ import com.moneymanager.app.ui.theme.TextPrimary
 import com.moneymanager.app.ui.theme.WarningAmber
 import com.moneymanager.app.viewmodel.MoneyViewModel
 import java.text.NumberFormat
+import java.time.LocalDate
 import java.time.YearMonth
 import java.util.Currency
 import java.util.Locale
@@ -187,7 +189,7 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
             when (state.selectedTab) {
                 ScreenTab.Dashboard -> dashboardContent(
                     state = state,
-                    onScan = viewModel::scanTodayMessages,
+                    onScanWithRange = viewModel::scanMessages,
                     onMonthSelected = viewModel::selectMonth,
                     onOpenSummary = viewModel::selectTab,
                     onAcceptDraft = viewModel::acceptDetectedTransaction,
@@ -268,7 +270,7 @@ private fun InitialLoadingScreen() {
 
 private fun androidx.compose.foundation.lazy.LazyListScope.dashboardContent(
     state: FinanceUiState,
-    onScan: () -> Unit,
+    onScanWithRange: (MessageScanRange, LocalDate, LocalDate) -> Unit,
     onMonthSelected: (YearMonth) -> Unit,
     onOpenSummary: (ScreenTab) -> Unit,
     onAcceptDraft: (Long, Long) -> Unit,
@@ -307,11 +309,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.dashboardContent(
         )
     }
     item {
-        ScanStatusCard(
-            isScanning = state.isScanningMessages,
-            detectedCount = state.detectedDrafts.size,
-            onScan = onScan
-        )
+        MessageScanPanel(onScan = onScanWithRange)
     }
     if (state.detectedDrafts.isNotEmpty()) {
         item { SectionHeader("Detected Transactions", "Review") }
@@ -972,17 +970,6 @@ private fun MonthSelector(months: List<YearMonth>, selected: YearMonth, onSelect
             MoneyChip(it.shortLabel(), selected = it == selected, onClick = { onSelected(it) })
         }
     }
-}
-
-@Composable
-private fun ScanStatusCard(isScanning: Boolean, detectedCount: Int, onScan: () -> Unit) {
-    ActionPanel(
-        title = if (isScanning) "Reading messages for today..." else "Message Detection",
-        subtitle = if (isScanning) "Detecting NEFT, RTGS, debited, credited, and UPI alerts." else "$detectedCount pending detected transaction${if (detectedCount == 1) "" else "s"}",
-        icon = Icons.Rounded.Sms,
-        action = if (isScanning) "Scanning" else "Scan",
-        onClick = onScan
-    )
 }
 
 @Composable
