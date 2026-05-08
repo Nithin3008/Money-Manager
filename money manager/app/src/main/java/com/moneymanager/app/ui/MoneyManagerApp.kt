@@ -194,7 +194,9 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
                     onOpenSummary = viewModel::selectTab,
                     onAcceptDraft = viewModel::acceptDetectedTransaction,
                     onIgnoreDraft = viewModel::ignoreDetectedTransaction,
-                    onDeleteTransaction = viewModel::deleteTransaction
+                    onDeleteTransaction = viewModel::deleteTransaction,
+                    onDashboardPageSelected = viewModel::selectDashboardTransactionPage,
+                    onDraftPageSelected = viewModel::selectDashboardDraftPage
                 )
                 ScreenTab.Activity -> activityContent(
                     state = state,
@@ -275,7 +277,9 @@ private fun androidx.compose.foundation.lazy.LazyListScope.dashboardContent(
     onOpenSummary: (ScreenTab) -> Unit,
     onAcceptDraft: (Long, Long) -> Unit,
     onIgnoreDraft: (Long) -> Unit,
-    onDeleteTransaction: (Long) -> Unit
+    onDeleteTransaction: (Long) -> Unit,
+    onDashboardPageSelected: (Int) -> Unit,
+    onDraftPageSelected: (Int) -> Unit
 ) {
     item {
         HeroMetricCard(
@@ -312,8 +316,13 @@ private fun androidx.compose.foundation.lazy.LazyListScope.dashboardContent(
         MessageScanPanel(onScan = onScanWithRange)
     }
     if (state.detectedDrafts.isNotEmpty()) {
-        item { SectionHeader("Detected Transactions", "Review") }
-        items(state.detectedDrafts, key = { "draft_${it.id}" }) {
+        item {
+            SectionHeader(
+                "Transactions",
+                "Page ${state.dashboardCurrentDraftPage} of ${state.dashboardDraftPageCount}"
+            )
+        }
+        items(state.dashboardPagedDrafts, key = { "draft_${it.id}" }) {
             DetectedDraftRow(
                 state = state,
                 draft = it,
@@ -321,10 +330,36 @@ private fun androidx.compose.foundation.lazy.LazyListScope.dashboardContent(
                 onIgnore = onIgnoreDraft
             )
         }
-    }
-    item { SectionHeader("Recent Transactions", "Latest") }
-    items(state.transactions.take(5), key = { "recent_txn_${it.id}" }) {
-        TransactionRow(transaction = it, state = state, onDelete = onDeleteTransaction)
+        item {
+            DashboardPagination(
+                pageCount = state.dashboardDraftPageCount,
+                currentPage = state.dashboardCurrentDraftPage,
+                onPageSelected = onDraftPageSelected,
+                label = "Pages"
+            )
+        }
+    } else {
+        item {
+            SectionHeader(
+                "Transactions",
+                "Page ${state.dashboardCurrentPage} of ${state.dashboardTransactionPageCount}"
+            )
+        }
+        if (state.transactions.isEmpty()) {
+            item { EmptyPanel("No transactions yet. Tap + to add your first income or expense.") }
+        } else {
+            items(state.dashboardPagedTransactions, key = { "dashboard_txn_${it.id}" }) {
+                TransactionRow(transaction = it, state = state, onDelete = onDeleteTransaction)
+            }
+            item {
+                DashboardPagination(
+                    pageCount = state.dashboardTransactionPageCount,
+                    currentPage = state.dashboardCurrentPage,
+                    onPageSelected = onDashboardPageSelected,
+                    label = "Pages"
+                )
+            }
+        }
     }
 }
 
@@ -984,6 +1019,39 @@ private fun ActionPanel(title: String, subtitle: String, icon: ImageVector, acti
             }
             TextButton(onClick = onClick) {
                 Text(action, color = PrimarySoft)
+            }
+        }
+    }
+}
+
+@Composable
+private fun DashboardPagination(
+    pageCount: Int,
+    currentPage: Int,
+    onPageSelected: (Int) -> Unit,
+    label: String
+) {
+    if (pageCount <= 1) return
+
+    ElevatedPanel {
+        Column(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(
+                text = label,
+                color = TextMuted,
+                style = MaterialTheme.typography.labelMedium
+            )
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(pageCount) { index ->
+                    val page = index + 1
+                    MoneyChip(
+                        label = page.toString(),
+                        selected = page == currentPage,
+                        onClick = { onPageSelected(page) }
+                    )
+                }
             }
         }
     }

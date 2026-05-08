@@ -136,6 +136,8 @@ data class FinanceUiState(
     val transactions: List<LedgerTransaction> = emptyList(),
     val budgets: List<BudgetPlan> = emptyList(),
     val detectedDrafts: List<DetectedTransactionDraft> = emptyList(),
+    val dashboardDraftPage: Int = 1,
+    val dashboardTransactionPage: Int = 1,
     val activityTransactionPage: Int = 1,
     val isScanningMessages: Boolean = false,
     val showTransactionSheet: Boolean = false,
@@ -168,6 +170,30 @@ data class FinanceUiState(
 
     val activeBudgets: List<BudgetPlan>
         get() = budgets.filter { it.month == selectedMonth }
+
+    val dashboardTransactionPageCount: Int
+        get() = ((transactions.size + TRANSACTIONS_PER_PAGE - 1) / TRANSACTIONS_PER_PAGE)
+            .coerceAtLeast(1)
+
+    val dashboardCurrentPage: Int
+        get() = dashboardTransactionPage.coerceIn(1, dashboardTransactionPageCount)
+
+    val dashboardPagedTransactions: List<LedgerTransaction>
+        get() = transactions
+            .drop((dashboardCurrentPage - 1) * TRANSACTIONS_PER_PAGE)
+            .take(TRANSACTIONS_PER_PAGE)
+
+    val dashboardDraftPageCount: Int
+        get() = ((detectedDrafts.size + TRANSACTIONS_PER_PAGE - 1) / TRANSACTIONS_PER_PAGE)
+            .coerceAtLeast(1)
+
+    val dashboardCurrentDraftPage: Int
+        get() = dashboardDraftPage.coerceIn(1, dashboardDraftPageCount)
+
+    val dashboardPagedDrafts: List<DetectedTransactionDraft>
+        get() = detectedDrafts
+            .drop((dashboardCurrentDraftPage - 1) * TRANSACTIONS_PER_PAGE)
+            .take(TRANSACTIONS_PER_PAGE)
 
     val pagedTransactions: List<LedgerTransaction>
         get() = transactions.take((activityTransactionPage.coerceAtLeast(1)) * TRANSACTIONS_PER_PAGE)

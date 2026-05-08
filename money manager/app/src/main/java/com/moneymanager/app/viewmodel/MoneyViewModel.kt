@@ -66,6 +66,18 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun selectDashboardTransactionPage(page: Int) {
+        _uiState.update { state ->
+            state.copy(dashboardTransactionPage = page.coerceIn(1, state.dashboardTransactionPageCount))
+        }
+    }
+
+    fun selectDashboardDraftPage(page: Int) {
+        _uiState.update { state ->
+            state.copy(dashboardDraftPage = page.coerceIn(1, state.dashboardDraftPageCount))
+        }
+    }
+
     fun selectMonth(month: YearMonth) {
         _uiState.update { it.copy(selectedMonth = month) }
     }
@@ -272,10 +284,13 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
 
     private suspend fun reloadState(transform: (FinanceUiState) -> FinanceUiState = { it }) {
         val current = _uiState.value
-        val loaded = repository.loadState(current).copy(
+        val persisted = repository.loadState(current)
+        val loaded = persisted.copy(
             isAppInitializing = false,
             selectedTab = current.selectedTab,
             selectedMonth = current.selectedMonth,
+            dashboardDraftPage = current.dashboardCurrentDraftPage.coerceIn(1, persisted.dashboardDraftPageCount),
+            dashboardTransactionPage = current.dashboardCurrentPage.coerceIn(1, persisted.dashboardTransactionPageCount),
             activityTransactionPage = current.activityTransactionPage,
             showTransactionSheet = current.showTransactionSheet,
             showBudgetSheet = current.showBudgetSheet,
