@@ -10,6 +10,8 @@ import androidx.room.PrimaryKey
 import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import com.moneymanager.app.model.BankAccount
 import com.moneymanager.app.model.BudgetPlan
 import com.moneymanager.app.model.CategoryItem
@@ -19,6 +21,7 @@ import com.moneymanager.app.model.DetectedTransactionDraft
 import com.moneymanager.app.model.FinanceUiState
 import com.moneymanager.app.model.LedgerTransaction
 import com.moneymanager.app.model.MoneyIcons
+import com.moneymanager.app.model.ThemeMode
 import com.moneymanager.app.model.TransactionType
 import java.time.YearMonth
 
@@ -26,7 +29,8 @@ import java.time.YearMonth
 data class UserSettingsEntity(
     @PrimaryKey val id: Long = 1,
     val userName: String,
-    val currencyCode: String
+    val currencyCode: String,
+    val themeMode: String
 )
 
 @Entity(tableName = "accounts")
@@ -142,7 +146,7 @@ interface FinanceDao {
         BudgetEntity::class,
         DetectedDraftEntity::class
     ],
-    version = 1
+    version = 2
 )
 abstract class FinanceDatabase : RoomDatabase() {
     abstract fun dao(): FinanceDao
@@ -156,7 +160,16 @@ abstract class FinanceDatabase : RoomDatabase() {
                     context.applicationContext,
                     FinanceDatabase::class.java,
                     "money_manager.db"
-                ).build().also { instance = it }
+                )
+                    .addMigrations(Migration1To2)
+                    .build()
+                    .also { instance = it }
+            }
+        }
+
+        private val Migration1To2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE user_settings ADD COLUMN themeMode TEXT NOT NULL DEFAULT 'Dark'")
             }
         }
     }
@@ -171,6 +184,9 @@ class FinanceRepository(private val dao: FinanceDao) {
             currency = settings?.currencyCode?.let { code ->
                 CurrencyOption.entries.firstOrNull { it.currencyCode == code }
             } ?: CurrencyOption.INR,
+            themeMode = settings?.themeMode?.let { mode ->
+                ThemeMode.entries.firstOrNull { it.name == mode }
+            } ?: ThemeMode.Dark,
             accounts = dao.getAccounts().map { it.toModel() },
             categories = dao.getCategories().map { it.toModel() },
             transactions = dao.getTransactions().map { it.toModel() },
@@ -179,8 +195,14 @@ class FinanceRepository(private val dao: FinanceDao) {
         )
     }
 
-    suspend fun saveSettings(name: String, currency: CurrencyOption) {
-        dao.saveSettings(UserSettingsEntity(userName = name, currencyCode = currency.currencyCode))
+    suspend fun saveSettings(name: String, currency: CurrencyOption, themeMode: ThemeMode) {
+        dao.saveSettings(
+            UserSettingsEntity(
+                userName = name,
+                currencyCode = currency.currencyCode,
+                themeMode = themeMode.name
+            )
+        )
     }
 
     suspend fun addAccount(name: String, balance: Double) {

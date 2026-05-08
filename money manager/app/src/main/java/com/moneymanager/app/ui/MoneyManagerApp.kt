@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBars
@@ -71,6 +72,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -107,6 +109,7 @@ import com.moneymanager.app.model.MessageScanRange
 import com.moneymanager.app.model.MonthlyCategoryTotal
 import com.moneymanager.app.model.MoneyIcons
 import com.moneymanager.app.model.ScreenTab
+import com.moneymanager.app.model.ThemeMode
 import com.moneymanager.app.model.TransactionType
 import com.moneymanager.app.model.month
 import com.moneymanager.app.model.shortLabel
@@ -158,6 +161,7 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
         },
         floatingActionButton = {
             if (state.selectedTab != ScreenTab.Settings) {
+                val fabDark = isAmoledTheme()
                 Button(
                     onClick = {
                         when (state.selectedTab) {
@@ -167,7 +171,7 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
                     },
                     colors = ButtonDefaults.buttonColors(
                         containerColor = PrimaryBlue,
-                        contentColor = Color(0xFF001A42)
+                        contentColor = if (fabDark) Color(0xFF001A42) else Color.White
                     ),
                     shape = CircleShape,
                     contentPadding = PaddingValues(18.dp)
@@ -209,6 +213,7 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
                     state = state,
                     onAddCategory = viewModel::setCategorySheet,
                     onCurrencySelected = viewModel::selectCurrency,
+                    onThemeSelected = viewModel::selectThemeMode,
                     onDeleteAccount = viewModel::deleteAccount,
                     onDeleteCategory = viewModel::deleteCategory
                 )
@@ -266,7 +271,7 @@ private fun InitialLoadingScreen() {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.White)
+            .background(Navy950)
     )
 }
 
@@ -289,31 +294,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.dashboardContent(
         )
     }
     item {
-        MetricGrid(
-            income = state.monthIncome,
-            expense = state.monthExpense,
-            net = state.monthNet,
-            currency = state.currency
-        )
-    }
-    item {
-        MonthSelector(
-            months = availableMonths(state),
-            selected = state.selectedMonth,
-            onSelected = onMonthSelected
-        )
-    }
-    item {
-        ActionPanel(
-            title = "Monthly Summary",
-            subtitle = "${state.selectedMonth.shortLabel()} income, expense, net total, graph, and category pie.",
-            icon = Icons.Rounded.BarChart,
-            action = "Open",
-            onClick = { onOpenSummary(ScreenTab.Summary) }
-        )
-    }
-    item {
-        MessageScanPanel(onScan = onScanWithRange)
+        CashFlowOverviewCard(state)
     }
     if (state.detectedDrafts.isNotEmpty()) {
         item {
@@ -361,6 +342,18 @@ private fun androidx.compose.foundation.lazy.LazyListScope.dashboardContent(
             }
         }
     }
+    item {
+        ActionPanel(
+            title = "Monthly Summary",
+            subtitle = "${state.selectedMonth.shortLabel()} income, expense, net total, graph, and category pie.",
+            icon = Icons.Rounded.BarChart,
+            action = "Open",
+            onClick = { onOpenSummary(ScreenTab.Summary) }
+        )
+    }
+    item {
+        MessageScanPanel(onScan = onScanWithRange)
+    }
 }
 
 private fun androidx.compose.foundation.lazy.LazyListScope.activityContent(
@@ -369,6 +362,14 @@ private fun androidx.compose.foundation.lazy.LazyListScope.activityContent(
     onLoadMore: () -> Unit
 ) {
     item { LargeTitle("Activity", "Add and review income or expenses by category.") }
+    item { SearchBarSurface("Search transactions") }
+    item {
+        ChipRow {
+            MoneyChip("This Month", selected = true, onClick = {})
+            MoneyChip("Categories", selected = false, onClick = {})
+            MoneyChip("Amount", selected = false, onClick = {})
+        }
+    }
     if (state.transactions.isEmpty()) {
         item { EmptyPanel("No transactions yet. Tap + to add your first income or expense.") }
     } else {
@@ -384,10 +385,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.activityContent(
                     onClick = onLoadMore,
                     modifier = Modifier.fillMaxWidth().height(52.dp),
                     shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = PrimaryBlue,
-                        contentColor = Color(0xFF001A42)
-                    )
+                    colors = primaryButtonColors()
                 ) {
                     Text("Load more", fontWeight = FontWeight.Bold)
                 }
@@ -454,6 +452,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.settingsContent(
     state: FinanceUiState,
     onAddCategory: (Boolean) -> Unit,
     onCurrencySelected: (CurrencyOption) -> Unit,
+    onThemeSelected: (ThemeMode) -> Unit,
     onDeleteAccount: (Long) -> Unit,
     onDeleteCategory: (Long) -> Unit
 ) {
@@ -470,6 +469,12 @@ private fun androidx.compose.foundation.lazy.LazyListScope.settingsContent(
         )
     }
     item {
+        ThemeSelector(
+            selected = state.themeMode,
+            onSelected = onThemeSelected
+        )
+    }
+    item {
         CategorySettingsGroup(categories = state.categories, onDelete = onDeleteCategory)
     }
     item {
@@ -477,7 +482,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.settingsContent(
             onClick = { onAddCategory(true) },
             modifier = Modifier.fillMaxWidth().height(54.dp),
             shape = RoundedCornerShape(12.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue, contentColor = Color(0xFF001A42))
+            colors = primaryButtonColors()
         ) {
             Icon(Icons.Rounded.Category, contentDescription = null)
             Spacer(Modifier.width(8.dp))
@@ -555,7 +560,7 @@ private fun RegistrationScreen(onComplete: (String, List<Pair<String, Double>>) 
                 enabled = name.isNotBlank(),
                 modifier = Modifier.fillMaxWidth().height(58.dp),
                 shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue, contentColor = Color(0xFF001A42))
+                colors = primaryButtonColors()
             ) {
                 Text("Start Tracking", fontWeight = FontWeight.Bold)
             }
@@ -663,7 +668,7 @@ private fun AddTransactionSheet(
                 },
                 modifier = Modifier.fillMaxWidth().height(56.dp),
                 shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue, contentColor = Color(0xFF001A42))
+                colors = primaryButtonColors()
             ) {
                 Text("Add Transaction", fontWeight = FontWeight.Bold)
             }
@@ -726,7 +731,7 @@ private fun AddBudgetSheet(
                 enabled = selectedCategoryIds.isNotEmpty(),
                 modifier = Modifier.fillMaxWidth().height(56.dp),
                 shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue, contentColor = Color(0xFF001A42))
+                colors = primaryButtonColors()
             ) {
                 Text("Save Budget", fontWeight = FontWeight.Bold)
             }
@@ -836,7 +841,7 @@ private fun AddCategorySheet(onDismiss: () -> Unit, onAdd: (String, String) -> U
                 enabled = name.isNotBlank(),
                 modifier = Modifier.fillMaxWidth().height(56.dp),
                 shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue, contentColor = Color(0xFF001A42))
+                colors = primaryButtonColors()
             ) {
                 Text("Create Category", fontWeight = FontWeight.Bold)
             }
@@ -859,9 +864,9 @@ private fun CategoryIconChip(
             Icon(option.icon, contentDescription = null, modifier = Modifier.size(18.dp))
         },
         colors = FilterChipDefaults.filterChipColors(
-            selectedContainerColor = PrimaryBlue,
-            selectedLabelColor = Color(0xFF001A42),
-            selectedLeadingIconColor = Color(0xFF001A42),
+            selectedContainerColor = if (isAmoledTheme()) PrimaryBlue else Color(0xFFEAF2FF),
+            selectedLabelColor = if (isAmoledTheme()) Color(0xFF001A42) else PrimaryBlue,
+            selectedLeadingIconColor = if (isAmoledTheme()) Color(0xFF001A42) else PrimaryBlue,
             containerColor = Navy800,
             labelColor = TextMuted
         )
@@ -911,7 +916,10 @@ private fun DetectedDraftRow(
                 Button(
                     onClick = { onAccept(draft.id, categoryId) },
                     modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.buttonColors(containerColor = PrimarySoft, contentColor = Color(0xFF001A42)),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (isAmoledTheme()) PrimarySoft else Color(0xFFEAF2FF),
+                        contentColor = if (isAmoledTheme()) Color(0xFF001A42) else PrimaryBlue
+                    ),
                     shape = RoundedCornerShape(12.dp)
                 ) {
                     Icon(Icons.Rounded.Check, contentDescription = null)
@@ -955,16 +963,21 @@ private fun LargeTitle(title: String, subtitle: String) {
 
 @Composable
 private fun HeroMetricCard(label: String, value: String, helper: String) {
+    val dark = isAmoledTheme()
+    val container = if (dark) PrimaryBlue else Color.White
+    val labelColor = if (dark) Color(0xCC00285D) else TextDim
+    val valueColor = if (dark) Color(0xFF07265C) else TextPrimary
     Card(
         modifier = Modifier.fillMaxWidth().height(158.dp),
         shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = PrimaryBlue)
+        colors = CardDefaults.cardColors(containerColor = container),
+        border = BorderStroke(1.dp, appBorderColor())
     ) {
         Column(Modifier.padding(22.dp), verticalArrangement = Arrangement.Center) {
-            Text(label, color = Color(0xCC00285D), style = MaterialTheme.typography.titleMedium)
+            Text(label.uppercase(), color = labelColor, style = MaterialTheme.typography.labelMedium)
             Text(
                 value,
-                color = Color(0xFF07265C),
+                color = valueColor,
                 fontSize = 38.sp,
                 lineHeight = 44.sp,
                 fontWeight = FontWeight.Bold,
@@ -972,7 +985,7 @@ private fun HeroMetricCard(label: String, value: String, helper: String) {
                 overflow = TextOverflow.Ellipsis
             )
             Spacer(Modifier.height(8.dp))
-            Text(helper, color = Color(0xFF07265C), style = MaterialTheme.typography.bodyMedium)
+            Text(helper, color = if (dark) Color(0xFF07265C) else PrimaryBlue, style = MaterialTheme.typography.bodyMedium)
         }
     }
 }
@@ -1058,6 +1071,118 @@ private fun DashboardPagination(
 }
 
 @Composable
+private fun SearchBarSurface(placeholder: String) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(58.dp),
+        shape = RoundedCornerShape(if (isAmoledTheme()) 16.dp else 10.dp),
+        colors = CardDefaults.cardColors(containerColor = if (isAmoledTheme()) Navy850 else Color.White),
+        border = BorderStroke(1.dp, appBorderColor())
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(Icons.Rounded.Search, contentDescription = null, tint = TextDim)
+            Spacer(Modifier.width(8.dp))
+            Text(placeholder, color = TextDim, style = MaterialTheme.typography.bodyLarge)
+        }
+    }
+}
+
+@Composable
+private fun CashFlowOverviewCard(state: FinanceUiState) {
+    val months = (5 downTo 0).map { YearMonth.now().minusMonths(it.toLong()) }
+    val income = months.map { month ->
+        state.transactions
+            .filter { it.month() == month && it.type == TransactionType.Income }
+            .sumOf { it.amount }
+    }
+    val expenses = months.map { month ->
+        state.transactions
+            .filter { it.month() == month && it.type == TransactionType.Expense }
+            .sumOf { it.amount }
+    }
+    val max = (income + expenses).maxOrNull()?.coerceAtLeast(1.0) ?: 1.0
+
+    ElevatedPanel {
+        Column(Modifier.padding(top = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Cash Flow", color = TextPrimary, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
+                LegendDot(PrimaryBlue, "Income")
+                Spacer(Modifier.width(10.dp))
+                LegendDot(TextDim, "Expenses")
+            }
+            HorizontalDivider(color = appBorderColor())
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(210.dp)
+                    .padding(start = 18.dp, top = 18.dp, end = 18.dp, bottom = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalAlignment = Alignment.Bottom
+            ) {
+                months.forEachIndexed { index, month ->
+                    CashFlowMonthBar(
+                        label = month.month.name.take(3),
+                        incomeProgress = (income[index] / max).toFloat(),
+                        expenseProgress = (expenses[index] / max).toFloat(),
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CashFlowMonthBar(
+    label: String,
+    incomeProgress: Float,
+    expenseProgress: Float,
+    modifier: Modifier = Modifier
+) {
+    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+        Row(
+            modifier = Modifier
+                .height(150.dp)
+                .fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
+            verticalAlignment = Alignment.Bottom
+        ) {
+            Box(
+                Modifier
+                    .weight(1f)
+                    .fillMaxHeight(incomeProgress.coerceIn(0.08f, 1f))
+                    .clip(RoundedCornerShape(topStart = 3.dp, topEnd = 3.dp))
+                    .background(PrimaryBlue)
+            )
+            Box(
+                Modifier
+                    .weight(1f)
+                    .fillMaxHeight(expenseProgress.coerceIn(0.08f, 1f))
+                    .clip(RoundedCornerShape(topStart = 3.dp, topEnd = 3.dp))
+                    .background(if (isAmoledTheme()) TextMuted else Color(0xFFC2C8D8))
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(label.uppercase(), color = TextDim, style = MaterialTheme.typography.labelSmall)
+    }
+}
+
+@Composable
+private fun LegendDot(color: Color, label: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(10.dp).clip(CircleShape).background(color))
+        Spacer(Modifier.width(4.dp))
+        Text(label, color = TextMuted, style = MaterialTheme.typography.labelMedium)
+    }
+}
+
+@Composable
 private fun TransactionRow(
     transaction: LedgerTransaction,
     state: FinanceUiState,
@@ -1065,7 +1190,7 @@ private fun TransactionRow(
 ) {
     val category = state.categories.firstOrNull { it.id == transaction.categoryId }
     ElevatedPanel {
-        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             IconTile(category?.icon ?: Icons.AutoMirrored.Rounded.ReceiptLong, categoryColor(category?.name.orEmpty(), transaction.type))
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
@@ -1080,9 +1205,6 @@ private fun TransactionRow(
             }
             Column(horizontalAlignment = Alignment.End) {
                 Text(transaction.signedAmount(state.currency), color = transaction.type.amountColor(), style = MaterialTheme.typography.titleMedium)
-                TextButton(onClick = { onDelete(transaction.id) }) {
-                    Text("Delete", color = LossRed, style = MaterialTheme.typography.labelMedium)
-                }
             }
         }
     }
@@ -1115,7 +1237,7 @@ private fun BudgetRow(budget: BudgetPlan, state: FinanceUiState, onDelete: (Long
                 progress = { progress },
                 modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(6.dp)),
                 color = if (over) LossRed else PrimarySoft,
-                trackColor = Navy800
+                trackColor = appTrackColor()
             )
             TextButton(onClick = { onDelete(budget.id) }, modifier = Modifier.align(Alignment.End)) {
                 Text("Delete", color = LossRed)
@@ -1214,7 +1336,7 @@ private fun SettingsGroup(title: String, rows: List<String>) {
             Column {
                 rows.forEachIndexed { index, row ->
                     Text(row, color = TextPrimary, modifier = Modifier.fillMaxWidth().padding(16.dp), style = MaterialTheme.typography.bodyLarge)
-                    if (index != rows.lastIndex) HorizontalDivider(color = Color(0xFF283044), modifier = Modifier.padding(horizontal = 16.dp))
+                    if (index != rows.lastIndex) HorizontalDivider(color = appDividerColor(), modifier = Modifier.padding(horizontal = 16.dp))
                 }
             }
         }
@@ -1244,7 +1366,7 @@ private fun AccountSettingsGroup(state: FinanceUiState, onDelete: (Long) -> Unit
                             }
                         }
                         if (index != state.accounts.lastIndex) {
-                            HorizontalDivider(color = Color(0xFF283044), modifier = Modifier.padding(horizontal = 16.dp))
+                            HorizontalDivider(color = appDividerColor(), modifier = Modifier.padding(horizontal = 16.dp))
                         }
                     }
                 }
@@ -1277,7 +1399,7 @@ private fun CategorySettingsGroup(categories: List<CategoryItem>, onDelete: (Lon
                         }
                     }
                     if (index != categories.lastIndex) {
-                        HorizontalDivider(color = Color(0xFF283044), modifier = Modifier.padding(horizontal = 16.dp))
+                        HorizontalDivider(color = appDividerColor(), modifier = Modifier.padding(horizontal = 16.dp))
                     }
                 }
             }
@@ -1314,6 +1436,36 @@ private fun CurrencySelector(
 }
 
 @Composable
+private fun ThemeSelector(
+    selected: ThemeMode,
+    onSelected: (ThemeMode) -> Unit
+) {
+    val dark = selected == ThemeMode.Dark
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        LabelText("THEME")
+        ElevatedPanel {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("Dark Mode", color = TextPrimary, style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        if (dark) "AMOLED black" else "Clean white",
+                        color = TextDim,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+                Switch(
+                    checked = dark,
+                    onCheckedChange = { onSelected(if (it) ThemeMode.Dark else ThemeMode.Light) }
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun SectionHeader(title: String, action: String) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text(title, color = TextPrimary, style = MaterialTheme.typography.headlineMedium)
@@ -1326,12 +1478,34 @@ private fun SectionHeader(title: String, action: String) {
 private fun ElevatedPanel(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
     Card(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(if (isAmoledTheme()) 16.dp else 10.dp),
         colors = CardDefaults.cardColors(containerColor = Navy850),
-        border = BorderStroke(1.dp, Color(0xFF242C40))
+        border = BorderStroke(1.dp, appBorderColor())
     ) {
         content()
     }
+}
+
+private fun appBorderColor(): Color {
+    return if (isAmoledTheme()) Color(0xFF33363D) else Color(0xFFC9CEDD)
+}
+
+private fun appDividerColor(): Color {
+    return if (isAmoledTheme()) Color(0xFF283044) else Color(0xFFD2D7E4)
+}
+
+private fun appTrackColor(): Color {
+    return if (isAmoledTheme()) Navy800 else Color(0xFFE7EBF5)
+}
+
+@Composable
+private fun primaryButtonColors() = ButtonDefaults.buttonColors(
+    containerColor = PrimaryBlue,
+    contentColor = if (isAmoledTheme()) Color(0xFF001A42) else Color.White
+)
+
+private fun isAmoledTheme(): Boolean {
+    return Navy950 == Color(0xFF000000)
 }
 
 @Composable
@@ -1343,7 +1517,7 @@ private fun EmptyPanel(text: String) {
 
 @Composable
 private fun IconTile(icon: ImageVector, tint: Color) {
-    Box(Modifier.size(52.dp).clip(RoundedCornerShape(14.dp)).background(tint.copy(alpha = 0.14f)), contentAlignment = Alignment.Center) {
+    Box(Modifier.size(52.dp).clip(RoundedCornerShape(if (isAmoledTheme()) 14.dp else 28.dp)).background(tint.copy(alpha = if (isAmoledTheme()) 0.14f else 0.11f)), contentAlignment = Alignment.Center) {
         Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(27.dp))
     }
 }
@@ -1364,13 +1538,14 @@ private fun ChipRow(content: @Composable RowScope.() -> Unit) {
 
 @Composable
 private fun MoneyChip(label: String, selected: Boolean, onClick: () -> Unit) {
+    val dark = isAmoledTheme()
     FilterChip(
         selected = selected,
         onClick = onClick,
         label = { Text(label) },
         colors = FilterChipDefaults.filterChipColors(
-            selectedContainerColor = PrimaryBlue,
-            selectedLabelColor = Color(0xFF001A42),
+            selectedContainerColor = if (dark) PrimaryBlue else Color(0xFFEAF2FF),
+            selectedLabelColor = if (dark) Color(0xFF001A42) else PrimaryBlue,
             containerColor = Navy800,
             labelColor = TextMuted
         )
@@ -1379,7 +1554,8 @@ private fun MoneyChip(label: String, selected: Boolean, onClick: () -> Unit) {
 
 @Composable
 private fun BottomNavigation(selectedTab: ScreenTab, onTabSelected: (ScreenTab) -> Unit) {
-    NavigationBar(containerColor = Navy850, tonalElevation = 0.dp) {
+    val dark = isAmoledTheme()
+    NavigationBar(containerColor = if (dark) Navy850 else Color(0xFFF7F9FE), tonalElevation = 0.dp) {
         ScreenTab.entries.forEach { tab ->
             NavigationBarItem(
                 selected = selectedTab == tab,
@@ -1389,9 +1565,9 @@ private fun BottomNavigation(selectedTab: ScreenTab, onTabSelected: (ScreenTab) 
                 colors = NavigationBarItemDefaults.colors(
                     selectedIconColor = PrimarySoft,
                     selectedTextColor = PrimarySoft,
-                    indicatorColor = Color(0xFF213E78),
-                    unselectedIconColor = TextDim.copy(alpha = 0.62f),
-                    unselectedTextColor = TextDim.copy(alpha = 0.62f)
+                    indicatorColor = if (dark) Color(0xFF112654) else Color(0xFFEAF2FF),
+                    unselectedIconColor = if (dark) TextDim.copy(alpha = 0.62f) else TextPrimary,
+                    unselectedTextColor = if (dark) TextDim.copy(alpha = 0.62f) else TextPrimary
                 )
             )
         }
@@ -1403,7 +1579,7 @@ private fun inputColors() = OutlinedTextFieldDefaults.colors(
     focusedTextColor = TextPrimary,
     unfocusedTextColor = TextPrimary,
     focusedBorderColor = PrimaryBlue,
-    unfocusedBorderColor = Color(0xFF424754),
+    unfocusedBorderColor = appBorderColor(),
     focusedContainerColor = Navy900,
     unfocusedContainerColor = Navy900,
     focusedLabelColor = PrimarySoft,

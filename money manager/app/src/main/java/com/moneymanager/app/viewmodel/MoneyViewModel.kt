@@ -21,6 +21,7 @@ import com.moneymanager.app.model.FinanceUiState
 import com.moneymanager.app.model.LedgerTransaction
 import com.moneymanager.app.model.MoneyIcons
 import com.moneymanager.app.model.ScreenTab
+import com.moneymanager.app.model.ThemeMode
 import com.moneymanager.app.model.TransactionType
 import com.moneymanager.app.model.month
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -41,7 +42,7 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
 
     fun completeRegistration(name: String, accounts: List<Pair<String, Double>>) {
         viewModelScope.launch {
-            repository.saveSettings(name.trim(), _uiState.value.currency)
+            repository.saveSettings(name.trim(), _uiState.value.currency, _uiState.value.themeMode)
             accounts
                 .filter { it.first.isNotBlank() && it.second >= 0.0 }
                 .forEach { repository.addAccount(it.first.trim(), it.second) }
@@ -84,8 +85,15 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
 
     fun selectCurrency(currency: CurrencyOption) {
         viewModelScope.launch {
-            repository.saveSettings(_uiState.value.userName, currency)
+            repository.saveSettings(_uiState.value.userName, currency, _uiState.value.themeMode)
             _uiState.update { it.copy(currency = currency) }
+        }
+    }
+
+    fun selectThemeMode(themeMode: ThemeMode) {
+        viewModelScope.launch {
+            repository.saveSettings(_uiState.value.userName, _uiState.value.currency, themeMode)
+            _uiState.update { it.copy(themeMode = themeMode) }
         }
     }
 

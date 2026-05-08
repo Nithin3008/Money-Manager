@@ -67,6 +67,11 @@ enum class CurrencyOption(
     GBP("British Pound", "GBP", "GBP")
 }
 
+enum class ThemeMode(val label: String) {
+    Dark("Dark"),
+    Light("Light")
+}
+
 data class BankAccount(
     val id: Long,
     val name: String,
@@ -129,6 +134,7 @@ data class FinanceUiState(
     val isAppInitializing: Boolean = true,
     val userName: String = "",
     val currency: CurrencyOption = CurrencyOption.INR,
+    val themeMode: ThemeMode = ThemeMode.Dark,
     val selectedTab: ScreenTab = ScreenTab.Dashboard,
     val selectedMonth: YearMonth = YearMonth.now(),
     val accounts: List<BankAccount> = emptyList(),

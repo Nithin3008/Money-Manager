@@ -4,6 +4,8 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.core.app.ActivityCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.moneymanager.app.ui.MoneyManagerApp
@@ -16,8 +18,9 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         requestSmsPermissions()
         setContent {
-            MoneyManagerTheme {
-                val viewModel: MoneyViewModel = viewModel()
+            val viewModel: MoneyViewModel = viewModel()
+            val state by viewModel.uiState.collectAsState()
+            MoneyManagerTheme(themeMode = state.themeMode) {
                 MoneyManagerApp(viewModel = viewModel)
             }
         }

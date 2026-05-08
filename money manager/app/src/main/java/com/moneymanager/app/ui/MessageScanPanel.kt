@@ -1,7 +1,7 @@
 package com.moneymanager.app.ui
 
 import android.app.DatePickerDialog
-import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -17,6 +17,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
@@ -37,6 +39,8 @@ import androidx.compose.ui.unit.sp
 import com.moneymanager.app.model.MessageScanRange
 import com.moneymanager.app.ui.theme.LossRed
 import com.moneymanager.app.ui.theme.Navy900
+import com.moneymanager.app.ui.theme.Navy850
+import com.moneymanager.app.ui.theme.Navy950
 import com.moneymanager.app.ui.theme.PrimaryBlue
 import com.moneymanager.app.ui.theme.TextMuted
 import com.moneymanager.app.ui.theme.TextPrimary
@@ -61,68 +65,76 @@ fun MessageScanPanel(onScan: (MessageScanRange, LocalDate, LocalDate) -> Unit) {
         MessageScanRange.Custom -> "Scan Range"
     }
 
-    Column(
+    val dark = Navy950 == Color(0xFF000000)
+
+    Card(
         modifier = Modifier
-            .fillMaxWidth()
-            .background(Navy900)
-            .padding(16.dp)
+            .fillMaxWidth(),
+        shape = RoundedCornerShape(if (dark) 16.dp else 10.dp),
+        colors = CardDefaults.cardColors(containerColor = Navy850),
+        border = BorderStroke(1.dp, if (dark) Color(0xFF33363D) else Color(0xFFC9CEDD))
     ) {
-        Text("Message Scanner", fontWeight = FontWeight.Bold, color = TextPrimary, fontSize = 16.sp)
-        Spacer(modifier = Modifier.height(12.dp))
-        Row(
-            modifier = Modifier
-                .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            MessageScanRange.values().forEach { range ->
-                FilterChip(
-                    selected = selectedRange == range,
-                    onClick = { selectedRange = range },
-                    label = { Text(range.label) },
-                    colors = FilterChipDefaults.filterChipColors(
-                        containerColor = if (selectedRange == range) PrimaryBlue else Navy900,
-                        labelColor = if (selectedRange == range) Color.White else TextMuted
-                    )
-                )
-            }
-        }
-        if (selectedRange == MessageScanRange.Custom) {
+        Column(Modifier.padding(16.dp)) {
+            Text("Message Scanner", fontWeight = FontWeight.Bold, color = TextPrimary, fontSize = 16.sp)
             Spacer(modifier = Modifier.height(12.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(
-                    onClick = { showStartPicker = true },
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Icon(Icons.Rounded.CalendarMonth, contentDescription = null)
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Start: ${formatter.format(startDate)}")
-                }
-                OutlinedButton(
-                    onClick = { showEndPicker = true },
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Icon(Icons.Rounded.CalendarMonth, contentDescription = null)
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("End: ${formatter.format(endDate)}")
+            Row(
+                modifier = Modifier
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                MessageScanRange.values().forEach { range ->
+                    val selected = selectedRange == range
+                    FilterChip(
+                        selected = selected,
+                        onClick = { selectedRange = range },
+                        label = { Text(range.label) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = if (dark) PrimaryBlue else Color(0xFFEAF2FF),
+                            selectedLabelColor = if (dark) Color(0xFF001A42) else PrimaryBlue,
+                            containerColor = if (dark) Navy900 else Color.White,
+                            labelColor = TextMuted
+                        )
+                    )
                 }
             }
-            if (!isCustomValid) {
-                Spacer(modifier = Modifier.height(8.dp))
-                Text("Start date must be on or before end date.", color = LossRed)
+            if (selectedRange == MessageScanRange.Custom) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = { showStartPicker = true },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Rounded.CalendarMonth, contentDescription = null)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Start: ${formatter.format(startDate)}")
+                    }
+                    OutlinedButton(
+                        onClick = { showEndPicker = true },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Rounded.CalendarMonth, contentDescription = null)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("End: ${formatter.format(endDate)}")
+                    }
+                }
+                if (!isCustomValid) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("Start date must be on or before end date.", color = LossRed)
+                }
             }
-        }
-        Spacer(modifier = Modifier.height(14.dp))
-        Button(
-            onClick = { onScan(selectedRange, startDate, endDate) },
-            enabled = selectedRange != MessageScanRange.Custom || isCustomValid,
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(12.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = PrimaryBlue,
-                contentColor = Color(0xFF001A42)
-            )
-        ) {
-            Text(buttonLabel, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(14.dp))
+            Button(
+                onClick = { onScan(selectedRange, startDate, endDate) },
+                enabled = selectedRange != MessageScanRange.Custom || isCustomValid,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = PrimaryBlue,
+                    contentColor = if (dark) Color(0xFF001A42) else Color.White
+                )
+            ) {
+                Text(buttonLabel, fontWeight = FontWeight.Bold)
+            }
         }
     }
 
