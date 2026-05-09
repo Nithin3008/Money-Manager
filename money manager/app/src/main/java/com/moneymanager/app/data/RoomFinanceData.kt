@@ -217,6 +217,10 @@ class FinanceRepository(private val dao: FinanceDao) {
         return dao.saveTransaction(transaction.toEntity(id = 0))
     }
 
+    suspend fun updateTransaction(transaction: LedgerTransaction): Long {
+        return dao.saveTransaction(transaction.toEntity(id = transaction.id))
+    }
+
     suspend fun addBudget(budget: BudgetPlan): Long {
         return dao.saveBudget(budget.toEntity(id = 0))
     }

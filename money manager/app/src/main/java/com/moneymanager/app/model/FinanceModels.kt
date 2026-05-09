@@ -149,6 +149,8 @@ data class FinanceUiState(
     val showTransactionSheet: Boolean = false,
     val showBudgetSheet: Boolean = false,
     val showCategorySheet: Boolean = false,
+    val showEditCategorySheet: Boolean = false,
+    val editingTransactionId: Long? = null,
     val budgetWarning: BudgetWarning? = null
 ) {
     val hasCompletedRegistration: Boolean = userName.isNotBlank()

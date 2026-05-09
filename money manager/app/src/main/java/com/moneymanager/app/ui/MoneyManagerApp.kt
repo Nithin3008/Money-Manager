@@ -49,6 +49,7 @@ import androidx.compose.material.icons.rounded.PieChart
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Sms
 import androidx.compose.material.icons.rounded.TrendingUp
+import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material.icons.rounded.Wallet
 import androidx.compose.material3.AlertDialog
@@ -62,6 +63,9 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -200,12 +204,14 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
                     onAcceptDraft = viewModel::acceptDetectedTransaction,
                     onIgnoreDraft = viewModel::ignoreDetectedTransaction,
                     onDeleteTransaction = viewModel::deleteTransaction,
+                    onEditTransaction = viewModel::requestEditTransactionCategory,
                     onDashboardPageSelected = viewModel::selectDashboardTransactionPage,
                     onDraftPageSelected = viewModel::selectDashboardDraftPage
                 )
                 ScreenTab.Activity -> activityContent(
                     state = state,
                     onDeleteTransaction = viewModel::deleteTransaction,
+                    onEditTransaction = viewModel::requestEditTransactionCategory,
                     onLoadMore = viewModel::loadMoreTransactions
                 )
                 ScreenTab.Budget -> budgetContent(state, viewModel::setBudgetSheet, viewModel::deleteBudget)
@@ -242,6 +248,16 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
         AddCategorySheet(
             onDismiss = { viewModel.setCategorySheet(false) },
             onAdd = viewModel::addCategory
+        )
+    }
+
+    if (state.showEditCategorySheet && state.editingTransactionId != null) {
+        val editingTransaction = state.transactions.firstOrNull { it.id == state.editingTransactionId }
+        EditTransactionCategorySheet(
+            state = state,
+            transaction = editingTransaction,
+            onDismiss = viewModel::cancelEditTransactionCategory,
+            onSave = viewModel::editTransactionCategory
         )
     }
 
@@ -284,6 +300,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.dashboardContent(
     onAcceptDraft: (Long, Long) -> Unit,
     onIgnoreDraft: (Long) -> Unit,
     onDeleteTransaction: (Long) -> Unit,
+    onEditTransaction: (Long) -> Unit,
     onDashboardPageSelected: (Int) -> Unit,
     onDraftPageSelected: (Int) -> Unit
 ) {
@@ -331,7 +348,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.dashboardContent(
             item { EmptyPanel("No transactions yet. Tap + to add your first income or expense.") }
         } else {
             items(state.dashboardPagedTransactions, key = { "dashboard_txn_${it.id}" }) {
-                TransactionRow(transaction = it, state = state, onDelete = onDeleteTransaction)
+                TransactionRow(transaction = it, state = state, onDelete = onDeleteTransaction, onEdit = onEditTransaction)
             }
             item {
                 DashboardPagination(
@@ -360,6 +377,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.dashboardContent(
 private fun androidx.compose.foundation.lazy.LazyListScope.activityContent(
     state: FinanceUiState,
     onDeleteTransaction: (Long) -> Unit,
+    onEditTransaction: (Long) -> Unit,
     onLoadMore: () -> Unit
 ) {
     item { LargeTitle("Activity", "Add and review income or expenses by category.") }
@@ -378,7 +396,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.activityContent(
             items = state.pagedTransactions,
             key = { index, transaction -> "${transaction.id}_${transaction.timestampMillis}_$index" }
         ) { _, transaction ->
-            TransactionRow(transaction = transaction, state = state, onDelete = onDeleteTransaction)
+            TransactionRow(transaction = transaction, state = state, onDelete = onDeleteTransaction, onEdit = onEditTransaction)
         }
         if (state.hasMoreTransactions) {
             item {
@@ -672,6 +690,49 @@ private fun AddTransactionSheet(
                 colors = primaryButtonColors()
             ) {
                 Text("Add Transaction", fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun EditTransactionCategorySheet(
+    state: FinanceUiState,
+    transaction: LedgerTransaction?,
+    onDismiss: () -> Unit,
+    onSave: (Long, Long) -> Unit
+) {
+    if (transaction == null) return
+    var categoryId by remember { mutableStateOf(transaction.categoryId) }
+
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = Navy900, contentColor = TextPrimary) {
+        SheetContent(title = "Edit Category") {
+            Text(
+                "Change the category for this transaction only.",
+                color = TextMuted,
+                style = MaterialTheme.typography.bodyMedium
+            )
+            Spacer(Modifier.height(12.dp))
+            Text(transaction.name, color = TextPrimary, style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(16.dp))
+            LabelText("CATEGORY")
+            ChipRow {
+                state.categories.forEach { category ->
+                    MoneyChip(
+                        label = category.name,
+                        selected = categoryId == category.id,
+                        onClick = { categoryId = category.id }
+                    )
+                }
+            }
+            Button(
+                onClick = { onSave(transaction.id, categoryId) },
+                modifier = Modifier.fillMaxWidth().height(56.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = primaryButtonColors()
+            ) {
+                Text("Update Category", fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -1187,9 +1248,12 @@ private fun LegendDot(color: Color, label: String) {
 private fun TransactionRow(
     transaction: LedgerTransaction,
     state: FinanceUiState,
-    onDelete: (Long) -> Unit
+    onDelete: (Long) -> Unit,
+    onEdit: (Long) -> Unit
 ) {
     val category = state.categories.firstOrNull { it.id == transaction.categoryId }
+    var menuExpanded by remember { mutableStateOf(false) }
+
     ElevatedPanel {
         Row(Modifier.padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             IconTile(category?.icon ?: Icons.AutoMirrored.Rounded.ReceiptLong, categoryColor(category?.name.orEmpty(), transaction.type))
@@ -1206,6 +1270,25 @@ private fun TransactionRow(
             }
             Column(horizontalAlignment = Alignment.End) {
                 Text(transaction.signedAmount(state.currency), color = transaction.type.amountColor(), style = MaterialTheme.typography.titleMedium)
+                IconButton(onClick = { menuExpanded = true }) {
+                    Icon(Icons.Rounded.MoreVert, contentDescription = "Transaction options", tint = TextDim)
+                }
+                DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                    DropdownMenuItem(
+                        text = { Text("Edit Category") },
+                        onClick = {
+                            menuExpanded = false
+                            onEdit(transaction.id)
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Delete") },
+                        onClick = {
+                            menuExpanded = false
+                            onDelete(transaction.id)
+                        }
+                    )
+                }
             }
         }
     }

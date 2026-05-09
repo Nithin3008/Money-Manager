@@ -180,6 +180,22 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun requestEditTransactionCategory(transactionId: Long) {
+        _uiState.update { it.copy(showEditCategorySheet = true, editingTransactionId = transactionId) }
+    }
+
+    fun cancelEditTransactionCategory() {
+        _uiState.update { it.copy(showEditCategorySheet = false, editingTransactionId = null) }
+    }
+
+    fun editTransactionCategory(transactionId: Long, categoryId: Long) {
+        viewModelScope.launch {
+            val transaction = _uiState.value.transactions.firstOrNull { it.id == transactionId } ?: return@launch
+            repository.updateTransaction(transaction.copy(categoryId = categoryId))
+            reloadState { it.copy(showEditCategorySheet = false, editingTransactionId = null) }
+        }
+    }
+
     fun deleteBudget(id: Long) {
         viewModelScope.launch {
             repository.deleteBudget(id)
@@ -303,6 +319,8 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
             showTransactionSheet = current.showTransactionSheet,
             showBudgetSheet = current.showBudgetSheet,
             showCategorySheet = current.showCategorySheet,
+            showEditCategorySheet = current.showEditCategorySheet,
+            editingTransactionId = current.editingTransactionId,
             isScanningMessages = current.isScanningMessages,
             budgetWarning = current.budgetWarning
         )
