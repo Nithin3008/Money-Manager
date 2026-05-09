@@ -53,6 +53,7 @@ import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material.icons.rounded.Wallet
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonColors
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -1499,12 +1500,12 @@ private fun appTrackColor(): Color {
 }
 
 @Composable
-private fun primaryButtonColors() = ButtonDefaults.buttonColors(
+fun primaryButtonColors(): ButtonColors = ButtonDefaults.buttonColors(
     containerColor = PrimaryBlue,
     contentColor = if (isAmoledTheme()) Color(0xFF001A42) else Color.White
 )
 
-private fun isAmoledTheme(): Boolean {
+fun isAmoledTheme(): Boolean {
     return Navy950 == Color(0xFF000000)
 }
 
