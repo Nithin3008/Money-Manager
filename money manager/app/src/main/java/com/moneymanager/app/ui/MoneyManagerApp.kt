@@ -1471,7 +1471,7 @@ private fun CategorySettingsGroup(categories: List<CategoryItem>, onDelete: (Lon
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            "${category.name}  ${if (category.isDefault) "Default" else "Custom"}",
+                            category.name,
                             color = TextPrimary,
                             modifier = Modifier.weight(1f),
                             style = MaterialTheme.typography.bodyLarge
