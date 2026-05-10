@@ -82,7 +82,8 @@ enum class ThemeMode(val label: String) {
 data class BankAccount(
     val id: Long,
     val name: String,
-    val balance: Double
+    val balance: Double,
+    val smsMatchKey: String? = null
 )
 
 data class CategoryItem(
@@ -103,7 +104,9 @@ data class LedgerTransaction(
     val accountId: Long?,
     val timestampMillis: Long,
     val isAutoDetected: Boolean = false,
-    val rawMessage: String? = null
+    val rawMessage: String? = null,
+    val smsBankLabel: String? = null,
+    val excludeFromSummary: Boolean = false
 )
 
 data class BudgetPlan(
@@ -166,16 +169,68 @@ data class FinanceUiState(
     val editingTransactionId: Long? = null,
     val showTransactionDetailSheet: Boolean = false,
     val selectedTransactionId: Long? = null,
-    val budgetWarning: BudgetWarning? = null
+    val budgetWarning: BudgetWarning? = null,
+    val salaryShiftIncomeEnabled: Boolean = false,
+    val salaryShiftWindowDays: Int = 5,
+    val salaryCategoryId: Long? = null,
+    val salaryKeywordsForUncategorized: Boolean = true,
+    val bankSmsSetupCompleted: Boolean = false,
+    /** Empty = all accounts on Summary; otherwise filter to these account ids. */
+    val summarySelectedAccountIds: Set<Long> = emptySet(),
+    /** Distinct SMS bank labels seen in scans/transactions; not persisted. */
+    val discoveredSmsBanks: List<String> = emptyList()
 ) {
     val hasCompletedRegistration: Boolean = userName.isNotBlank()
 
-    val monthTransactions: List<LedgerTransaction>
-        get() = transactions.filter { it.month() == selectedMonth }
+    private fun passesSummaryAccountFilter(tx: LedgerTransaction): Boolean {
+        if (summarySelectedAccountIds.isEmpty()) return true
+        val aid = tx.accountId ?: return false
+        return aid in summarySelectedAccountIds
+    }
 
-    val monthIncome: Double
+    /**
+     * Transactions included in Summary metrics for [selectedMonth].
+     * Expenses use the calendar month; income uses [LedgerTransaction.summaryIncomeMonth] when payroll shift is on.
+     */
+    val monthTransactions: List<LedgerTransaction>
+        get() {
+            val monthStart = selectedMonth.atDay(1)
+            val monthEnd = selectedMonth.atEndOfMonth()
+            return transactions.filter { tx ->
+                if (tx.excludeFromSummary) return@filter false
+                if (!passesSummaryAccountFilter(tx)) return@filter false
+                when (tx.type) {
+                    TransactionType.Expense -> {
+                        val d = tx.transactionDate()
+                        !d.isBefore(monthStart) && !d.isAfter(monthEnd)
+                    }
+                    TransactionType.Income ->
+                        tx.summaryIncomeMonth(salaryShiftIncomeEnabled, salaryShiftWindowDays) == selectedMonth
+                }
+            }
+        }
+
+    private val uncategorizedId: Long?
+        get() = categories.firstOrNull { it.name == "Uncategorized" }?.id
+
+    private fun incomeCountsAsSalary(tx: LedgerTransaction): Boolean {
+        if (tx.type != TransactionType.Income) return false
+        val salaryId = salaryCategoryId
+        if (salaryId != null && tx.categoryId == salaryId) return true
+        if (!salaryKeywordsForUncategorized) return false
+        val uncId = uncategorizedId ?: return false
+        if (tx.categoryId != uncId) return false
+        return SalaryIncomeRules.matchesSalaryKeywords(tx.name, tx.rawMessage)
+    }
+
+    val monthSalaryIncome: Double
         get() = monthTransactions
-            .filter { it.type == TransactionType.Income }
+            .filter { it.type == TransactionType.Income && incomeCountsAsSalary(it) }
+            .sumOf { it.amount }
+
+    val monthOtherIncome: Double
+        get() = monthTransactions
+            .filter { it.type == TransactionType.Income && !incomeCountsAsSalary(it) }
             .sumOf { it.amount }
 
     val monthExpense: Double
@@ -185,6 +240,45 @@ data class FinanceUiState(
 
     val monthNet: Double
         get() = monthIncome - monthExpense
+
+    val monthIncome: Double
+        get() = monthSalaryIncome + monthOtherIncome
+
+    /** Actual credits dated inside [selectedMonth] (calendar), for comparison when payroll shift moves income. */
+    val calendarMonthIncomeTotal: Double
+        get() {
+            val monthStart = selectedMonth.atDay(1)
+            val monthEnd = selectedMonth.atEndOfMonth()
+            return transactions
+                .filter { tx ->
+                    if (tx.excludeFromSummary) return@filter false
+                    if (!passesSummaryAccountFilter(tx)) return@filter false
+                    if (tx.type != TransactionType.Income) return@filter false
+                    val d = tx.transactionDate()
+                    !d.isBefore(monthStart) && !d.isAfter(monthEnd)
+                }
+                .sumOf { it.amount }
+        }
+
+    /** Cash balance before any transaction dated in [selectedMonth] (calendar). */
+    val balanceAtStartOfSelectedMonth: Double
+        get() {
+            val cutoff = selectedMonth.atDay(1)
+            val priorNet = transactions
+                .filter { it.transactionDate().isBefore(cutoff) }
+                .sumOf { if (it.type == TransactionType.Income) it.amount else -it.amount }
+            return accounts.sumOf { it.balance } + priorNet
+        }
+
+    /** Cash balance after all transactions through the last day of [selectedMonth]. */
+    val balanceAtEndOfSelectedMonth: Double
+        get() {
+            val lastDay = selectedMonth.atEndOfMonth()
+            val netThrough = transactions
+                .filter { !it.transactionDate().isAfter(lastDay) }
+                .sumOf { if (it.type == TransactionType.Income) it.amount else -it.amount }
+            return accounts.sumOf { it.balance } + netThrough
+        }
 
     val trackedBalance: Double
         get() = accounts.sumOf { it.balance } + transactions.sumOf {

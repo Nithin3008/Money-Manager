@@ -105,6 +105,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.moneymanager.app.model.BankAccount
@@ -123,6 +124,7 @@ import com.moneymanager.app.model.TransactionType
 import com.moneymanager.app.model.month
 import com.moneymanager.app.model.shortLabel
 import com.moneymanager.app.model.transactionDate
+import com.moneymanager.app.data.SmsBankKeys
 import com.moneymanager.app.ui.theme.LossRed
 import com.moneymanager.app.ui.theme.MoneyGreen
 import com.moneymanager.app.ui.theme.Navy800
@@ -157,6 +159,29 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
 
     if (!state.hasCompletedRegistration) {
         RegistrationScreen(onComplete = viewModel::completeRegistration)
+        return
+    }
+
+    LaunchedEffect(state.bankSmsSetupCompleted) {
+        if (!state.bankSmsSetupCompleted) {
+            viewModel.refreshDiscoveredSmsBanks()
+        }
+    }
+
+    val needsBankSmsSetup =
+        !state.bankSmsSetupCompleted &&
+            (state.accounts.size >= 2 || state.discoveredSmsBanks.size >= 2)
+    if (needsBankSmsSetup) {
+        LaunchedEffect(Unit) {
+            viewModel.refreshDiscoveredSmsBanks()
+        }
+        BankSmsSetupScreen(
+            state = state,
+            onMapBank = viewModel::mapSmsBankToAccount,
+            onCreateAccount = viewModel::createAccountForSmsLabel,
+            onSkip = viewModel::completeBankSmsOnboarding,
+            onDone = viewModel::completeBankSmsOnboarding
+        )
         return
     }
 
@@ -232,15 +257,25 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
                     onLoadMore = viewModel::loadMoreTransactions
                 )
                 ScreenTab.Budget -> budgetContent(state, viewModel::setBudgetSheet, viewModel::deleteBudget)
-                ScreenTab.Summary -> summaryContent(state, viewModel::selectMonth)
+                ScreenTab.Summary -> summaryContent(
+                    state = state,
+                    onMonthSelected = viewModel::selectMonth,
+                    onToggleSummaryAccount = viewModel::toggleSummaryAccountInFilter,
+                    onClearSummaryAccountFilter = viewModel::clearSummaryAccountFilter
+                )
                 ScreenTab.Settings -> settingsContent(
                     state = state,
                     onAddCategory = viewModel::setCategorySheet,
                     onCurrencySelected = viewModel::selectCurrency,
                     onThemeSelected = viewModel::selectThemeMode,
+                    onSalaryShiftChanged = viewModel::setSalaryShiftIncomeEnabled,
+                    onSalaryWindowDaysChanged = viewModel::setSalaryShiftWindowDays,
+                    onSalaryCategorySelected = viewModel::setSalaryCategoryId,
+                    onSalaryKeywordsToggled = viewModel::setSalaryKeywordsForUncategorized,
                     onDeleteAccount = viewModel::deleteAccount,
                     onDeleteCategory = viewModel::deleteCategory,
-                    onCategoryColorSelected = viewModel::updateCategoryColor
+                    onCategoryColorSelected = viewModel::updateCategoryColor,
+                    onDeleteAllData = viewModel::deleteAllSavedData
                 )
             }
         }
@@ -467,7 +502,9 @@ private fun androidx.compose.foundation.lazy.LazyListScope.budgetContent(
 
 private fun androidx.compose.foundation.lazy.LazyListScope.summaryContent(
     state: FinanceUiState,
-    onMonthSelected: (YearMonth) -> Unit
+    onMonthSelected: (YearMonth) -> Unit,
+    onToggleSummaryAccount: (Long) -> Unit,
+    onClearSummaryAccountFilter: () -> Unit
 ) {
     item { LargeTitle("Monthly Summary", state.selectedMonth.shortLabel()) }
     item {
@@ -477,13 +514,17 @@ private fun androidx.compose.foundation.lazy.LazyListScope.summaryContent(
             onSelected = onMonthSelected
         )
     }
+    if (state.accounts.isNotEmpty()) {
+        item {
+            SummaryAccountFilterRow(
+                state = state,
+                onToggleAccount = onToggleSummaryAccount,
+                onClearFilter = onClearSummaryAccountFilter
+            )
+        }
+    }
     item {
-        MetricGrid(
-            income = state.monthIncome,
-            expense = state.monthExpense,
-            net = state.monthNet,
-            currency = state.currency
-        )
+        MetricGrid(state = state)
     }
     item { CashFlowGraph(state) }
     item { DailyExpenseBarGraph(state) }
@@ -496,9 +537,14 @@ private fun androidx.compose.foundation.lazy.LazyListScope.settingsContent(
     onAddCategory: (Boolean) -> Unit,
     onCurrencySelected: (CurrencyOption) -> Unit,
     onThemeSelected: (ThemeMode) -> Unit,
+    onSalaryShiftChanged: (Boolean) -> Unit,
+    onSalaryWindowDaysChanged: (Int) -> Unit,
+    onSalaryCategorySelected: (Long?) -> Unit,
+    onSalaryKeywordsToggled: (Boolean) -> Unit,
     onDeleteAccount: (Long) -> Unit,
     onDeleteCategory: (Long) -> Unit,
-    onCategoryColorSelected: (Long, String) -> Unit
+    onCategoryColorSelected: (Long, String) -> Unit,
+    onDeleteAllData: () -> Unit
 ) {
     item {
         ProfileHeader(state)
@@ -519,6 +565,21 @@ private fun androidx.compose.foundation.lazy.LazyListScope.settingsContent(
         )
     }
     item {
+        SummaryBehaviorSettings(
+            salaryShiftEnabled = state.salaryShiftIncomeEnabled,
+            windowDays = state.salaryShiftWindowDays,
+            onSalaryShiftChanged = onSalaryShiftChanged,
+            onWindowDaysChanged = onSalaryWindowDaysChanged
+        )
+    }
+    item {
+        SalaryCategorySettings(
+            state = state,
+            onSalaryCategorySelected = onSalaryCategorySelected,
+            onSalaryKeywordsToggled = onSalaryKeywordsToggled
+        )
+    }
+    item {
         CategorySettingsGroup(
             categories = state.categories,
             onDelete = onDeleteCategory,
@@ -536,6 +597,73 @@ private fun androidx.compose.foundation.lazy.LazyListScope.settingsContent(
             Spacer(Modifier.width(8.dp))
             Text("Create Category", fontWeight = FontWeight.Bold)
         }
+    }
+    item {
+        DeleteDataPanel(onDeleteAllData = onDeleteAllData)
+    }
+}
+
+@Composable
+private fun DeleteDataPanel(onDeleteAllData: () -> Unit) {
+    var showConfirm by remember { mutableStateOf(false) }
+
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        LabelText("DATA")
+        ElevatedPanel {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconTile(Icons.Rounded.Warning, LossRed)
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Saved app data", color = TextPrimary, style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            "Clear scanned SMS transactions, accounts, budgets, categories, and settings.",
+                            color = TextDim,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                }
+                OutlinedButton(
+                    onClick = { showConfirm = true },
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, LossRed)
+                ) {
+                    Text("Delete All Saved Data", color = LossRed, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+
+    if (showConfirm) {
+        AlertDialog(
+            onDismissRequest = { showConfirm = false },
+            title = { Text("Delete all saved data?") },
+            text = {
+                Text(
+                    "This removes the local app database: transactions, detected drafts, accounts, budgets, custom categories, and setup choices.",
+                    color = TextMuted
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showConfirm = false
+                        onDeleteAllData()
+                    }
+                ) {
+                    Text("Delete", color = LossRed, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showConfirm = false }) {
+                    Text("Cancel")
+                }
+            },
+            containerColor = Navy850,
+            titleContentColor = TextPrimary,
+            textContentColor = TextMuted
+        )
     }
 }
 
@@ -1466,20 +1594,345 @@ private fun ActivityDateFilterPanel(
     }
 }
 
+private val OtherIncomeGold = Color(0xFFFFC857)
+
 @Composable
-private fun MetricGrid(income: Double, expense: Double, net: Double, currency: CurrencyOption) {
+private fun MetricGrid(state: FinanceUiState) {
+    val currency = state.currency
+    val salary = state.monthSalaryIncome
+    val other = state.monthOtherIncome
+    val expense = state.monthExpense
+    val net = state.monthNet
+    val totalIncome = state.monthIncome
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            SmallMetric("Income", money(income, currency), MoneyGreen, Modifier.weight(1f))
-            SmallMetric("Expenses", money(expense, currency), LossRed, Modifier.weight(1f))
+            ElevatedPanel(modifier = Modifier.weight(1f).height(124.dp)) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.Center) {
+                    Text("Income", color = TextDim, style = MaterialTheme.typography.bodyMedium)
+                    when {
+                        salary > 0.0 || other > 0.0 -> {
+                            Text(
+                                money(salary, currency),
+                                color = MoneyGreen,
+                                style = MaterialTheme.typography.headlineMedium,
+                                maxLines = 1
+                            )
+                            if (other > 0.0) {
+                                Text(
+                                    "+ ${money(other, currency)} other",
+                                    color = OtherIncomeGold,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                        else -> {
+                            Text(
+                                money(totalIncome, currency),
+                                color = MoneyGreen,
+                                style = MaterialTheme.typography.headlineMedium,
+                                maxLines = 1
+                            )
+                        }
+                    }
+                }
+            }
+            SmallMetric("Expenses", money(expense, currency), LossRed, Modifier.weight(1f), boxHeight = 124.dp)
         }
         SmallMetric("Net Total", money(net, currency), if (net >= 0) PrimarySoft else LossRed, Modifier.fillMaxWidth())
+        if (state.salaryShiftIncomeEnabled &&
+            kotlin.math.abs(state.calendarMonthIncomeTotal - totalIncome) > 0.01
+        ) {
+            Text(
+                "Bank credits this month (calendar): ${money(state.calendarMonthIncomeTotal, currency)} - Summary income uses payroll shift.",
+                color = TextDim,
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
     }
 }
 
 @Composable
-private fun SmallMetric(label: String, value: String, valueColor: Color, modifier: Modifier) {
-    ElevatedPanel(modifier = modifier.height(104.dp)) {
+private fun SummaryAccountFilterRow(
+    state: FinanceUiState,
+    onToggleAccount: (Long) -> Unit,
+    onClearFilter: () -> Unit
+) {
+    val allSelected = state.summarySelectedAccountIds.isEmpty()
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        LabelText("SUMMARY ACCOUNTS")
+        ChipRow {
+            MoneyChip(
+                label = "All",
+                selected = allSelected,
+                onClick = onClearFilter
+            )
+            state.accounts.forEach { account ->
+                val selected =
+                    !allSelected && account.id in state.summarySelectedAccountIds
+                MoneyChip(
+                    label = account.name,
+                    selected = selected,
+                    onClick = { onToggleAccount(account.id) }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun MonthBalanceStrip(state: FinanceUiState) {
+    ElevatedPanel {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("Cash balance (calendar)", color = TextPrimary, style = MaterialTheme.typography.titleMedium)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("Start of month", color = TextDim, style = MaterialTheme.typography.bodyMedium)
+                Text(state.money(state.balanceAtStartOfSelectedMonth), color = TextPrimary, style = MaterialTheme.typography.titleMedium)
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("End of month", color = TextDim, style = MaterialTheme.typography.bodyMedium)
+                Text(state.money(state.balanceAtEndOfSelectedMonth), color = TextPrimary, style = MaterialTheme.typography.titleMedium)
+            }
+            if (state.salaryShiftIncomeEnabled) {
+                Text(
+                    "Summary income includes late-month credits in the next month; balances above follow actual dates.",
+                    color = TextDim,
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SummaryBehaviorSettings(
+    salaryShiftEnabled: Boolean,
+    windowDays: Int,
+    onSalaryShiftChanged: (Boolean) -> Unit,
+    onWindowDaysChanged: (Int) -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        LabelText("MONTHLY SUMMARY")
+        ElevatedPanel {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Payroll month for income", color = TextPrimary, style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            "Credits in the last days of a month can count toward the next month on Summary.",
+                            color = TextDim,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                    Switch(
+                        checked = salaryShiftEnabled,
+                        onCheckedChange = onSalaryShiftChanged
+                    )
+                }
+                if (salaryShiftEnabled) {
+                    Text("Payday window (last N days)", color = TextMuted, style = MaterialTheme.typography.labelMedium)
+                    ChipRow {
+                        listOf(3, 5, 7, 10, 14).forEach { days ->
+                            MoneyChip(
+                                "$days d",
+                                selected = windowDays == days,
+                                onClick = { onWindowDaysChanged(days) }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BankSmsSetupScreen(
+    state: FinanceUiState,
+    onMapBank: (String, Long) -> Unit,
+    onCreateAccount: (String, String) -> Unit,
+    onSkip: () -> Unit,
+    onDone: () -> Unit
+) {
+    val banks = remember(state.discoveredSmsBanks, state.transactions) {
+        val fromDiscovery = state.discoveredSmsBanks
+        val fromTx = state.transactions.mapNotNull { it.smsBankLabel }.distinct()
+        usefulSmsAccountLabels(fromDiscovery + fromTx)
+    }
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Navy950)
+            .statusBarsPadding()
+            .verticalScroll(rememberScrollState())
+            .padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        LargeTitle("Link bank SMS", "Map each detected SMS account label to a saved account, or name it now.")
+        if (banks.isEmpty()) {
+            Text(
+                "We will detect bank names from transaction SMS after you use the app. You can skip and map accounts anytime.",
+                color = TextDim,
+                style = MaterialTheme.typography.bodyMedium
+            )
+        } else {
+            banks.forEach { bank ->
+                var newAccountName by remember(bank) { mutableStateOf("") }
+                val examples = remember(bank, state.transactions) {
+                    state.transactions
+                        .filter { SmsBankKeys.normalize(it.smsBankLabel.orEmpty()) == SmsBankKeys.normalize(bank) }
+                        .take(2)
+                }
+                ElevatedPanel {
+                    Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text(bank, color = TextPrimary, style = MaterialTheme.typography.titleMedium)
+                        if (examples.isNotEmpty()) {
+                            examples.forEach { tx ->
+                                Text(
+                                    "${tx.name} - ${state.money(tx.amount)}",
+                                    color = TextDim,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                        LabelText("MAP TO ACCOUNT")
+                        ChipRow {
+                            state.accounts.forEach { account ->
+                                val keyMatch =
+                                    account.smsMatchKey?.let { SmsBankKeys.normalize(it) == SmsBankKeys.normalize(bank) } == true
+                                MoneyChip(
+                                    label = account.name,
+                                    selected = keyMatch,
+                                    onClick = { onMapBank(bank, account.id) }
+                                )
+                            }
+                        }
+                        LabelText("OR CREATE ACCOUNT")
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            OutlinedTextField(
+                                value = newAccountName,
+                                onValueChange = { newAccountName = it },
+                                modifier = Modifier.weight(1f),
+                                label = { Text("Account name") },
+                                singleLine = true,
+                                colors = inputColors(),
+                                shape = RoundedCornerShape(12.dp)
+                            )
+                            Button(
+                                onClick = {
+                                    onCreateAccount(bank, newAccountName)
+                                    newAccountName = ""
+                                },
+                                enabled = newAccountName.isNotBlank(),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = primaryButtonColors()
+                            ) {
+                                Text("Add")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            OutlinedButton(onClick = onSkip, modifier = Modifier.weight(1f)) {
+                Text("Skip")
+            }
+            Button(onClick = onDone, modifier = Modifier.weight(1f), colors = primaryButtonColors()) {
+                Text("Continue")
+            }
+        }
+    }
+}
+
+private fun usefulSmsAccountLabels(labels: List<String>): List<String> {
+    val cleaned = labels
+        .map { it.trim() }
+        .filter { it.isNotEmpty() }
+        .distinct()
+    val accountSpecific = cleaned.filter { it.contains(" A/C ", ignoreCase = true) }
+    val accountSpecificBases = accountSpecific
+        .map { SmsBankKeys.normalize(it.substringBefore(" A/C ")) }
+        .toSet()
+    return cleaned
+        .filterNot { SmsBankKeys.normalize(it) in setOf("BANK", "ACCOUNT", "A/C", "CARD") }
+        .filterNot { label ->
+            !label.contains(" A/C ", ignoreCase = true) &&
+                SmsBankKeys.normalize(label) in accountSpecificBases
+        }
+        .sortedWith(compareByDescending<String> { it.contains(" A/C ", ignoreCase = true) }.thenBy { it })
+}
+
+@Composable
+private fun SalaryCategorySettings(
+    state: FinanceUiState,
+    onSalaryCategorySelected: (Long?) -> Unit,
+    onSalaryKeywordsToggled: (Boolean) -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        LabelText("SALARY ON SUMMARY")
+        ElevatedPanel {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    "The income tile highlights salary separately; other income appears in gold.",
+                    color = TextDim,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                LabelText("SALARY CATEGORY")
+                ChipRow {
+                    MoneyChip(
+                        "None",
+                        selected = state.salaryCategoryId == null,
+                        onClick = { onSalaryCategorySelected(null) }
+                    )
+                    state.categories.forEach { cat ->
+                        MoneyChip(
+                            cat.name,
+                            selected = state.salaryCategoryId == cat.id,
+                            onClick = { onSalaryCategorySelected(cat.id) }
+                        )
+                    }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            "Salary keywords for Uncategorized",
+                            color = TextPrimary,
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        Text(
+                            "Treat matching payroll SMS as salary when still Uncategorized.",
+                            color = TextDim,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                    Switch(
+                        checked = state.salaryKeywordsForUncategorized,
+                        onCheckedChange = onSalaryKeywordsToggled
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SmallMetric(
+    label: String,
+    value: String,
+    valueColor: Color,
+    modifier: Modifier,
+    boxHeight: Dp = 104.dp
+) {
+    ElevatedPanel(modifier = modifier.height(boxHeight)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.Center) {
             Text(label, color = TextDim, style = MaterialTheme.typography.bodyMedium)
             Text(value, color = valueColor, style = MaterialTheme.typography.headlineMedium, maxLines = 1)
@@ -1890,7 +2343,7 @@ private fun DailyExpenseBar(day: Int, segments: List<Pair<CategoryItem, Double>>
 private fun CategoryPieChart(state: FinanceUiState, totals: List<MonthlyCategoryTotal>) {
     ElevatedPanel {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            SectionHeader("Pie Chart", "Outgoing by Category")
+            SectionHeader("Pie Chart", "Expenses by category")
             val expenses = totals.filter { it.expense > 0.0 }
             val total = expenses.sumOf { it.expense }.toFloat()
             if (total <= 0f) {
@@ -1898,10 +2351,10 @@ private fun CategoryPieChart(state: FinanceUiState, totals: List<MonthlyCategory
             } else {
                 Canvas(modifier = Modifier.align(Alignment.CenterHorizontally).size(170.dp)) {
                     var startAngle = -90f
-                    expenses.forEachIndexed { index, item ->
+                    expenses.forEach { item ->
                         val sweep = (item.expense.toFloat() / total) * 360f
                         drawArc(
-                            color = chartColors[index % chartColors.size],
+                            color = categoryColor(item.category, TransactionType.Expense),
                             startAngle = startAngle,
                             sweepAngle = sweep,
                             useCenter = false,
@@ -1912,9 +2365,12 @@ private fun CategoryPieChart(state: FinanceUiState, totals: List<MonthlyCategory
                         startAngle += sweep
                     }
                 }
-                expenses.forEachIndexed { index, item ->
+                expenses.forEach { item ->
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(10.dp).clip(CircleShape).background(chartColors[index % chartColors.size]))
+                        Box(
+                            Modifier.size(10.dp).clip(CircleShape)
+                                .background(categoryColor(item.category, TransactionType.Expense))
+                        )
                         Spacer(Modifier.width(8.dp))
                         Text(item.category.name, color = TextMuted, modifier = Modifier.weight(1f))
                         Text(state.money(item.expense), color = TextPrimary)
@@ -1928,23 +2384,22 @@ private fun CategoryPieChart(state: FinanceUiState, totals: List<MonthlyCategory
 @Composable
 private fun CategoryHistoryGraph(state: FinanceUiState, totals: List<MonthlyCategoryTotal>) {
     val visibleTotals = totals
-        .filter { it.income > 0.0 || it.expense > 0.0 }
-        .sortedByDescending { it.income + it.expense }
-    val max = visibleTotals.maxOfOrNull { it.income + it.expense }?.coerceAtLeast(1.0) ?: 1.0
+        .filter { it.expense > 0.0 }
+        .sortedByDescending { it.expense }
+    val max = visibleTotals.maxOfOrNull { it.expense }?.coerceAtLeast(1.0) ?: 1.0
 
     ElevatedPanel {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            SectionHeader("Category History", state.selectedMonth.shortLabel())
+            SectionHeader("Category History", "Spending · ${state.selectedMonth.shortLabel()}")
             if (visibleTotals.isEmpty()) {
-                EmptyPanel("No category history for this month.")
+                EmptyPanel("No category expenses for this month.")
             } else {
                 visibleTotals.forEach { item ->
-                    val total = item.income + item.expense
                     SegmentAmountRow(
                         label = item.category.name,
-                        value = state.money(total),
-                        color = categoryColor(item.category, if (item.expense >= item.income) TransactionType.Expense else TransactionType.Income),
-                        progress = (total / max).toFloat()
+                        value = state.money(item.expense),
+                        color = categoryColor(item.category, TransactionType.Expense),
+                        progress = (item.expense / max).toFloat()
                     )
                 }
             }
@@ -2259,11 +2714,13 @@ private fun availableMonths(state: FinanceUiState): List<YearMonth> {
 
 private fun categoryTotals(state: FinanceUiState): List<MonthlyCategoryTotal> {
     return state.categories.map { category ->
-        val transactions = state.monthTransactions.filter { it.categoryId == category.id }
+        val expense = state.monthTransactions
+            .filter { it.categoryId == category.id && it.type == TransactionType.Expense }
+            .sumOf { it.amount }
         MonthlyCategoryTotal(
             category = category,
-            income = transactions.filter { it.type == TransactionType.Income }.sumOf { it.amount },
-            expense = transactions.filter { it.type == TransactionType.Expense }.sumOf { it.amount }
+            income = 0.0,
+            expense = expense
         )
     }
 }
@@ -2323,17 +2780,6 @@ private fun money(value: Double, currency: CurrencyOption): String {
     formatter.maximumFractionDigits = 2
     return formatter.format(value)
 }
-
-private val chartColors = listOf(
-    Color(0xFF4F8CFF),
-    Color(0xFF38E68B),
-    Color(0xFFFFC857),
-    Color(0xFFFF4FB8),
-    Color(0xFFFF8A3D),
-    Color(0xFF9B5CFF),
-    Color(0xFF00D1C1),
-    Color(0xFFFF6B7A)
-)
 
 private val categoryPalette = listOf(
     "#8F95A3",

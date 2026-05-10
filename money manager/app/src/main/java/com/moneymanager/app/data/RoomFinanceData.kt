@@ -30,14 +30,21 @@ data class UserSettingsEntity(
     @PrimaryKey val id: Long = 1,
     val userName: String,
     val currencyCode: String,
-    val themeMode: String
+    val themeMode: String,
+    val salaryShiftIncomeEnabled: Boolean = false,
+    val salaryShiftWindowDays: Int = 5,
+    val salaryCategoryId: Long? = null,
+    val salaryKeywordsForUncategorized: Boolean = true,
+    val bankSmsSetupCompleted: Boolean = false,
+    val summaryAccountFilterIdsCsv: String = ""
 )
 
 @Entity(tableName = "accounts")
 data class AccountEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val name: String,
-    val balance: Double
+    val balance: Double,
+    val smsMatchKey: String? = null
 )
 
 @Entity(tableName = "categories")
@@ -59,7 +66,9 @@ data class TransactionEntity(
     val accountId: Long?,
     val timestampMillis: Long,
     val isAutoDetected: Boolean,
-    val rawMessage: String?
+    val rawMessage: String?,
+    val smsBankLabel: String? = null,
+    val excludeFromSummary: Boolean = false
 )
 
 @Entity(tableName = "budgets")
@@ -140,6 +149,24 @@ interface FinanceDao {
 
     @Query("SELECT * FROM detected_drafts ORDER BY detectedAtMillis DESC")
     suspend fun getDrafts(): List<DetectedDraftEntity>
+
+    @Query("DELETE FROM user_settings")
+    suspend fun deleteSettings()
+
+    @Query("DELETE FROM accounts")
+    suspend fun deleteAccounts()
+
+    @Query("DELETE FROM transactions")
+    suspend fun deleteTransactions()
+
+    @Query("DELETE FROM budgets")
+    suspend fun deleteBudgets()
+
+    @Query("DELETE FROM detected_drafts")
+    suspend fun deleteDrafts()
+
+    @Query("DELETE FROM categories WHERE isDefault = 0")
+    suspend fun deleteCustomCategories()
 }
 
 @Database(
@@ -151,7 +178,7 @@ interface FinanceDao {
         BudgetEntity::class,
         DetectedDraftEntity::class
     ],
-    version = 5
+    version = 7
 )
 abstract class FinanceDatabase : RoomDatabase() {
     abstract fun dao(): FinanceDao
@@ -166,7 +193,14 @@ abstract class FinanceDatabase : RoomDatabase() {
                     FinanceDatabase::class.java,
                     "money_manager.db"
                 )
-                    .addMigrations(Migration1To2, Migration2To3, Migration3To4, Migration4To5)
+                    .addMigrations(
+                        Migration1To2,
+                        Migration2To3,
+                        Migration3To4,
+                        Migration4To5,
+                        Migration5To6,
+                        Migration6To7
+                    )
                     .build()
                     .also { instance = it }
             }
@@ -201,6 +235,37 @@ abstract class FinanceDatabase : RoomDatabase() {
                 db.execSQL("UPDATE transactions SET categoryId = 0 WHERE isAutoDetected = 1")
             }
         }
+
+        private val Migration5To6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE user_settings ADD COLUMN salaryShiftIncomeEnabled INTEGER NOT NULL DEFAULT 0"
+                )
+                db.execSQL(
+                    "ALTER TABLE user_settings ADD COLUMN salaryShiftWindowDays INTEGER NOT NULL DEFAULT 5"
+                )
+            }
+        }
+
+        private val Migration6To7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE transactions ADD COLUMN smsBankLabel TEXT")
+                db.execSQL(
+                    "ALTER TABLE transactions ADD COLUMN excludeFromSummary INTEGER NOT NULL DEFAULT 0"
+                )
+                db.execSQL("ALTER TABLE accounts ADD COLUMN smsMatchKey TEXT")
+                db.execSQL("ALTER TABLE user_settings ADD COLUMN salaryCategoryId INTEGER")
+                db.execSQL(
+                    "ALTER TABLE user_settings ADD COLUMN salaryKeywordsForUncategorized INTEGER NOT NULL DEFAULT 1"
+                )
+                db.execSQL(
+                    "ALTER TABLE user_settings ADD COLUMN bankSmsSetupCompleted INTEGER NOT NULL DEFAULT 0"
+                )
+                db.execSQL(
+                    "ALTER TABLE user_settings ADD COLUMN summaryAccountFilterIdsCsv TEXT NOT NULL DEFAULT ''"
+                )
+            }
+        }
     }
 }
 
@@ -216,6 +281,16 @@ class FinanceRepository(private val dao: FinanceDao) {
             themeMode = settings?.themeMode?.let { mode ->
                 ThemeMode.entries.firstOrNull { it.name == mode }
             } ?: ThemeMode.Dark,
+            salaryShiftIncomeEnabled = settings?.salaryShiftIncomeEnabled ?: false,
+            salaryShiftWindowDays = settings?.salaryShiftWindowDays?.coerceIn(1, 14) ?: 5,
+            salaryCategoryId = settings?.salaryCategoryId,
+            salaryKeywordsForUncategorized = settings?.salaryKeywordsForUncategorized ?: true,
+            bankSmsSetupCompleted = settings?.bankSmsSetupCompleted ?: false,
+            summarySelectedAccountIds = settings?.summaryAccountFilterIdsCsv
+                ?.split(",")
+                ?.mapNotNull { it.trim().toLongOrNull() }
+                ?.toSet()
+                ?: emptySet(),
             accounts = dao.getAccounts().map { it.toModel() },
             categories = dao.getCategories().map { it.toModel() },
             transactions = dao.getTransactions().map { it.toModel() },
@@ -224,18 +299,48 @@ class FinanceRepository(private val dao: FinanceDao) {
         )
     }
 
-    suspend fun saveSettings(name: String, currency: CurrencyOption, themeMode: ThemeMode) {
-        dao.saveSettings(
-            UserSettingsEntity(
-                userName = name,
-                currencyCode = currency.currencyCode,
-                themeMode = themeMode.name
+    suspend fun persistUserSettings(state: FinanceUiState) {
+        dao.saveSettings(state.toSettingsEntity())
+    }
+
+    suspend fun addAccount(name: String, balance: Double, smsMatchKey: String? = null) {
+        dao.saveAccount(
+            AccountEntity(
+                name = name,
+                balance = balance,
+                smsMatchKey = smsMatchKey?.trim()?.takeIf { it.isNotEmpty() }
             )
         )
     }
 
-    suspend fun addAccount(name: String, balance: Double) {
-        dao.saveAccount(AccountEntity(name = name, balance = balance))
+    suspend fun updateAccount(account: BankAccount) {
+        dao.saveAccount(
+            AccountEntity(
+                id = account.id,
+                name = account.name,
+                balance = account.balance,
+                smsMatchKey = account.smsMatchKey?.trim()?.takeIf { it.isNotEmpty() }
+            )
+        )
+    }
+
+    suspend fun remapTransactionAccountsFromSmsLabels() {
+        val accounts = dao.getAccounts().map { it.toModel() }
+        if (accounts.isEmpty()) return
+        for (entity in dao.getTransactions()) {
+            val tx = entity.toModel()
+            val parsedLabel = tx.rawMessage
+                ?.let { TransactionMessageParser.parse(it, tx.timestampMillis)?.bankName }
+            val label = parsedLabel ?: tx.smsBankLabel ?: continue
+            val resolved = SmsBankKeys.resolveAccountId(label, accounts)
+            val next = tx.copy(
+                smsBankLabel = label,
+                accountId = resolved ?: tx.accountId
+            )
+            if (next.accountId != tx.accountId || next.smsBankLabel != tx.smsBankLabel) {
+                dao.saveTransaction(next.toEntity(tx.id))
+            }
+        }
     }
 
     suspend fun addCategory(category: CategoryItem) {
@@ -264,12 +369,48 @@ class FinanceRepository(private val dao: FinanceDao) {
     suspend fun deleteAccount(id: Long) = dao.deleteAccount(id)
     suspend fun deleteCustomCategory(id: Long) = dao.deleteCustomCategory(id)
 
+    suspend fun clearAllSavedData() {
+        dao.deleteDrafts()
+        dao.deleteTransactions()
+        dao.deleteBudgets()
+        dao.deleteAccounts()
+        dao.deleteCustomCategories()
+        dao.deleteSettings()
+        seedDefaultCategories()
+    }
+
+    suspend fun cleanupCreditCardRepaymentArtifacts() {
+        dao.getTransactions().forEach { entity ->
+            val tx = entity.toModel()
+            if (SmsTransactionNormalizer.isNonLedgerTransactionArtifact(tx.rawMessage, tx.type)) {
+                dao.deleteTransaction(tx.id)
+            }
+        }
+    }
+
     private suspend fun seedDefaultCategories() {
         DefaultCategories.items.forEach { dao.seedCategory(it.toEntity()) }
     }
 }
 
-private fun AccountEntity.toModel() = BankAccount(id = id, name = name, balance = balance)
+private fun FinanceUiState.toSettingsEntity(): UserSettingsEntity = UserSettingsEntity(
+    userName = userName,
+    currencyCode = currency.currencyCode,
+    themeMode = themeMode.name,
+    salaryShiftIncomeEnabled = salaryShiftIncomeEnabled,
+    salaryShiftWindowDays = salaryShiftWindowDays.coerceIn(1, 14),
+    salaryCategoryId = salaryCategoryId,
+    salaryKeywordsForUncategorized = salaryKeywordsForUncategorized,
+    bankSmsSetupCompleted = bankSmsSetupCompleted,
+    summaryAccountFilterIdsCsv = summarySelectedAccountIds.joinToString(",")
+)
+
+private fun AccountEntity.toModel() = BankAccount(
+    id = id,
+    name = name,
+    balance = balance,
+    smsMatchKey = smsMatchKey
+)
 
 private fun CategoryEntity.toModel() = CategoryItem(
     id = id,
@@ -297,7 +438,9 @@ private fun TransactionEntity.toModel() = LedgerTransaction(
     accountId = accountId,
     timestampMillis = timestampMillis,
     isAutoDetected = isAutoDetected,
-    rawMessage = rawMessage
+    rawMessage = rawMessage,
+    smsBankLabel = smsBankLabel,
+    excludeFromSummary = excludeFromSummary
 )
 
 private fun LedgerTransaction.toEntity(id: Long = this.id) = TransactionEntity(
@@ -309,7 +452,9 @@ private fun LedgerTransaction.toEntity(id: Long = this.id) = TransactionEntity(
     accountId = accountId,
     timestampMillis = timestampMillis,
     isAutoDetected = isAutoDetected,
-    rawMessage = rawMessage
+    rawMessage = rawMessage,
+    smsBankLabel = smsBankLabel,
+    excludeFromSummary = excludeFromSummary
 )
 
 private fun BudgetEntity.toModel() = BudgetPlan(
