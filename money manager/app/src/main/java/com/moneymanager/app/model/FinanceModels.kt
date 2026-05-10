@@ -48,8 +48,15 @@ enum class MessageScanRange(val label: String) {
     Custom("Custom Range")
 }
 
+enum class ActivityDateFilter(val label: String) {
+    Today("Today"),
+    Week("Last 7 Days"),
+    Month("This Month"),
+    Custom("Custom")
+}
+
 enum class ScreenTab(val label: String, val icon: ImageVector) {
-    Dashboard("Dashboard", Icons.Rounded.GridView),
+    Dashboard("Today", Icons.Rounded.GridView),
     Activity("Activity", Icons.AutoMirrored.Rounded.ReceiptLong),
     Budget("Budget", Icons.Rounded.PieChart),
     Summary("Summary", Icons.Rounded.BarChart),
@@ -83,7 +90,8 @@ data class CategoryItem(
     val name: String,
     val iconKey: String,
     val icon: ImageVector,
-    val isDefault: Boolean
+    val isDefault: Boolean,
+    val colorHex: String
 )
 
 data class LedgerTransaction(
@@ -115,7 +123,8 @@ data class DetectedTransactionDraft(
     val counterparty: String,
     val rawMessage: String,
     val suggestedCategoryId: Long?,
-    val detectedAtMillis: Long
+    val detectedAtMillis: Long,
+    val transactionTimestampMillis: Long
 )
 
 data class BudgetWarning(
@@ -142,6 +151,10 @@ data class FinanceUiState(
     val transactions: List<LedgerTransaction> = emptyList(),
     val budgets: List<BudgetPlan> = emptyList(),
     val detectedDrafts: List<DetectedTransactionDraft> = emptyList(),
+    val activityDateFilter: ActivityDateFilter = ActivityDateFilter.Today,
+    val activityStartDate: java.time.LocalDate = java.time.LocalDate.now(),
+    val activityEndDate: java.time.LocalDate = java.time.LocalDate.now(),
+    val scanStatusMessage: String = "",
     val dashboardDraftPage: Int = 1,
     val dashboardTransactionPage: Int = 1,
     val activityTransactionPage: Int = 1,
@@ -151,6 +164,8 @@ data class FinanceUiState(
     val showCategorySheet: Boolean = false,
     val showEditCategorySheet: Boolean = false,
     val editingTransactionId: Long? = null,
+    val showTransactionDetailSheet: Boolean = false,
+    val selectedTransactionId: Long? = null,
     val budgetWarning: BudgetWarning? = null
 ) {
     val hasCompletedRegistration: Boolean = userName.isNotBlank()
@@ -179,44 +194,57 @@ data class FinanceUiState(
     val activeBudgets: List<BudgetPlan>
         get() = budgets.filter { it.month == selectedMonth }
 
+    val todayTransactions: List<LedgerTransaction>
+        get() = transactions.filter { it.transactionDate() == java.time.LocalDate.now() }
+
+    val todayDetectedDrafts: List<DetectedTransactionDraft>
+        get() = detectedDrafts.filter { it.transactionDate() == java.time.LocalDate.now() }
+
+    val activityTransactions: List<LedgerTransaction>
+        get() = transactions.filter {
+            val date = it.transactionDate()
+            !date.isBefore(activityStartDate) && !date.isAfter(activityEndDate)
+        }
+
     val dashboardTransactionPageCount: Int
-        get() = ((transactions.size + TRANSACTIONS_PER_PAGE - 1) / TRANSACTIONS_PER_PAGE)
+        get() = ((todayTransactions.size + TRANSACTIONS_PER_PAGE - 1) / TRANSACTIONS_PER_PAGE)
             .coerceAtLeast(1)
 
     val dashboardCurrentPage: Int
         get() = dashboardTransactionPage.coerceIn(1, dashboardTransactionPageCount)
 
     val dashboardPagedTransactions: List<LedgerTransaction>
-        get() = transactions
+        get() = todayTransactions
             .drop((dashboardCurrentPage - 1) * TRANSACTIONS_PER_PAGE)
             .take(TRANSACTIONS_PER_PAGE)
 
     val dashboardDraftPageCount: Int
-        get() = ((detectedDrafts.size + TRANSACTIONS_PER_PAGE - 1) / TRANSACTIONS_PER_PAGE)
+        get() = ((todayDetectedDrafts.size + TRANSACTIONS_PER_PAGE - 1) / TRANSACTIONS_PER_PAGE)
             .coerceAtLeast(1)
 
     val dashboardCurrentDraftPage: Int
         get() = dashboardDraftPage.coerceIn(1, dashboardDraftPageCount)
 
     val dashboardPagedDrafts: List<DetectedTransactionDraft>
-        get() = detectedDrafts
+        get() = todayDetectedDrafts
             .drop((dashboardCurrentDraftPage - 1) * TRANSACTIONS_PER_PAGE)
             .take(TRANSACTIONS_PER_PAGE)
 
     val pagedTransactions: List<LedgerTransaction>
-        get() = transactions.take((activityTransactionPage.coerceAtLeast(1)) * TRANSACTIONS_PER_PAGE)
+        get() = activityTransactions.take((activityTransactionPage.coerceAtLeast(1)) * TRANSACTIONS_PER_PAGE)
 
     val hasMoreTransactions: Boolean
-        get() = pagedTransactions.size < transactions.size
+        get() = pagedTransactions.size < activityTransactions.size
 }
 
 object DefaultCategories {
     val items = listOf(
-        CategoryItem(1, "Grocery", "grocery", Icons.Rounded.LocalGroceryStore, true),
-        CategoryItem(2, "Food", "food", Icons.Rounded.Dining, true),
-        CategoryItem(3, "Shopping", "shopping", Icons.Rounded.ShoppingBag, true),
-        CategoryItem(4, "Fuel", "fuel", Icons.Rounded.LocalGasStation, true),
-        CategoryItem(5, "Rent", "rent", Icons.Rounded.Home, true)
+        CategoryItem(0, "Uncategorized", "category", Icons.Rounded.Category, true, "#8F95A3"),
+        CategoryItem(1, "Grocery", "grocery", Icons.Rounded.LocalGroceryStore, true, "#38E68B"),
+        CategoryItem(2, "Food", "food", Icons.Rounded.Dining, true, "#FFC857"),
+        CategoryItem(3, "Shopping", "shopping", Icons.Rounded.ShoppingBag, true, "#FF4FB8"),
+        CategoryItem(4, "Fuel", "fuel", Icons.Rounded.LocalGasStation, true, "#FF8A3D"),
+        CategoryItem(5, "Rent", "rent", Icons.Rounded.Home, true, "#FF6B7A")
     )
 }
 

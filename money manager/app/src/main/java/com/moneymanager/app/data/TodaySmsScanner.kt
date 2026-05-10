@@ -41,10 +41,12 @@ class TodaySmsScanner(private val context: Context) {
             args,
             "${Telephony.Sms.DATE} DESC"
         )?.use { cursor ->
+            val dateIndex = cursor.getColumnIndexOrThrow(Telephony.Sms.DATE)
             val bodyIndex = cursor.getColumnIndexOrThrow(Telephony.Sms.BODY)
             while (cursor.moveToNext()) {
+                val timestampMillis = cursor.getLong(dateIndex)
                 val body = cursor.getString(bodyIndex)
-                TransactionMessageParser.parse(body)?.let(messages::add)
+                TransactionMessageParser.parse(body, timestampMillis)?.let(messages::add)
             }
         }
 

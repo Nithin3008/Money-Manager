@@ -8,7 +8,8 @@ data class ParsedTransactionMessage(
     val amount: Double,
     val type: TransactionType,
     val counterparty: String,
-    val rawMessage: String
+    val rawMessage: String,
+    val transactionTimestampMillis: Long = System.currentTimeMillis()
 )
 
 object TransactionMessageParser {
@@ -21,17 +22,17 @@ object TransactionMessageParser {
         """(?i)\b(hdfc|icici|sbi|axis|kotak|yes bank|idfc|indusind|canara|union bank|pnb|bank of baroda|bob)\b"""
     )
 
-    // ✅ Fixed: Removed '?' inside interval and simplified
+    // ICICI-style merchant before debited/credited.
     private val merchantSemicolonRegex = Regex(
         """(?i);\s*([A-Z0-9 .&_-]{2,40})\s+(?:debited|credited)"""
     )
 
-    // ✅ Merchant after to/at/for (other banks)
+    // Merchant after to/at/for for other bank formats.
     private val merchantToRegex = Regex(
         """(?i)(?:to|at|for|towards)\s+([a-z0-9 .&_-]{3,40})"""
     )
 
-    fun parse(message: String): ParsedTransactionMessage? {
+    fun parse(message: String, transactionTimestampMillis: Long = System.currentTimeMillis()): ParsedTransactionMessage? {
         val normalized = message.replace('\n', ' ').trim()
         if (!looksLikeBankTransaction(normalized)) return null
 
@@ -43,7 +44,7 @@ object TransactionMessageParser {
 
         val lower = normalized.lowercase()
 
-        // ✅ Robust detection: Priority to "debited/credited for rs", then first occurring keyword
+        // Prefer direct debit/credit phrases, then fall back to the first keyword occurrence.
         val type = when {
             lower.contains("debited for rs") -> TransactionType.Expense
             lower.contains("credited for rs") -> TransactionType.Income
@@ -58,7 +59,7 @@ object TransactionMessageParser {
             ?.value?.trim()?.uppercase()
             ?: "Bank"
 
-        // ✅ Try semicolon pattern first (ICICI), then fallback to to/at/for
+        // Try the semicolon pattern first, then fall back to to/at/for.
         var counterparty = (
                 merchantSemicolonRegex.find(normalized)?.groupValues?.getOrNull(1)
                     ?: merchantToRegex.find(normalized)?.groupValues?.getOrNull(1)
@@ -81,7 +82,8 @@ object TransactionMessageParser {
             amount = amount,
             type = type,
             counterparty = counterparty.replaceFirstChar { it.uppercase() },
-            rawMessage = message
+            rawMessage = message,
+            transactionTimestampMillis = transactionTimestampMillis
         )
     }
 

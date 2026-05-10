@@ -17,6 +17,7 @@ import com.moneymanager.app.model.BudgetWarning
 import com.moneymanager.app.model.CategoryItem
 import com.moneymanager.app.model.CurrencyOption
 import com.moneymanager.app.model.DetectedTransactionDraft
+import com.moneymanager.app.model.ActivityDateFilter
 import com.moneymanager.app.model.FinanceUiState
 import com.moneymanager.app.model.LedgerTransaction
 import com.moneymanager.app.model.MoneyIcons
@@ -24,6 +25,8 @@ import com.moneymanager.app.model.ScreenTab
 import com.moneymanager.app.model.ThemeMode
 import com.moneymanager.app.model.TransactionType
 import com.moneymanager.app.model.month
+import java.time.Instant
+import java.time.ZoneId
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -47,7 +50,11 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
                 .filter { it.first.isNotBlank() && it.second >= 0.0 }
                 .forEach { repository.addAccount(it.first.trim(), it.second) }
             reloadState()
-            scanTodayMessages()
+            scanMessages(
+                range = MessageScanRange.Custom,
+                startDate = LocalDate.now().minusMonths(3),
+                endDate = LocalDate.now()
+            )
         }
     }
 
@@ -83,6 +90,32 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(selectedMonth = month) }
     }
 
+    fun setActivityDateFilter(
+        filter: ActivityDateFilter,
+        startDate: LocalDate? = null,
+        endDate: LocalDate? = null
+    ) {
+        val today = LocalDate.now()
+        val range = when (filter) {
+            ActivityDateFilter.Today -> today to today
+            ActivityDateFilter.Week -> today.minusDays(6) to today
+            ActivityDateFilter.Month -> today.withDayOfMonth(1) to today
+            ActivityDateFilter.Custom -> {
+                val start = startDate ?: _uiState.value.activityStartDate
+                val end = endDate ?: _uiState.value.activityEndDate
+                if (start <= end) start to end else end to start
+            }
+        }
+        _uiState.update {
+            it.copy(
+                activityDateFilter = filter,
+                activityStartDate = range.first,
+                activityEndDate = range.second,
+                activityTransactionPage = 1
+            )
+        }
+    }
+
     fun selectCurrency(currency: CurrencyOption) {
         viewModelScope.launch {
             repository.saveSettings(_uiState.value.userName, currency, _uiState.value.themeMode)
@@ -113,7 +146,7 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(budgetWarning = null) }
     }
 
-    fun addCategory(name: String, iconKey: String) {
+    fun addCategory(name: String, iconKey: String, colorHex: String = "#4F8CFF") {
         if (name.isBlank()) return
         viewModelScope.launch {
             repository.addCategory(
@@ -122,7 +155,8 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
                     name = name.trim(),
                     iconKey = iconKey,
                     icon = MoneyIcons.resolveCategoryIcon(iconKey),
-                    isDefault = false
+                    isDefault = false,
+                    colorHex = colorHex
                 )
             )
             reloadState { it.copy(showCategorySheet = false) }
@@ -176,23 +210,31 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
     fun deleteTransaction(id: Long) {
         viewModelScope.launch {
             repository.deleteTransaction(id)
-            reloadState()
+            reloadState { it.copy(showTransactionDetailSheet = false, selectedTransactionId = null) }
         }
     }
 
     fun requestEditTransactionCategory(transactionId: Long) {
-        _uiState.update { it.copy(showEditCategorySheet = true, editingTransactionId = transactionId) }
+        _uiState.update { it.copy(showTransactionDetailSheet = true, selectedTransactionId = transactionId) }
     }
 
     fun cancelEditTransactionCategory() {
-        _uiState.update { it.copy(showEditCategorySheet = false, editingTransactionId = null) }
+        _uiState.update { it.copy(showTransactionDetailSheet = false, selectedTransactionId = null) }
     }
 
     fun editTransactionCategory(transactionId: Long, categoryId: Long) {
         viewModelScope.launch {
             val transaction = _uiState.value.transactions.firstOrNull { it.id == transactionId } ?: return@launch
             repository.updateTransaction(transaction.copy(categoryId = categoryId))
-            reloadState { it.copy(showEditCategorySheet = false, editingTransactionId = null) }
+            reloadState { it.copy(showTransactionDetailSheet = false, selectedTransactionId = null) }
+        }
+    }
+
+    fun updateTransactionDetails(transactionId: Long, type: TransactionType, categoryId: Long) {
+        viewModelScope.launch {
+            val transaction = _uiState.value.transactions.firstOrNull { it.id == transactionId } ?: return@launch
+            repository.updateTransaction(transaction.copy(type = type, categoryId = categoryId))
+            reloadState { it.copy(showTransactionDetailSheet = false, selectedTransactionId = null) }
         }
     }
 
@@ -217,16 +259,53 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun updateCategoryColor(categoryId: Long, colorHex: String) {
+        viewModelScope.launch {
+            val category = _uiState.value.categories.firstOrNull { it.id == categoryId } ?: return@launch
+            repository.addCategory(category.copy(colorHex = colorHex))
+            reloadState()
+        }
+    }
+
+    fun createCategoryForTransaction(transactionId: Long, name: String, iconKey: String, colorHex: String) {
+        if (name.isBlank()) return
+        viewModelScope.launch {
+            val transaction = _uiState.value.transactions.firstOrNull { it.id == transactionId } ?: return@launch
+            val category = CategoryItem(
+                id = System.currentTimeMillis(),
+                name = name.trim(),
+                iconKey = iconKey,
+                icon = MoneyIcons.resolveCategoryIcon(iconKey),
+                isDefault = false,
+                colorHex = colorHex
+            )
+            repository.addCategory(category)
+            repository.updateTransaction(transaction.copy(categoryId = category.id))
+            reloadState { it.copy(showTransactionDetailSheet = false, selectedTransactionId = null) }
+        }
+    }
+
     fun scanTodayMessages() {
         scanMessages(MessageScanRange.Today)
+    }
+
+    fun scanCurrentActivityPeriod() {
+        val state = _uiState.value
+        scanMessages(MessageScanRange.Custom, state.activityStartDate, state.activityEndDate)
+    }
+
+    fun populateLastThreeMonths() {
+        val today = LocalDate.now()
+        scanMessages(MessageScanRange.Custom, today.minusMonths(3), today)
     }
 
     fun scanMessages(range: MessageScanRange, startDate: LocalDate? = null, endDate: LocalDate? = null) {
         if (_uiState.value.isScanningMessages) return
 
         viewModelScope.launch {
-            _uiState.update { it.copy(isScanningMessages = true) }
-            val parsedMessages = if (hasSmsPermission()) {
+            _uiState.update { it.copy(isScanningMessages = true, scanStatusMessage = "Scanning messages...") }
+            val hasPermission = hasSmsPermission()
+            val parsedMessages = if (hasPermission) {
                 when (range) {
                     MessageScanRange.Today -> TodaySmsScanner(getApplication()).scanToday()
                     MessageScanRange.Yesterday -> TodaySmsScanner(getApplication()).scanYesterday()
@@ -246,26 +325,65 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
                 emptyList()
             }
 
-            val existingRawMessages = _uiState.value.detectedDrafts.map { it.rawMessage }.toSet()
+            if (!hasPermission) {
+                reloadState {
+                    it.copy(
+                        isScanningMessages = false,
+                        scanStatusMessage = "SMS permission is needed before scanning can populate transactions."
+                    )
+                }
+                return@launch
+            }
+
+            val existingRawMessages = (
+                _uiState.value.transactions.mapNotNull { it.rawMessage } +
+                    _uiState.value.detectedDrafts.map { it.rawMessage }
+                ).toMutableSet()
+            var importedCount = 0
             parsedMessages
                 .filterNot { it.rawMessage in existingRawMessages }
                 .forEach {
-                    repository.saveDraft(
-                        DetectedTransactionDraft(
+                    existingRawMessages.add(it.rawMessage)
+                    val categoryId = _uiState.value.categories.firstOrNull { category ->
+                        category.name == "Uncategorized"
+                    }?.id ?: 0L
+                    repository.addTransaction(
+                        LedgerTransaction(
                             id = 0,
-                            bankName = it.bankName,
                             name = it.counterparty,
                             amount = it.amount,
                             type = it.type,
-                            counterparty = it.counterparty,
+                            categoryId = categoryId,
+                            accountId = _uiState.value.accounts.firstOrNull()?.id,
+                            timestampMillis = it.transactionTimestampMillis,
+                            isAutoDetected = true,
                             rawMessage = it.rawMessage,
-                            suggestedCategoryId = suggestCategoryId(it.counterparty),
-                            detectedAtMillis = System.currentTimeMillis()
                         )
                     )
+                    importedCount += 1
                 }
 
-            reloadState { it.copy(isScanningMessages = false) }
+            val status = when {
+                parsedMessages.isEmpty() -> "No transaction messages found for this period."
+                importedCount == 0 -> "No new transactions found. Existing messages were already imported."
+                importedCount == 1 -> "Imported 1 transaction."
+                else -> "Imported $importedCount transactions."
+            }
+            val newestMonth = parsedMessages.maxByOrNull { it.transactionTimestampMillis }
+                ?.let {
+                    YearMonth.from(
+                        Instant.ofEpochMilli(it.transactionTimestampMillis)
+                            .atZone(ZoneId.systemDefault())
+                            .toLocalDate()
+                    )
+                }
+            reloadState {
+                it.copy(
+                    isScanningMessages = false,
+                    scanStatusMessage = status,
+                    selectedMonth = newestMonth ?: it.selectedMonth
+                )
+            }
         }
     }
 
@@ -280,7 +398,7 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
                     type = draft.type,
                     categoryId = categoryId,
                     accountId = _uiState.value.accounts.firstOrNull()?.id,
-                    timestampMillis = System.currentTimeMillis(),
+                    timestampMillis = draft.transactionTimestampMillis,
                     isAutoDetected = true,
                     rawMessage = draft.rawMessage
                 )
@@ -321,7 +439,13 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
             showCategorySheet = current.showCategorySheet,
             showEditCategorySheet = current.showEditCategorySheet,
             editingTransactionId = current.editingTransactionId,
+            showTransactionDetailSheet = current.showTransactionDetailSheet,
+            selectedTransactionId = current.selectedTransactionId,
+            activityDateFilter = current.activityDateFilter,
+            activityStartDate = current.activityStartDate,
+            activityEndDate = current.activityEndDate,
             isScanningMessages = current.isScanningMessages,
+            scanStatusMessage = current.scanStatusMessage,
             budgetWarning = current.budgetWarning
         )
         _uiState.value = transform(loaded)

@@ -1,8 +1,10 @@
 package com.moneymanager.app.ui
 
+import android.app.DatePickerDialog
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -81,6 +83,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -97,6 +100,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
@@ -108,9 +112,9 @@ import com.moneymanager.app.model.BudgetPlan
 import com.moneymanager.app.model.CategoryItem
 import com.moneymanager.app.model.CurrencyOption
 import com.moneymanager.app.model.DetectedTransactionDraft
+import com.moneymanager.app.model.ActivityDateFilter
 import com.moneymanager.app.model.FinanceUiState
 import com.moneymanager.app.model.LedgerTransaction
-import com.moneymanager.app.model.MessageScanRange
 import com.moneymanager.app.model.MonthlyCategoryTotal
 import com.moneymanager.app.model.MoneyIcons
 import com.moneymanager.app.model.ScreenTab
@@ -118,6 +122,7 @@ import com.moneymanager.app.model.ThemeMode
 import com.moneymanager.app.model.TransactionType
 import com.moneymanager.app.model.month
 import com.moneymanager.app.model.shortLabel
+import com.moneymanager.app.model.transactionDate
 import com.moneymanager.app.ui.theme.LossRed
 import com.moneymanager.app.ui.theme.MoneyGreen
 import com.moneymanager.app.ui.theme.Navy800
@@ -134,8 +139,11 @@ import com.moneymanager.app.viewmodel.MoneyViewModel
 import java.text.NumberFormat
 import java.time.LocalDate
 import java.time.YearMonth
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.util.Currency
 import java.util.Locale
+import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -150,6 +158,14 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
     if (!state.hasCompletedRegistration) {
         RegistrationScreen(onComplete = viewModel::completeRegistration)
         return
+    }
+
+    LaunchedEffect(Unit) {
+        viewModel.scanTodayMessages()
+        while (true) {
+            delay(5 * 60 * 1000L)
+            viewModel.scanTodayMessages()
+        }
     }
 
     Scaffold(
@@ -198,8 +214,6 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
             when (state.selectedTab) {
                 ScreenTab.Dashboard -> dashboardContent(
                     state = state,
-                    onScanWithRange = viewModel::scanMessages,
-                    onMonthSelected = viewModel::selectMonth,
                     onOpenSummary = viewModel::selectTab,
                     onAcceptDraft = viewModel::acceptDetectedTransaction,
                     onIgnoreDraft = viewModel::ignoreDetectedTransaction,
@@ -210,6 +224,9 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
                 )
                 ScreenTab.Activity -> activityContent(
                     state = state,
+                    onScanNow = viewModel::scanCurrentActivityPeriod,
+                    onPopulateThreeMonths = viewModel::populateLastThreeMonths,
+                    onDateFilterSelected = viewModel::setActivityDateFilter,
                     onDeleteTransaction = viewModel::deleteTransaction,
                     onEditTransaction = viewModel::requestEditTransactionCategory,
                     onLoadMore = viewModel::loadMoreTransactions
@@ -222,7 +239,8 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
                     onCurrencySelected = viewModel::selectCurrency,
                     onThemeSelected = viewModel::selectThemeMode,
                     onDeleteAccount = viewModel::deleteAccount,
-                    onDeleteCategory = viewModel::deleteCategory
+                    onDeleteCategory = viewModel::deleteCategory,
+                    onCategoryColorSelected = viewModel::updateCategoryColor
                 )
             }
         }
@@ -251,13 +269,15 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
         )
     }
 
-    if (state.showEditCategorySheet && state.editingTransactionId != null) {
-        val editingTransaction = state.transactions.firstOrNull { it.id == state.editingTransactionId }
-        EditTransactionCategorySheet(
+    if (state.showTransactionDetailSheet && state.selectedTransactionId != null) {
+        val selectedTransaction = state.transactions.firstOrNull { it.id == state.selectedTransactionId }
+        TransactionDetailSheet(
             state = state,
-            transaction = editingTransaction,
+            transaction = selectedTransaction,
             onDismiss = viewModel::cancelEditTransactionCategory,
-            onSave = viewModel::editTransactionCategory
+            onSave = viewModel::updateTransactionDetails,
+            onDelete = viewModel::deleteTransaction,
+            onAddCustomCategory = viewModel::createCategoryForTransaction
         )
     }
 
@@ -294,8 +314,6 @@ private fun InitialLoadingScreen() {
 
 private fun androidx.compose.foundation.lazy.LazyListScope.dashboardContent(
     state: FinanceUiState,
-    onScanWithRange: (MessageScanRange, LocalDate, LocalDate) -> Unit,
-    onMonthSelected: (YearMonth) -> Unit,
     onOpenSummary: (ScreenTab) -> Unit,
     onAcceptDraft: (Long, Long) -> Unit,
     onIgnoreDraft: (Long) -> Unit,
@@ -305,19 +323,15 @@ private fun androidx.compose.foundation.lazy.LazyListScope.dashboardContent(
     onDraftPageSelected: (Int) -> Unit
 ) {
     item {
-        HeroMetricCard(
-            label = "Tracked Balance",
-            value = state.money(state.trackedBalance),
-            helper = "${state.accounts.size} bank account${if (state.accounts.size == 1) "" else "s"} tracked"
-        )
+        TodayDonutCard(state)
     }
     item {
-        CashFlowOverviewCard(state)
+        TodayCategoryBreakdown(state)
     }
-    if (state.detectedDrafts.isNotEmpty()) {
+    if (state.todayDetectedDrafts.isNotEmpty()) {
         item {
             SectionHeader(
-                "Transactions",
+                "Today Pending",
                 "Page ${state.dashboardCurrentDraftPage} of ${state.dashboardDraftPageCount}"
             )
         }
@@ -340,15 +354,15 @@ private fun androidx.compose.foundation.lazy.LazyListScope.dashboardContent(
     } else {
         item {
             SectionHeader(
-                "Transactions",
+                "Today",
                 "Page ${state.dashboardCurrentPage} of ${state.dashboardTransactionPageCount}"
             )
         }
-        if (state.transactions.isEmpty()) {
-            item { EmptyPanel("No transactions yet. Tap + to add your first income or expense.") }
+        if (state.todayTransactions.isEmpty()) {
+            item { EmptyPanel("No transactions for today yet.") }
         } else {
             items(state.dashboardPagedTransactions, key = { "dashboard_txn_${it.id}" }) {
-                TransactionRow(transaction = it, state = state, onDelete = onDeleteTransaction, onEdit = onEditTransaction)
+                TransactionRow(transaction = it, state = state, onSelect = onEditTransaction)
             }
             item {
                 DashboardPagination(
@@ -362,41 +376,49 @@ private fun androidx.compose.foundation.lazy.LazyListScope.dashboardContent(
     }
     item {
         ActionPanel(
-            title = "Monthly Summary",
-            subtitle = "${state.selectedMonth.shortLabel()} income, expense, net total, graph, and category pie.",
+            title = "Monthly Analysis",
+            subtitle = "Open category history, monthly totals, and graphical breakdowns.",
             icon = Icons.Rounded.BarChart,
             action = "Open",
             onClick = { onOpenSummary(ScreenTab.Summary) }
         )
     }
-    item {
-        MessageScanPanel(onScan = onScanWithRange)
-    }
 }
 
 private fun androidx.compose.foundation.lazy.LazyListScope.activityContent(
     state: FinanceUiState,
+    onScanNow: () -> Unit,
+    onPopulateThreeMonths: () -> Unit,
+    onDateFilterSelected: (ActivityDateFilter, LocalDate?, LocalDate?) -> Unit,
     onDeleteTransaction: (Long) -> Unit,
     onEditTransaction: (Long) -> Unit,
     onLoadMore: () -> Unit
 ) {
-    item { LargeTitle("Activity", "Add and review income or expenses by category.") }
-    item { SearchBarSurface("Search transactions") }
+    item { LargeTitle("Activity", "Review transactions for today or pick another period.") }
     item {
-        ChipRow {
-            MoneyChip("This Month", selected = true, onClick = {})
-            MoneyChip("Categories", selected = false, onClick = {})
-            MoneyChip("Amount", selected = false, onClick = {})
-        }
+        ActivityScanPanel(
+            state = state,
+            onScanNow = onScanNow,
+            onPopulateThreeMonths = onPopulateThreeMonths
+        )
     }
-    if (state.transactions.isEmpty()) {
-        item { EmptyPanel("No transactions yet. Tap + to add your first income or expense.") }
+    item {
+        ActivityDateFilterPanel(
+            state = state,
+            onDateFilterSelected = onDateFilterSelected
+        )
+    }
+    item {
+        SearchBarSurface("Search in selected period")
+    }
+    if (state.activityTransactions.isEmpty()) {
+        item { EmptyPanel("No transactions in this period.") }
     } else {
         itemsIndexed(
             items = state.pagedTransactions,
             key = { index, transaction -> "${transaction.id}_${transaction.timestampMillis}_$index" }
         ) { _, transaction ->
-            TransactionRow(transaction = transaction, state = state, onDelete = onDeleteTransaction, onEdit = onEditTransaction)
+            TransactionRow(transaction = transaction, state = state, onSelect = onEditTransaction)
         }
         if (state.hasMoreTransactions) {
             item {
@@ -464,7 +486,9 @@ private fun androidx.compose.foundation.lazy.LazyListScope.summaryContent(
         )
     }
     item { CashFlowGraph(state) }
+    item { DailyExpenseBarGraph(state) }
     item { CategoryPieChart(state, categoryTotals(state)) }
+    item { CategoryHistoryGraph(state, categoryTotals(state)) }
 }
 
 private fun androidx.compose.foundation.lazy.LazyListScope.settingsContent(
@@ -473,7 +497,8 @@ private fun androidx.compose.foundation.lazy.LazyListScope.settingsContent(
     onCurrencySelected: (CurrencyOption) -> Unit,
     onThemeSelected: (ThemeMode) -> Unit,
     onDeleteAccount: (Long) -> Unit,
-    onDeleteCategory: (Long) -> Unit
+    onDeleteCategory: (Long) -> Unit,
+    onCategoryColorSelected: (Long, String) -> Unit
 ) {
     item {
         ProfileHeader(state)
@@ -494,7 +519,11 @@ private fun androidx.compose.foundation.lazy.LazyListScope.settingsContent(
         )
     }
     item {
-        CategorySettingsGroup(categories = state.categories, onDelete = onDeleteCategory)
+        CategorySettingsGroup(
+            categories = state.categories,
+            onDelete = onDeleteCategory,
+            onColorSelected = onCategoryColorSelected
+        )
     }
     item {
         Button(
@@ -669,7 +698,7 @@ private fun AddTransactionSheet(
             LabelText("CATEGORY")
             ChipRow {
                 state.categories.forEach {
-                    MoneyChip(it.name, selected = categoryId == it.id, onClick = { categoryId = it.id })
+                    CategoryChoiceChip(it, type, selected = categoryId == it.id, onClick = { categoryId = it.id })
                 }
             }
             if (state.accounts.isNotEmpty()) {
@@ -697,44 +726,143 @@ private fun AddTransactionSheet(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun EditTransactionCategorySheet(
+private fun TransactionDetailSheet(
     state: FinanceUiState,
     transaction: LedgerTransaction?,
     onDismiss: () -> Unit,
-    onSave: (Long, Long) -> Unit
+    onSave: (Long, TransactionType, Long) -> Unit,
+    onDelete: (Long) -> Unit,
+    onAddCustomCategory: (Long, String, String, String) -> Unit
 ) {
     if (transaction == null) return
     var categoryId by remember { mutableStateOf(transaction.categoryId) }
+    var type by remember { mutableStateOf(transaction.type) }
+    var showAllCategories by remember { mutableStateOf(false) }
+    var showOriginalMessage by remember { mutableStateOf(false) }
+    var showCustomCategoryForm by remember { mutableStateOf(false) }
+    var customCategoryName by remember { mutableStateOf("") }
+    var customColor by remember { mutableStateOf(categoryPalette.first()) }
+    val categoryRanking = remember(state.transactions, state.categories) {
+        state.transactions
+            .groupingBy { it.categoryId }
+            .eachCount()
+    }
+    val uncategorizedId = state.categories.firstOrNull { it.name == "Uncategorized" }?.id
+    val frequentCategories = state.categories
+        .filter { it.id == categoryId || it.id == uncategorizedId || categoryRanking.containsKey(it.id) }
+        .sortedWith(
+            compareByDescending<CategoryItem> { it.id == categoryId }
+                .thenByDescending { categoryRanking[it.id] ?: 0 }
+                .thenBy { it.id }
+        )
+        .take(7)
+    val visibleCategories = if (showAllCategories) state.categories else frequentCategories
+    val dateLabel = transaction.transactionDate().format(DateTimeFormatter.ofPattern("MMM d, yyyy"))
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
-    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = Navy900, contentColor = TextPrimary) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = Navy900,
+        contentColor = TextPrimary
+    ) {
         SheetContent(title = "Edit Category") {
-            Text(
-                "Change the category for this transaction only.",
-                color = TextMuted,
-                style = MaterialTheme.typography.bodyMedium
-            )
-            Spacer(Modifier.height(12.dp))
-            Text(transaction.name, color = TextPrimary, style = MaterialTheme.typography.titleMedium)
-            Spacer(Modifier.height(16.dp))
-            LabelText("CATEGORY")
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(transaction.name, color = TextPrimary, style = MaterialTheme.typography.titleLarge)
+                    Text("$dateLabel | ${state.money(transaction.amount)}", color = TextMuted, style = MaterialTheme.typography.bodyMedium)
+                }
+                Text(signedAmount(transaction.amount, type, state.currency), color = type.amountColor(), style = MaterialTheme.typography.titleMedium)
+            }
             ChipRow {
-                state.categories.forEach { category ->
-                    MoneyChip(
-                        label = category.name,
+                TransactionType.entries.forEach {
+                    MoneyChip(it.name, selected = type == it, onClick = { type = it })
+                }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                LabelText("CATEGORY")
+                Spacer(Modifier.weight(1f))
+                TextButton(onClick = { showAllCategories = !showAllCategories }) {
+                    Text(if (showAllCategories) "Frequent" else "Show all", color = PrimarySoft)
+                }
+            }
+            ChipRow {
+                visibleCategories.forEach { category ->
+                    CategoryChoiceChip(
+                        category = category,
+                        type = type,
                         selected = categoryId == category.id,
                         onClick = { categoryId = category.id }
                     )
                 }
+                MoneyChip("Custom +", selected = showCustomCategoryForm, onClick = { showCustomCategoryForm = !showCustomCategoryForm })
+            }
+            if (showCustomCategoryForm) {
+                OutlinedTextField(
+                    value = customCategoryName,
+                    onValueChange = { customCategoryName = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Custom category") },
+                    singleLine = true,
+                    colors = inputColors(),
+                    shape = RoundedCornerShape(12.dp)
+                )
+                ColorSwatches(selected = customColor, onSelected = { customColor = it })
+                Button(
+                    onClick = {
+                        onAddCustomCategory(transaction.id, customCategoryName, "category", customColor)
+                        customCategoryName = ""
+                        showCustomCategoryForm = false
+                    },
+                    enabled = customCategoryName.isNotBlank(),
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = primaryButtonColors()
+                ) {
+                    Text("Create Custom Category", fontWeight = FontWeight.Bold)
+                }
+            }
+            if (transaction.rawMessage != null) {
+                OutlinedButton(
+                    onClick = { showOriginalMessage = true },
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(Icons.Rounded.Sms, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Show Original Message")
+                }
             }
             Button(
-                onClick = { onSave(transaction.id, categoryId) },
+                onClick = { onSave(transaction.id, type, categoryId) },
                 modifier = Modifier.fillMaxWidth().height(56.dp),
                 shape = RoundedCornerShape(12.dp),
                 colors = primaryButtonColors()
             ) {
-                Text("Update Category", fontWeight = FontWeight.Bold)
+                Text("Save Changes", fontWeight = FontWeight.Bold)
+            }
+            TextButton(onClick = { onDelete(transaction.id) }, modifier = Modifier.fillMaxWidth()) {
+                Text("Delete Transaction", color = LossRed, fontWeight = FontWeight.Bold)
             }
         }
+    }
+
+    if (showOriginalMessage) {
+        AlertDialog(
+            onDismissRequest = { showOriginalMessage = false },
+            title = { Text("Original SMS") },
+            text = {
+                Text(transaction.rawMessage.orEmpty(), color = TextMuted)
+            },
+            confirmButton = {
+                TextButton(onClick = { showOriginalMessage = false }) {
+                    Text("Close")
+                }
+            },
+            containerColor = Navy850,
+            titleContentColor = TextPrimary,
+            textContentColor = TextMuted
+        )
     }
 }
 
@@ -803,9 +931,10 @@ private fun AddBudgetSheet(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun AddCategorySheet(onDismiss: () -> Unit, onAdd: (String, String) -> Unit) {
+private fun AddCategorySheet(onDismiss: () -> Unit, onAdd: (String, String, String) -> Unit) {
     var name by remember { mutableStateOf("") }
     var selectedIconKey by remember { mutableStateOf(MoneyIcons.frequentCategoryIcons.first().key) }
+    var selectedColor by remember { mutableStateOf(categoryPalette.first()) }
     var iconQuery by remember { mutableStateOf("") }
     val filteredIcons by remember(iconQuery) { derivedStateOf {
         val query = iconQuery.trim().lowercase()
@@ -866,6 +995,8 @@ private fun AddCategorySheet(onDismiss: () -> Unit, onAdd: (String, String) -> U
                 colors = inputColors(),
                 shape = RoundedCornerShape(12.dp)
             )
+            LabelText("COLOR")
+            ColorSwatches(selected = selectedColor, onSelected = { selectedColor = it })
             LabelText("ALL ICONS")
             if (iconQuery.isBlank()) {
                 Text(
@@ -899,7 +1030,7 @@ private fun AddCategorySheet(onDismiss: () -> Unit, onAdd: (String, String) -> U
                 }
             }
             Button(
-                onClick = { onAdd(name, selectedIconKey) },
+                onClick = { onAdd(name, selectedIconKey, selectedColor) },
                 enabled = name.isNotBlank(),
                 modifier = Modifier.fillMaxWidth().height(56.dp),
                 shape = RoundedCornerShape(12.dp),
@@ -936,6 +1067,52 @@ private fun CategoryIconChip(
 }
 
 @Composable
+private fun ColorSwatches(selected: String, onSelected: (String) -> Unit) {
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        items(categoryPalette, key = { it }) { colorHex ->
+            val color = colorFromHex(colorHex)
+            Box(
+                modifier = Modifier
+                    .size(42.dp)
+                    .clip(CircleShape)
+                    .background(color)
+                    .clickable { onSelected(colorHex) },
+                contentAlignment = Alignment.Center
+            ) {
+                if (selected == colorHex) {
+                    Icon(Icons.Rounded.Check, contentDescription = null, tint = Color.White)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CategoryChoiceChip(
+    category: CategoryItem,
+    type: TransactionType,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    val color = categoryColor(category, type)
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        label = { Text(category.name) },
+        leadingIcon = {
+            Icon(category.icon, contentDescription = null, modifier = Modifier.size(18.dp))
+        },
+        colors = FilterChipDefaults.filterChipColors(
+            selectedContainerColor = color,
+            selectedLabelColor = if (isAmoledTheme()) Color(0xFF10131F) else Color.White,
+            selectedLeadingIconColor = if (isAmoledTheme()) Color(0xFF10131F) else Color.White,
+            containerColor = Navy800,
+            labelColor = TextMuted
+        )
+    )
+}
+
+@Composable
 private fun SheetContent(title: String, content: @Composable ColumnScope.() -> Unit) {
     Column(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
@@ -955,6 +1132,7 @@ private fun DetectedDraftRow(
     onIgnore: (Long) -> Unit
 ) {
     var categoryId by remember { mutableStateOf(draft.suggestedCategoryId ?: state.categories.first().id) }
+    val dateLabel = draft.transactionDate().format(DateTimeFormatter.ofPattern("MMM d, yyyy"))
 
     ElevatedPanel {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -963,15 +1141,20 @@ private fun DetectedDraftRow(
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     Text(draft.bankName, color = TextPrimary, style = MaterialTheme.typography.titleMedium)
-                    Text(draft.type.bankVerb(), color = TextDim, style = MaterialTheme.typography.bodyMedium)
+                    Text("${draft.type.bankVerb()} | $dateLabel", color = TextDim, style = MaterialTheme.typography.bodyMedium)
                 }
                 Text(draft.signedAmount(state.currency), color = draft.type.amountColor(), style = MaterialTheme.typography.titleLarge)
             }
             Text(draft.counterparty, color = TextPrimary, style = MaterialTheme.typography.headlineMedium)
             LabelText("CATEGORY")
             ChipRow {
-                state.categories.forEach {
-                    MoneyChip(it.name, selected = categoryId == it.id, onClick = { categoryId = it.id })
+                state.categories.forEach { category ->
+                    CategoryChoiceChip(
+                        category = category,
+                        type = draft.type,
+                        selected = categoryId == category.id,
+                        onClick = { categoryId = category.id }
+                    )
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -1048,6 +1231,237 @@ private fun HeroMetricCard(label: String, value: String, helper: String) {
             )
             Spacer(Modifier.height(8.dp))
             Text(helper, color = if (dark) Color(0xFF07265C) else PrimaryBlue, style = MaterialTheme.typography.bodyMedium)
+        }
+    }
+}
+
+@Composable
+private fun TodayDonutCard(state: FinanceUiState) {
+    val income = state.todayTransactions
+        .filter { it.type == TransactionType.Income }
+        .sumOf { it.amount }
+    val expense = state.todayTransactions
+        .filter { it.type == TransactionType.Expense }
+        .sumOf { it.amount }
+    val total = expense.coerceAtLeast(1.0)
+
+    ElevatedPanel {
+        Row(
+            modifier = Modifier.padding(18.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(Modifier.size(176.dp), contentAlignment = Alignment.Center) {
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    val stroke = Stroke(width = 34f, cap = StrokeCap.Round)
+                    drawArc(
+                        color = appTrackColor(),
+                        startAngle = -90f,
+                        sweepAngle = 360f,
+                        useCenter = false,
+                        topLeft = Offset(20f, 20f),
+                        size = Size(size.width - 40f, size.height - 40f),
+                        style = stroke
+                    )
+                    drawArc(
+                        color = LossRed,
+                        startAngle = -90f,
+                        sweepAngle = ((expense / total) * 360f).toFloat(),
+                        useCenter = false,
+                        topLeft = Offset(20f, 20f),
+                        size = Size(size.width - 40f, size.height - 40f),
+                        style = stroke
+                    )
+                }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("Today", color = TextDim, style = MaterialTheme.typography.labelMedium)
+                    Text(state.money(expense), color = LossRed, style = MaterialTheme.typography.titleMedium, maxLines = 1)
+                    Text("spent", color = TextDim, style = MaterialTheme.typography.labelMedium, maxLines = 1)
+                }
+            }
+            Spacer(Modifier.width(18.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Today Spend", color = TextPrimary, style = MaterialTheme.typography.titleLarge)
+                Text(
+                    "${state.todayTransactions.size} transaction${if (state.todayTransactions.size == 1) "" else "s"} detected today",
+                    color = TextMuted,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                LegendDot(LossRed, "Expense")
+                Text(
+                    "Net movement: ${state.money(income - expense)}",
+                    color = if (income >= expense) PrimarySoft else LossRed,
+                    style = MaterialTheme.typography.titleMedium
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TodayCategoryBreakdown(state: FinanceUiState) {
+    val totals = state.categories.map { category ->
+        val transactions = state.todayTransactions.filter { it.categoryId == category.id }
+        MonthlyCategoryTotal(
+            category = category,
+            income = transactions.filter { it.type == TransactionType.Income }.sumOf { it.amount },
+            expense = transactions.filter { it.type == TransactionType.Expense }.sumOf { it.amount }
+        )
+    }.filter { it.income > 0.0 || it.expense > 0.0 }
+
+    ElevatedPanel {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            SectionHeader("Today Segments", LocalDate.now().format(DateTimeFormatter.ofPattern("MMM d")))
+            if (totals.isEmpty()) {
+                Text("No categorized movement today.", color = TextDim, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+            } else {
+                val max = totals.maxOf { it.income + it.expense }.coerceAtLeast(1.0)
+                totals.forEach { item ->
+                    val amount = item.income + item.expense
+                    SegmentAmountRow(
+                        label = item.category.name,
+                        value = state.money(amount),
+                        color = categoryColor(item.category, if (item.expense > 0.0) TransactionType.Expense else TransactionType.Income),
+                        progress = (amount / max).toFloat()
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ActivityScanPanel(
+    state: FinanceUiState,
+    onScanNow: () -> Unit,
+    onPopulateThreeMonths: () -> Unit
+) {
+    ElevatedPanel {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            SectionHeader("Message Import", if (state.isScanningMessages) "Scanning" else "Ready")
+            Text(
+                if (state.scanStatusMessage.isBlank()) {
+                    "Scan the selected period or populate the last 3 months from SMS."
+                } else {
+                    state.scanStatusMessage
+                },
+                color = TextMuted,
+                style = MaterialTheme.typography.bodyMedium
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Button(
+                    onClick = onScanNow,
+                    enabled = !state.isScanningMessages,
+                    modifier = Modifier.weight(1f).height(52.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = primaryButtonColors()
+                ) {
+                    Icon(Icons.Rounded.Sms, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Scan Now", fontWeight = FontWeight.Bold)
+                }
+                OutlinedButton(
+                    onClick = onPopulateThreeMonths,
+                    enabled = !state.isScanningMessages,
+                    modifier = Modifier.weight(1f).height(52.dp),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(Icons.Rounded.CalendarMonth, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Populate 3M", fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ActivityDateFilterPanel(
+    state: FinanceUiState,
+    onDateFilterSelected: (ActivityDateFilter, LocalDate?, LocalDate?) -> Unit
+) {
+    val formatter = DateTimeFormatter.ofPattern("MMM d, yyyy")
+    val today = LocalDate.now()
+    var startDate by remember(state.activityStartDate) { mutableStateOf(state.activityStartDate) }
+    var endDate by remember(state.activityEndDate) { mutableStateOf(state.activityEndDate) }
+    var showStartPicker by remember { mutableStateOf(false) }
+    var showEndPicker by remember { mutableStateOf(false) }
+
+    ElevatedPanel {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            SectionHeader("Period", "${formatter.format(state.activityStartDate)} - ${formatter.format(state.activityEndDate)}")
+            ChipRow {
+                ActivityDateFilter.entries.forEach { filter ->
+                    MoneyChip(
+                        label = filter.label,
+                        selected = state.activityDateFilter == filter,
+                        onClick = { onDateFilterSelected(filter, startDate, endDate) }
+                    )
+                }
+            }
+            if (state.activityDateFilter == ActivityDateFilter.Custom) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = { showStartPicker = true },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(Icons.Rounded.CalendarMonth, contentDescription = null)
+                        Spacer(Modifier.width(6.dp))
+                        Text(formatter.format(startDate), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    OutlinedButton(
+                        onClick = { showEndPicker = true },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(Icons.Rounded.CalendarMonth, contentDescription = null)
+                        Spacer(Modifier.width(6.dp))
+                        Text(formatter.format(endDate), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+            }
+        }
+    }
+
+    if (showStartPicker) {
+        val context = LocalContext.current
+        LaunchedEffect(showStartPicker) {
+            DatePickerDialog(
+                context,
+                { _, year, month, day ->
+                    startDate = LocalDate.of(year, month + 1, day)
+                    if (startDate.isAfter(endDate)) endDate = startDate
+                    onDateFilterSelected(ActivityDateFilter.Custom, startDate, endDate)
+                    showStartPicker = false
+                },
+                startDate.year,
+                startDate.monthValue - 1,
+                startDate.dayOfMonth
+            ).apply {
+                datePicker.maxDate = today.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+                show()
+            }
+        }
+    }
+
+    if (showEndPicker) {
+        val context = LocalContext.current
+        LaunchedEffect(showEndPicker) {
+            DatePickerDialog(
+                context,
+                { _, year, month, day ->
+                    endDate = LocalDate.of(year, month + 1, day).coerceAtMost(today)
+                    if (startDate.isAfter(endDate)) startDate = endDate
+                    onDateFilterSelected(ActivityDateFilter.Custom, startDate, endDate)
+                    showEndPicker = false
+                },
+                endDate.year,
+                endDate.monthValue - 1,
+                endDate.dayOfMonth
+            ).apply {
+                datePicker.maxDate = today.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+                show()
+            }
         }
     }
 }
@@ -1248,47 +1662,54 @@ private fun LegendDot(color: Color, label: String) {
 private fun TransactionRow(
     transaction: LedgerTransaction,
     state: FinanceUiState,
-    onDelete: (Long) -> Unit,
-    onEdit: (Long) -> Unit
+    onSelect: (Long) -> Unit
 ) {
     val category = state.categories.firstOrNull { it.id == transaction.categoryId }
-    var menuExpanded by remember { mutableStateOf(false) }
+    val color = categoryColor(category, transaction.type)
+    val dateLabel = transaction.transactionDate().format(DateTimeFormatter.ofPattern("MMM d, yyyy"))
 
-    ElevatedPanel {
-        Row(Modifier.padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconTile(category?.icon ?: Icons.AutoMirrored.Rounded.ReceiptLong, categoryColor(category?.name.orEmpty(), transaction.type))
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onSelect(transaction.id) },
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = Navy850),
+        border = BorderStroke(1.dp, color.copy(alpha = if (isAmoledTheme()) 0.82f else 0.64f))
+    ) {
+        Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.width(5.dp).height(54.dp).clip(RoundedCornerShape(8.dp)).background(color))
             Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
-                Text(transaction.name, color = TextPrimary, style = MaterialTheme.typography.titleMedium, maxLines = 1)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(
-                    "${category?.name ?: "Miscellaneous"} | ${transaction.month().shortLabel()}${if (transaction.isAutoDetected) " | Auto" else ""}",
-                    color = TextDim,
-                    style = MaterialTheme.typography.bodyMedium,
+                    transaction.name,
+                    color = TextPrimary,
+                    style = MaterialTheme.typography.titleMedium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(8.dp).clip(CircleShape).background(color))
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        category?.name ?: "Set category",
+                        color = TextMuted,
+                        style = MaterialTheme.typography.labelMedium,
+                        modifier = Modifier.weight(1f, fill = false),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text("  |  $dateLabel", color = TextDim, style = MaterialTheme.typography.labelMedium, maxLines = 1)
+                }
             }
-            Column(horizontalAlignment = Alignment.End) {
-                Text(transaction.signedAmount(state.currency), color = transaction.type.amountColor(), style = MaterialTheme.typography.titleMedium)
-                IconButton(onClick = { menuExpanded = true }) {
-                    Icon(Icons.Rounded.MoreVert, contentDescription = "Transaction options", tint = TextDim)
-                }
-                DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
-                    DropdownMenuItem(
-                        text = { Text("Edit Category") },
-                        onClick = {
-                            menuExpanded = false
-                            onEdit(transaction.id)
-                        }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Delete") },
-                        onClick = {
-                            menuExpanded = false
-                            onDelete(transaction.id)
-                        }
-                    )
-                }
+            Spacer(Modifier.width(10.dp))
+            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    transaction.signedAmount(state.currency),
+                    color = transaction.type.amountColor(),
+                    style = MaterialTheme.typography.titleMedium,
+                    maxLines = 1
+                )
+                Text("Tap to edit", color = TextDim, style = MaterialTheme.typography.labelMedium)
             }
         }
     }
@@ -1362,6 +1783,110 @@ private fun Bar(label: String, progress: Float, color: Color, value: String) {
 }
 
 @Composable
+private fun SegmentAmountRow(label: String, value: String, color: Color, progress: Float) {
+    Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(11.dp).clip(CircleShape).background(color))
+            Spacer(Modifier.width(8.dp))
+            Text(label, color = TextPrimary, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f), maxLines = 1)
+            Text(value, color = TextMuted, style = MaterialTheme.typography.bodyMedium, maxLines = 1)
+        }
+        LinearProgressIndicator(
+            progress = { progress.coerceIn(0.04f, 1f) },
+            modifier = Modifier.fillMaxWidth().height(7.dp).clip(RoundedCornerShape(8.dp)),
+            color = color,
+            trackColor = appTrackColor()
+        )
+    }
+}
+
+@Composable
+private fun DailyExpenseBarGraph(state: FinanceUiState) {
+    val selectedMonth = state.selectedMonth
+    val today = LocalDate.now()
+    val lastDay = if (selectedMonth == YearMonth.now()) today.dayOfMonth else selectedMonth.lengthOfMonth()
+    val daySegments = (1..lastDay).map { day ->
+        val date = selectedMonth.atDay(day)
+        val transactions = state.transactions
+            .filter { it.type == TransactionType.Expense && it.transactionDate() == date }
+        val segments = state.categories.mapNotNull { category ->
+            val amount = transactions.filter { it.categoryId == category.id }.sumOf { it.amount }
+            if (amount > 0.0) category to amount else null
+        }
+        date to segments
+    }
+    val max = daySegments.maxOfOrNull { it.second.sumOf { segment -> segment.second } }?.coerceAtLeast(1.0) ?: 1.0
+
+    ElevatedPanel {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            SectionHeader("Daily Expenses", selectedMonth.shortLabel())
+            if (daySegments.all { it.second.isEmpty() }) {
+                EmptyPanel("No daily expenses for this month.")
+            } else {
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth().height(190.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.Bottom
+                ) {
+                    items(daySegments, key = { it.first.toString() }) { (date, segments) ->
+                        val total = segments.sumOf { it.second }
+                        DailyExpenseBar(
+                            day = date.dayOfMonth,
+                            segments = segments,
+                            maxAmount = max,
+                            value = state.money(total)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DailyExpenseBar(day: Int, segments: List<Pair<CategoryItem, Double>>, maxAmount: Double, value: String) {
+    val amount = segments.sumOf { it.second }
+    Column(
+        modifier = Modifier.width(34.dp).fillMaxHeight(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Bottom
+    ) {
+        if (amount > 0.0) {
+            Text(
+                value,
+                color = TextDim,
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(Modifier.height(6.dp))
+        }
+        Column(
+            modifier = Modifier
+                .width(22.dp)
+                .height((112 * (amount / maxAmount).toFloat().coerceIn(0.05f, 1f)).dp)
+                .clip(RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp))
+                .background(appTrackColor()),
+            verticalArrangement = Arrangement.Bottom
+        ) {
+            if (amount > 0.0) {
+                segments.forEach { (category, segmentAmount) ->
+                    val segmentHeight = (112 * (segmentAmount / maxAmount).toFloat()).coerceAtLeast(3f).dp
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(segmentHeight)
+                            .background(categoryColor(category, TransactionType.Expense))
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(day.toString(), color = TextMuted, style = MaterialTheme.typography.labelMedium)
+    }
+}
+
+@Composable
 private fun CategoryPieChart(state: FinanceUiState, totals: List<MonthlyCategoryTotal>) {
     ElevatedPanel {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -1394,6 +1919,33 @@ private fun CategoryPieChart(state: FinanceUiState, totals: List<MonthlyCategory
                         Text(item.category.name, color = TextMuted, modifier = Modifier.weight(1f))
                         Text(state.money(item.expense), color = TextPrimary)
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CategoryHistoryGraph(state: FinanceUiState, totals: List<MonthlyCategoryTotal>) {
+    val visibleTotals = totals
+        .filter { it.income > 0.0 || it.expense > 0.0 }
+        .sortedByDescending { it.income + it.expense }
+    val max = visibleTotals.maxOfOrNull { it.income + it.expense }?.coerceAtLeast(1.0) ?: 1.0
+
+    ElevatedPanel {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            SectionHeader("Category History", state.selectedMonth.shortLabel())
+            if (visibleTotals.isEmpty()) {
+                EmptyPanel("No category history for this month.")
+            } else {
+                visibleTotals.forEach { item ->
+                    val total = item.income + item.expense
+                    SegmentAmountRow(
+                        label = item.category.name,
+                        value = state.money(total),
+                        color = categoryColor(item.category, if (item.expense >= item.income) TransactionType.Expense else TransactionType.Income),
+                        progress = (total / max).toFloat()
+                    )
                 }
             }
         }
@@ -1460,25 +2012,46 @@ private fun AccountSettingsGroup(state: FinanceUiState, onDelete: (Long) -> Unit
 }
 
 @Composable
-private fun CategorySettingsGroup(categories: List<CategoryItem>, onDelete: (Long) -> Unit) {
+private fun CategorySettingsGroup(
+    categories: List<CategoryItem>,
+    onDelete: (Long) -> Unit,
+    onColorSelected: (Long, String) -> Unit
+) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         LabelText("CATEGORIES")
         ElevatedPanel {
             Column {
                 categories.forEachIndexed { index, category ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, top = 10.dp, end = 8.dp, bottom = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            category.name,
-                            color = TextPrimary,
-                            modifier = Modifier.weight(1f),
-                            style = MaterialTheme.typography.bodyLarge
-                        )
-                        if (!category.isDefault) {
-                            TextButton(onClick = { onDelete(category.id) }) {
-                                Text("Delete", color = LossRed)
+                    var expanded by remember { mutableStateOf(false) }
+                    Column {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { expanded = !expanded }
+                                .padding(start = 16.dp, top = 12.dp, end = 16.dp, bottom = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(Modifier.size(12.dp).clip(CircleShape).background(categoryColor(category, TransactionType.Expense)))
+                            Spacer(Modifier.width(10.dp))
+                            Text(
+                                category.name,
+                                color = TextPrimary,
+                                modifier = Modifier.weight(1f),
+                                style = MaterialTheme.typography.bodyLarge
+                            )
+                            Text(if (expanded) "Hide" else "Edit", color = PrimarySoft, style = MaterialTheme.typography.labelMedium)
+                        }
+                        if (expanded) {
+                            Column(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                ColorSwatches(
+                                    selected = category.colorHex,
+                                    onSelected = { onColorSelected(category.id, it) }
+                                )
+                                if (!category.isDefault) {
+                                    TextButton(onClick = { onDelete(category.id) }) {
+                                        Text("Delete Category", color = LossRed)
+                                    }
+                                }
                             }
                         }
                     }
@@ -1645,7 +2218,15 @@ private fun BottomNavigation(selectedTab: ScreenTab, onTabSelected: (ScreenTab) 
                 selected = selectedTab == tab,
                 onClick = { onTabSelected(tab) },
                 icon = { Icon(tab.icon, contentDescription = tab.label) },
-                label = { Text(tab.label, maxLines = 1) },
+                label = {
+                    Text(
+                        tab.label,
+                        maxLines = 1,
+                        overflow = TextOverflow.Clip,
+                        fontSize = 11.sp,
+                        lineHeight = 12.sp
+                    )
+                },
                 colors = NavigationBarItemDefaults.colors(
                     selectedIconColor = PrimarySoft,
                     selectedTextColor = PrimarySoft,
@@ -1688,11 +2269,14 @@ private fun categoryTotals(state: FinanceUiState): List<MonthlyCategoryTotal> {
 }
 
 private fun LedgerTransaction.signedAmount(currency: CurrencyOption): String {
-    val prefix = if (type == TransactionType.Income) "+" else "-"
-    return "$prefix${money(amount, currency)}"
+    return signedAmount(amount, type, currency)
 }
 
 private fun DetectedTransactionDraft.signedAmount(currency: CurrencyOption): String {
+    return signedAmount(amount, type, currency)
+}
+
+private fun signedAmount(amount: Double, type: TransactionType, currency: CurrencyOption): String {
     val prefix = if (type == TransactionType.Income) "+" else "-"
     return "$prefix${money(amount, currency)}"
 }
@@ -1705,14 +2289,28 @@ private fun TransactionType.bankVerb(): String {
     return if (this == TransactionType.Income) "credited" else "debited"
 }
 
+private fun categoryColor(category: CategoryItem?, type: TransactionType): Color {
+    if (category == null) return TextMuted
+    return colorFromHex(category.colorHex)
+}
+
 private fun categoryColor(category: String, type: TransactionType): Color {
     if (type == TransactionType.Income) return MoneyGreen
     return when (category) {
-        "Food", "Fuel" -> WarningAmber
-        "Grocery", "Shopping" -> PrimarySoft
-        "Rent" -> LossRed
+        "Uncategorized" -> TextDim
+        "Grocery" -> Color(0xFF38E68B)
+        "Food" -> Color(0xFFFFC857)
+        "Shopping" -> Color(0xFFFF4FB8)
+        "Fuel" -> Color(0xFFFF8A3D)
+        "Rent" -> Color(0xFFFF6B7A)
         else -> TextMuted
     }
+}
+
+private fun colorFromHex(hex: String): Color {
+    return runCatching {
+        Color(android.graphics.Color.parseColor(hex))
+    }.getOrDefault(TextDim)
 }
 
 private fun FinanceUiState.money(value: Double): String {
@@ -1726,4 +2324,26 @@ private fun money(value: Double, currency: CurrencyOption): String {
     return formatter.format(value)
 }
 
-private val chartColors = listOf(PrimarySoft, MoneyGreen, WarningAmber, LossRed, PrimaryBlue)
+private val chartColors = listOf(
+    Color(0xFF4F8CFF),
+    Color(0xFF38E68B),
+    Color(0xFFFFC857),
+    Color(0xFFFF4FB8),
+    Color(0xFFFF8A3D),
+    Color(0xFF9B5CFF),
+    Color(0xFF00D1C1),
+    Color(0xFFFF6B7A)
+)
+
+private val categoryPalette = listOf(
+    "#8F95A3",
+    "#4F8CFF",
+    "#38E68B",
+    "#FFC857",
+    "#FF4FB8",
+    "#FF8A3D",
+    "#9B5CFF",
+    "#00D1C1",
+    "#FF6B7A",
+    "#2DD4BF"
+)

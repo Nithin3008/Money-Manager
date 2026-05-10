@@ -45,7 +45,8 @@ data class CategoryEntity(
     @PrimaryKey val id: Long,
     val name: String,
     val iconKey: String,
-    val isDefault: Boolean
+    val isDefault: Boolean,
+    val colorHex: String
 )
 
 @Entity(tableName = "transactions")
@@ -80,7 +81,8 @@ data class DetectedDraftEntity(
     val counterparty: String,
     val rawMessage: String,
     val suggestedCategoryId: Long?,
-    val detectedAtMillis: Long
+    val detectedAtMillis: Long,
+    val transactionTimestampMillis: Long
 )
 
 @Dao
@@ -102,6 +104,9 @@ interface FinanceDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun saveCategory(category: CategoryEntity)
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun seedCategory(category: CategoryEntity)
 
     @Query("DELETE FROM categories WHERE id = :id AND isDefault = 0")
     suspend fun deleteCustomCategory(id: Long)
@@ -146,7 +151,7 @@ interface FinanceDao {
         BudgetEntity::class,
         DetectedDraftEntity::class
     ],
-    version = 2
+    version = 5
 )
 abstract class FinanceDatabase : RoomDatabase() {
     abstract fun dao(): FinanceDao
@@ -161,7 +166,7 @@ abstract class FinanceDatabase : RoomDatabase() {
                     FinanceDatabase::class.java,
                     "money_manager.db"
                 )
-                    .addMigrations(Migration1To2)
+                    .addMigrations(Migration1To2, Migration2To3, Migration3To4, Migration4To5)
                     .build()
                     .also { instance = it }
             }
@@ -170,6 +175,30 @@ abstract class FinanceDatabase : RoomDatabase() {
         private val Migration1To2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE user_settings ADD COLUMN themeMode TEXT NOT NULL DEFAULT 'Dark'")
+            }
+        }
+
+        private val Migration2To3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE detected_drafts ADD COLUMN transactionTimestampMillis INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("UPDATE detected_drafts SET transactionTimestampMillis = detectedAtMillis WHERE transactionTimestampMillis = 0")
+            }
+        }
+
+        private val Migration3To4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE categories ADD COLUMN colorHex TEXT NOT NULL DEFAULT '#8F95A3'")
+                db.execSQL("UPDATE categories SET colorHex = '#38E68B' WHERE name = 'Grocery'")
+                db.execSQL("UPDATE categories SET colorHex = '#FFC857' WHERE name = 'Food'")
+                db.execSQL("UPDATE categories SET colorHex = '#FF4FB8' WHERE name = 'Shopping'")
+                db.execSQL("UPDATE categories SET colorHex = '#FF8A3D' WHERE name = 'Fuel'")
+                db.execSQL("UPDATE categories SET colorHex = '#FF6B7A' WHERE name = 'Rent'")
+            }
+        }
+
+        private val Migration4To5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("UPDATE transactions SET categoryId = 0 WHERE isAutoDetected = 1")
             }
         }
     }
@@ -236,7 +265,7 @@ class FinanceRepository(private val dao: FinanceDao) {
     suspend fun deleteCustomCategory(id: Long) = dao.deleteCustomCategory(id)
 
     private suspend fun seedDefaultCategories() {
-        DefaultCategories.items.forEach { dao.saveCategory(it.toEntity()) }
+        DefaultCategories.items.forEach { dao.seedCategory(it.toEntity()) }
     }
 }
 
@@ -247,14 +276,16 @@ private fun CategoryEntity.toModel() = CategoryItem(
     name = name,
     iconKey = iconKey,
     icon = MoneyIcons.resolveCategoryIcon(iconKey),
-    isDefault = isDefault
+    isDefault = isDefault,
+    colorHex = colorHex
 )
 
 private fun CategoryItem.toEntity() = CategoryEntity(
     id = id,
     name = name,
     iconKey = iconKey,
-    isDefault = isDefault
+    isDefault = isDefault,
+    colorHex = colorHex
 )
 
 private fun TransactionEntity.toModel() = LedgerTransaction(
@@ -306,7 +337,8 @@ private fun DetectedDraftEntity.toModel() = DetectedTransactionDraft(
     counterparty = counterparty,
     rawMessage = rawMessage,
     suggestedCategoryId = suggestedCategoryId,
-    detectedAtMillis = detectedAtMillis
+    detectedAtMillis = detectedAtMillis,
+    transactionTimestampMillis = if (transactionTimestampMillis == 0L) detectedAtMillis else transactionTimestampMillis
 )
 
 private fun DetectedTransactionDraft.toEntity(id: Long = this.id) = DetectedDraftEntity(
@@ -318,5 +350,6 @@ private fun DetectedTransactionDraft.toEntity(id: Long = this.id) = DetectedDraf
     counterparty = counterparty,
     rawMessage = rawMessage,
     suggestedCategoryId = suggestedCategoryId,
-    detectedAtMillis = detectedAtMillis
+    detectedAtMillis = detectedAtMillis,
+    transactionTimestampMillis = transactionTimestampMillis
 )
