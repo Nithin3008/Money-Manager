@@ -249,6 +249,14 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun addBankAccount(name: String, balance: Double) {
+        if (name.isBlank() || balance < 0.0) return
+        viewModelScope.launch {
+            repository.addAccount(name.trim(), balance)
+            reloadState()
+        }
+    }
+
     fun deleteAllSavedData() {
         viewModelScope.launch {
             repository.clearAllSavedData()
@@ -338,6 +346,48 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
             repository.addTransaction(transaction)
             val warning = findBudgetWarning(_uiState.value, transaction)
             reloadState { it.copy(showTransactionSheet = false, budgetWarning = warning) }
+        }
+    }
+
+    fun addTransfer(name: String, amount: Double, fromAccountId: Long?, toAccountId: Long?) {
+        if (amount <= 0.0 || fromAccountId == null || toAccountId == null || fromAccountId == toAccountId) return
+        viewModelScope.launch {
+            val state = _uiState.value
+            val from = state.accounts.firstOrNull { it.id == fromAccountId } ?: return@launch
+            val to = state.accounts.firstOrNull { it.id == toAccountId } ?: return@launch
+            val uncategorizedId = state.categories.firstOrNull { it.name == "Uncategorized" }?.id
+                ?: state.categories.first().id
+            val timestamp = System.currentTimeMillis()
+            val label = name.trim().ifBlank { "Transfer" }
+            repository.addTransaction(
+                LedgerTransaction(
+                    id = 0,
+                    name = "$label to ${to.name}",
+                    amount = amount,
+                    type = TransactionType.Expense,
+                    categoryId = uncategorizedId,
+                    accountId = from.id,
+                    timestampMillis = timestamp,
+                    rawMessage = "Manual transfer from ${from.name} to ${to.name}",
+                    excludeFromSummary = true
+                )
+            )
+            repository.addTransaction(
+                LedgerTransaction(
+                    id = 0,
+                    name = "$label from ${from.name}",
+                    amount = amount,
+                    type = TransactionType.Income,
+                    categoryId = uncategorizedId,
+                    accountId = to.id,
+                    timestampMillis = timestamp + 1,
+                    rawMessage = "Manual transfer from ${from.name} to ${to.name}",
+                    excludeFromSummary = true
+                )
+            )
+            repository.updateAccount(from.copy(balance = (from.balance - amount).coerceAtLeast(0.0)))
+            repository.updateAccount(to.copy(balance = to.balance + amount))
+            reloadState { it.copy(showTransactionSheet = false) }
         }
     }
 
