@@ -412,6 +412,35 @@ class FinanceRepository(private val dao: FinanceDao) {
         }
     }
 
+    suspend fun exportData(): String {
+        val data = com.moneymanager.app.model.AppBackupData(
+            settings = dao.getSettings(),
+            accounts = dao.getAccounts(),
+            categories = dao.getCategories(),
+            transactions = dao.getTransactions(),
+            budgets = dao.getBudgets()
+        )
+        return com.google.gson.Gson().toJson(data)
+    }
+
+    suspend fun importData(jsonString: String) {
+        val data = com.google.gson.Gson().fromJson(jsonString, com.moneymanager.app.model.AppBackupData::class.java)
+        
+        // delete all current
+        dao.deleteTransactions()
+        dao.deleteBudgets()
+        dao.deleteAccounts()
+        dao.deleteCustomCategories()
+        dao.deleteSettings()
+
+        // insert all
+        data.settings?.let { dao.saveSettings(it) }
+        data.accounts.forEach { dao.saveAccount(it) }
+        data.categories.forEach { dao.saveCategory(it) }
+        data.transactions.forEach { dao.saveTransaction(it) }
+        data.budgets.forEach { dao.saveBudget(it) }
+    }
+
     private suspend fun seedDefaultCategories() {
         DefaultCategories.items.forEach { dao.seedCategory(it.toEntity()) }
     }

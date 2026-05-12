@@ -641,6 +641,21 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    suspend fun getExportData(): String {
+        return repository.exportData()
+    }
+
+    fun importData(jsonString: String) {
+        viewModelScope.launch {
+            try {
+                repository.importData(jsonString)
+                reloadState()
+            } catch (e: Exception) {
+                // handle error or add to a state error message
+            }
+        }
+    }
+
     private fun normalizedSmsRaw(raw: String?): String =
         raw?.replace('\n', ' ')?.trim()?.replace(Regex("\\s+"), " ").orEmpty()
 

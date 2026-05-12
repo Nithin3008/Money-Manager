@@ -158,11 +158,54 @@ import java.time.format.DateTimeFormatter
 import java.util.Currency
 import java.util.Locale
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.material.icons.rounded.Save
+import androidx.compose.material.icons.rounded.FileDownload
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MoneyManagerApp(viewModel: MoneyViewModel) {
     val state by viewModel.uiState.collectAsState()
+    
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    
+    val exportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        if (uri != null) {
+            scope.launch {
+                try {
+                    val json = viewModel.getExportData()
+                    context.contentResolver.openOutputStream(uri)?.use { 
+                        it.write(json.toByteArray()) 
+                    }
+                } catch (e: Exception) {
+                    // Ignore
+                }
+            }
+        }
+    }
+
+    val importLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            scope.launch {
+                try {
+                    val json = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                    if (json != null) {
+                        viewModel.importData(json)
+                    }
+                } catch (e: Exception) {
+                    // Ignore
+                }
+            }
+        }
+    }
 
     if (state.isAppInitializing) {
         InitialLoadingScreen()
@@ -283,7 +326,9 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
                         onAddAccount = viewModel::addBankAccount,
                         onDeleteCategory = viewModel::deleteCategory,
                         onCategoryColorSelected = viewModel::updateCategoryColor,
-                        onDeleteAllData = viewModel::deleteAllSavedData
+                        onDeleteAllData = viewModel::deleteAllSavedData,
+                        onExportData = { exportLauncher.launch("MoneyManager_Backup_${LocalDate.now()}.json") },
+                        onImportData = { importLauncher.launch(arrayOf("application/json")) }
                     )
                 }
             }
@@ -559,7 +604,9 @@ private fun androidx.compose.foundation.lazy.LazyListScope.settingsContent(
     onAddAccount: (String, Double) -> Unit,
     onDeleteCategory: (Long) -> Unit,
     onCategoryColorSelected: (Long, String) -> Unit,
-    onDeleteAllData: () -> Unit
+    onDeleteAllData: () -> Unit,
+    onExportData: () -> Unit,
+    onImportData: () -> Unit
 ) {
     item {
         ProfileHeader(state)
@@ -633,7 +680,51 @@ private fun androidx.compose.foundation.lazy.LazyListScope.settingsContent(
         }
     }
     item {
+        BackupRestorePanel(onExport = onExportData, onImport = onImportData)
+    }
+    item {
         DeleteDataPanel(onDeleteAllData = onDeleteAllData)
+    }
+}
+
+@Composable
+private fun BackupRestorePanel(onExport: () -> Unit, onImport: () -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        LabelText("BACKUP & RESTORE")
+        ElevatedPanel {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconTile(Icons.Rounded.Save, PrimarySoft)
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Export & Import Data", color = TextPrimary, style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            "Save your data to a file, or restore from a previous backup.",
+                            color = TextDim,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedButton(
+                        onClick = onExport,
+                        modifier = Modifier.weight(1f).height(52.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, PrimarySoft)
+                    ) {
+                        Text("Export", color = PrimarySoft, fontWeight = FontWeight.Bold)
+                    }
+                    Button(
+                        onClick = onImport,
+                        modifier = Modifier.weight(1f).height(52.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = primaryButtonColors()
+                    ) {
+                        Text("Import", fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
     }
 }
 
