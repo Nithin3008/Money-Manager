@@ -1,6 +1,7 @@
 package com.moneymanager.app.ui
 
 import android.app.DatePickerDialog
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
@@ -8,6 +9,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
@@ -81,6 +83,7 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -122,6 +125,7 @@ import com.moneymanager.app.model.MoneyIcons
 import com.moneymanager.app.model.ScreenTab
 import com.moneymanager.app.model.ThemeMode
 import com.moneymanager.app.model.TransactionType
+import com.moneymanager.app.model.UiAccent
 import com.moneymanager.app.model.month
 import com.moneymanager.app.model.shortLabel
 import com.moneymanager.app.model.transactionDate
@@ -246,6 +250,7 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
                     onAddCategory = viewModel::setCategorySheet,
                     onCurrencySelected = viewModel::selectCurrency,
                     onThemeSelected = viewModel::selectThemeMode,
+                    onUiAccentSelected = viewModel::selectUiAccent,
                     onSalaryShiftChanged = viewModel::setSalaryShiftIncomeEnabled,
                     onSalaryWindowDaysChanged = viewModel::setSalaryShiftWindowDays,
                     onSalaryCategorySelected = viewModel::setSalaryCategoryId,
@@ -517,6 +522,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.settingsContent(
     onAddCategory: (Boolean) -> Unit,
     onCurrencySelected: (CurrencyOption) -> Unit,
     onThemeSelected: (ThemeMode) -> Unit,
+    onUiAccentSelected: (UiAccent) -> Unit,
     onSalaryShiftChanged: (Boolean) -> Unit,
     onSalaryWindowDaysChanged: (Int) -> Unit,
     onSalaryCategorySelected: (Long?) -> Unit,
@@ -547,6 +553,13 @@ private fun androidx.compose.foundation.lazy.LazyListScope.settingsContent(
         ThemeSelector(
             selected = state.themeMode,
             onSelected = onThemeSelected
+        )
+    }
+    item {
+        UiAccentSelector(
+            selected = state.uiAccent,
+            darkMode = state.themeMode == ThemeMode.Dark,
+            onSelected = onUiAccentSelected
         )
     }
     item {
@@ -1154,16 +1167,36 @@ private fun ColorSwatches(selected: String, onSelected: (String) -> Unit) {
     LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         items(categoryPalette, key = { it }) { colorHex ->
             val color = colorFromHex(colorHex)
+            val selectedColor = selected == colorHex
+            val scale by animateFloatAsState(
+                targetValue = if (selectedColor) 1.08f else 1f,
+                animationSpec = tween(220, easing = FastOutSlowInEasing),
+                label = "swatchScale"
+            )
             Box(
                 modifier = Modifier
-                    .size(42.dp)
+                    .size(46.dp)
+                    .scale(scale)
                     .clip(CircleShape)
-                    .background(color)
+                    .background(if (selectedColor) Color.White else color.copy(alpha = 0.16f))
+                    .border(
+                        width = if (selectedColor) 3.dp else 1.dp,
+                        color = if (selectedColor) Color.White else color.copy(alpha = 0.72f),
+                        shape = CircleShape
+                    )
                     .clickable { onSelected(colorHex) },
                 contentAlignment = Alignment.Center
             ) {
-                if (selected == colorHex) {
-                    Icon(Icons.Rounded.Check, contentDescription = null, tint = Color.White)
+                Box(
+                    modifier = Modifier
+                        .size(if (selectedColor) 32.dp else 34.dp)
+                        .clip(CircleShape)
+                        .background(color),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (selectedColor) {
+                        Icon(Icons.Rounded.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+                    }
                 }
             }
         }
@@ -1197,6 +1230,7 @@ private fun SheetContent(title: String, content: @Composable ColumnScope.() -> U
         modifier = Modifier
             .fillMaxWidth()
             .verticalScroll(rememberScrollState())
+            .animateContentSize(tween(260, easing = FastOutSlowInEasing))
             .imePadding()
             .padding(horizontal = 20.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
@@ -1441,21 +1475,25 @@ private fun ActivityScanPanel(
                     enabled = !state.isScanningMessages,
                     modifier = Modifier.weight(1f).height(52.dp),
                     shape = RoundedCornerShape(12.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp),
                     colors = primaryButtonColors()
                 ) {
                     Icon(Icons.Rounded.Sms, contentDescription = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Scan Now", fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.width(6.dp))
+                    Text("Scan", fontWeight = FontWeight.Bold, maxLines = 1)
                 }
                 OutlinedButton(
                     onClick = onPopulateThreeMonths,
                     enabled = !state.isScanningMessages,
                     modifier = Modifier.weight(1f).height(52.dp),
-                    shape = RoundedCornerShape(12.dp)
+                    shape = RoundedCornerShape(12.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp),
+                    border = BorderStroke(1.dp, PrimaryBlue),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = PrimaryBlue)
                 ) {
                     Icon(Icons.Rounded.CalendarMonth, contentDescription = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Populate 3M", fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.width(6.dp))
+                    Text("3 Months", fontWeight = FontWeight.Bold, maxLines = 1)
                 }
             }
         }
@@ -1716,7 +1754,8 @@ private fun SummaryBehaviorSettings(
                     }
                     Switch(
                         checked = salaryShiftEnabled,
-                        onCheckedChange = onSalaryShiftChanged
+                        onCheckedChange = onSalaryShiftChanged,
+                        colors = appSwitchColors()
                     )
                 }
                 if (salaryShiftEnabled) {
@@ -1903,7 +1942,8 @@ private fun SalaryCategorySettings(
                     }
                     Switch(
                         checked = state.salaryKeywordsForUncategorized,
-                        onCheckedChange = onSalaryKeywordsToggled
+                        onCheckedChange = onSalaryKeywordsToggled,
+                        colors = appSwitchColors()
                     )
                 }
             }
@@ -2636,8 +2676,77 @@ private fun ThemeSelector(
                 }
                 Switch(
                     checked = dark,
-                    onCheckedChange = { onSelected(if (it) ThemeMode.Dark else ThemeMode.Light) }
+                    onCheckedChange = { onSelected(if (it) ThemeMode.Dark else ThemeMode.Light) },
+                    colors = appSwitchColors()
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun UiAccentSelector(
+    selected: UiAccent,
+    darkMode: Boolean,
+    onSelected: (UiAccent) -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        LabelText("UI ACCENT")
+        ElevatedPanel {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Buttons, toggles, tabs and highlights", color = TextMuted, style = MaterialTheme.typography.bodyMedium)
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    items(UiAccent.entries, key = { it.name }) { accent ->
+                        val color = colorFromHex(if (darkMode) accent.darkHex else accent.lightHex)
+                        val isSelected = selected == accent
+                        val scale by animateFloatAsState(
+                            targetValue = if (isSelected) 1.08f else 1f,
+                            animationSpec = tween(220, easing = FastOutSlowInEasing),
+                            label = "accentScale"
+                        )
+                        Column(
+                            modifier = Modifier
+                                .width(58.dp)
+                                .scale(scale)
+                                .clickable { onSelected(accent) },
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(46.dp)
+                                    .clip(CircleShape)
+                                    .background(if (isSelected) Color.White else color.copy(alpha = 0.16f))
+                                    .border(
+                                        width = if (isSelected) 3.dp else 1.dp,
+                                        color = if (isSelected) Color.White else color.copy(alpha = 0.72f),
+                                        shape = CircleShape
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(if (isSelected) 32.dp else 34.dp)
+                                        .clip(CircleShape)
+                                        .background(color),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (isSelected) {
+                                        Icon(Icons.Rounded.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+                                    }
+                                }
+                            }
+                            Text(
+                                accent.label,
+                                color = if (isSelected) TextPrimary else TextMuted,
+                                style = MaterialTheme.typography.labelSmall,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    }
+                }
             }
         }
     }
@@ -2668,7 +2777,7 @@ private fun SectionHeader(title: String, action: String) {
 @Composable
 private fun ElevatedPanel(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
     Card(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth().animateContentSize(tween(260, easing = FastOutSlowInEasing)),
         shape = MaterialTheme.shapes.large,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
         border = BorderStroke(1.dp, appBorderColor())
@@ -2688,6 +2797,16 @@ private fun appDividerColor(): Color {
 private fun appTrackColor(): Color {
     return if (isAmoledTheme()) Navy800 else Color(0xFFDCE4F3)
 }
+
+@Composable
+private fun appSwitchColors() = SwitchDefaults.colors(
+    checkedThumbColor = Color.White,
+    checkedTrackColor = PrimaryBlue,
+    checkedBorderColor = PrimaryBlue,
+    uncheckedThumbColor = TextMuted,
+    uncheckedTrackColor = if (isAmoledTheme()) Navy800 else Color(0xFFE8EDF7),
+    uncheckedBorderColor = appBorderColor()
+)
 
 @Composable
 fun primaryButtonColors(): ButtonColors = ButtonDefaults.buttonColors(
@@ -2924,14 +3043,19 @@ private fun compactMoney(value: Double, currency: CurrencyOption): String {
 }
 
 private val categoryPalette = listOf(
-    "#8F95A3",
-    "#4F8CFF",
-    "#38E68B",
-    "#FFC857",
-    "#FF4FB8",
-    "#FF8A3D",
-    "#9B5CFF",
-    "#00D1C1",
-    "#FF6B7A",
-    "#2DD4BF"
+    "#7C9DFF",
+    "#61E6A4",
+    "#FF7A8A",
+    "#FFD166",
+    "#B589FF",
+    "#38D5E8",
+    "#FF9F43",
+    "#F472B6",
+    "#4ADE80",
+    "#60A5FA",
+    "#A78BFA",
+    "#F87171",
+    "#2DD4BF",
+    "#FBBF24",
+    "#94A3B8"
 )

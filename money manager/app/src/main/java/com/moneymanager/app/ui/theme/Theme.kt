@@ -1,18 +1,15 @@
 package com.moneymanager.app.ui.theme
 
-import android.os.Build
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.moneymanager.app.model.ThemeMode
+import com.moneymanager.app.model.UiAccent
 
 var Navy950 = Color(0xFF000000)
 var Navy900 = Color(0xFF111111)
@@ -100,17 +97,12 @@ private val ExpressiveShapes = Shapes(
 @Composable
 fun MoneyManagerTheme(
     themeMode: ThemeMode = ThemeMode.Dark,
+    uiAccent: UiAccent = UiAccent.Sky,
     content: @Composable () -> Unit
 ) {
     val dark = themeMode == ThemeMode.Dark
-    val context = LocalContext.current
-    val colorScheme = when {
-        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && dark -> dynamicDarkColorScheme(context)
-        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> dynamicLightColorScheme(context)
-        dark -> ExpressiveDarkColorScheme
-        else -> ExpressiveLightColorScheme
-    }
-    applyThemeTokens(dark)
+    val colorScheme = if (dark) ExpressiveDarkColorScheme else ExpressiveLightColorScheme
+    applyThemeTokens(dark, uiAccent)
 
     MaterialTheme(
         colorScheme = colorScheme,
@@ -120,7 +112,7 @@ fun MoneyManagerTheme(
     )
 }
 
-private fun applyThemeTokens(dark: Boolean) {
+private fun applyThemeTokens(dark: Boolean, uiAccent: UiAccent) {
     if (dark) {
         Navy950 = Color(0xFF0C0F17)
         Navy900 = Color(0xFF111620)
@@ -129,8 +121,8 @@ private fun applyThemeTokens(dark: Boolean) {
         TextPrimary = Color(0xFFF8FAFF)
         TextMuted = Color(0xFFC7CEDC)
         TextDim = Color(0xFF94A0B4)
-        PrimaryBlue = Color(0xFF7C9DFF)
-        PrimarySoft = Color(0xFFAFC6FF)
+        PrimaryBlue = uiAccent.darkHex.toColorOr(Color(0xFF7C9DFF))
+        PrimarySoft = uiAccent.softDarkHex.toColorOr(Color(0xFFAFC6FF))
         MoneyGreen = Color(0xFF61E6A4)
         WarningAmber = Color(0xFFFFD166)
         LossRed = Color(0xFFFF7A8A)
@@ -142,10 +134,14 @@ private fun applyThemeTokens(dark: Boolean) {
         TextPrimary = Color(0xFF151923)
         TextMuted = Color(0xFF4A5568)
         TextDim = Color(0xFF6D7688)
-        PrimaryBlue = Color(0xFF345CA8)
-        PrimarySoft = Color(0xFF1F65C8)
+        PrimaryBlue = uiAccent.lightHex.toColorOr(Color(0xFF345CA8))
+        PrimarySoft = uiAccent.softLightHex.toColorOr(Color(0xFF1F65C8))
         MoneyGreen = Color(0xFF00875A)
         WarningAmber = Color(0xFFC87400)
         LossRed = Color(0xFFC43A4E)
     }
+}
+
+private fun String.toColorOr(fallback: Color): Color {
+    return runCatching { Color(android.graphics.Color.parseColor(this)) }.getOrDefault(fallback)
 }

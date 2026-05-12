@@ -26,6 +26,7 @@ import com.moneymanager.app.model.MoneyIcons
 import com.moneymanager.app.model.ScreenTab
 import com.moneymanager.app.model.ThemeMode
 import com.moneymanager.app.model.TransactionType
+import com.moneymanager.app.model.UiAccent
 import com.moneymanager.app.model.month
 import java.time.Instant
 import java.time.ZoneId
@@ -134,6 +135,14 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
     fun selectThemeMode(themeMode: ThemeMode) {
         viewModelScope.launch {
             val next = _uiState.value.copy(themeMode = themeMode)
+            repository.persistUserSettings(next)
+            _uiState.value = next
+        }
+    }
+
+    fun selectUiAccent(uiAccent: UiAccent) {
+        viewModelScope.launch {
+            val next = _uiState.value.copy(uiAccent = uiAccent)
             repository.persistUserSettings(next)
             _uiState.value = next
         }

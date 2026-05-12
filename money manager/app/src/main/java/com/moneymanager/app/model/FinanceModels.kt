@@ -80,6 +80,27 @@ enum class ThemeMode(val label: String) {
     Light("Light")
 }
 
+enum class UiAccent(
+    val label: String,
+    val darkHex: String,
+    val lightHex: String,
+    val softDarkHex: String,
+    val softLightHex: String
+) {
+    Sky("Sky", "#7C9DFF", "#345CA8", "#AFC6FF", "#1F65C8"),
+    Mint("Mint", "#61E6A4", "#007A52", "#B8FFD7", "#006C49"),
+    Rose("Rose", "#FF7A8A", "#B32648", "#FFD9DE", "#A3193D"),
+    Amber("Amber", "#FFD166", "#8A5600", "#FFE2A3", "#7A4B00"),
+    Violet("Violet", "#B589FF", "#6750A4", "#D8C2FF", "#5B45A0"),
+    Cyan("Cyan", "#38D5E8", "#006878", "#B3EBF4", "#005E6C"),
+    Coral("Coral", "#FF9F7A", "#A33D22", "#FFD7C7", "#91341B"),
+    Pink("Pink", "#F472B6", "#9D2868", "#FFD7EC", "#8A1F5B"),
+    Emerald("Emerald", "#4ADE80", "#167A3A", "#C4FBD3", "#0D6F31"),
+    Indigo("Indigo", "#818CF8", "#3F51B5", "#DCE1FF", "#3342A2"),
+    Teal("Teal", "#2DD4BF", "#00796B", "#B6F1E8", "#006D60"),
+    Slate("Slate", "#A7B3CC", "#526178", "#D9E2F2", "#445268")
+}
+
 data class BankAccount(
     val id: Long,
     val name: String,
@@ -148,6 +169,7 @@ data class FinanceUiState(
     val userName: String = "",
     val currency: CurrencyOption = CurrencyOption.INR,
     val themeMode: ThemeMode = ThemeMode.Dark,
+    val uiAccent: UiAccent = UiAccent.Sky,
     val selectedTab: ScreenTab = ScreenTab.Dashboard,
     val selectedMonth: YearMonth = YearMonth.now(),
     val accounts: List<BankAccount> = emptyList(),
