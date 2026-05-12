@@ -47,7 +47,12 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
 
     fun completeRegistration(name: String, accounts: List<Pair<String, Double>>) {
         viewModelScope.launch {
-            repository.persistUserSettings(_uiState.value.copy(userName = name.trim()))
+            repository.persistUserSettings(
+                _uiState.value.copy(
+                    userName = name.trim(),
+                    bankSmsSetupCompleted = true
+                )
+            )
             accounts
                 .filter { it.first.isNotBlank() && it.second >= 0.0 }
                 .forEach { repository.addAccount(it.first.trim(), it.second) }
@@ -213,6 +218,15 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
                 smsMatchKey = SmsBankKeys.normalize(smsBankLabel)
             )
             repository.remapTransactionAccountsFromSmsLabels()
+            reloadState()
+        }
+    }
+
+    fun updateAccountBalance(accountId: Long, balance: Double) {
+        if (balance < 0.0) return
+        viewModelScope.launch {
+            val account = _uiState.value.accounts.firstOrNull { it.id == accountId } ?: return@launch
+            repository.updateAccount(account.copy(balance = balance))
             reloadState()
         }
     }

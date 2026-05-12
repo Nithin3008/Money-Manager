@@ -162,29 +162,6 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
         return
     }
 
-    LaunchedEffect(state.bankSmsSetupCompleted) {
-        if (!state.bankSmsSetupCompleted) {
-            viewModel.refreshDiscoveredSmsBanks()
-        }
-    }
-
-    val needsBankSmsSetup =
-        !state.bankSmsSetupCompleted &&
-            (state.accounts.size >= 2 || state.discoveredSmsBanks.size >= 2)
-    if (needsBankSmsSetup) {
-        LaunchedEffect(Unit) {
-            viewModel.refreshDiscoveredSmsBanks()
-        }
-        BankSmsSetupScreen(
-            state = state,
-            onMapBank = viewModel::mapSmsBankToAccount,
-            onCreateAccount = viewModel::createAccountForSmsLabel,
-            onSkip = viewModel::completeBankSmsOnboarding,
-            onDone = viewModel::completeBankSmsOnboarding
-        )
-        return
-    }
-
     LaunchedEffect(Unit) {
         viewModel.scanTodayMessages()
         while (true) {
@@ -273,6 +250,7 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
                     onSalaryCategorySelected = viewModel::setSalaryCategoryId,
                     onSalaryKeywordsToggled = viewModel::setSalaryKeywordsForUncategorized,
                     onDeleteAccount = viewModel::deleteAccount,
+                    onUpdateAccountBalance = viewModel::updateAccountBalance,
                     onDeleteCategory = viewModel::deleteCategory,
                     onCategoryColorSelected = viewModel::updateCategoryColor,
                     onDeleteAllData = viewModel::deleteAllSavedData
@@ -526,6 +504,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.summaryContent(
     item {
         MetricGrid(state = state)
     }
+    item { MonthBalanceStrip(state) }
     item { CashFlowGraph(state) }
     item { DailyExpenseBarGraph(state) }
     item { CategoryPieChart(state, categoryTotals(state)) }
@@ -542,6 +521,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.settingsContent(
     onSalaryCategorySelected: (Long?) -> Unit,
     onSalaryKeywordsToggled: (Boolean) -> Unit,
     onDeleteAccount: (Long) -> Unit,
+    onUpdateAccountBalance: (Long, Double) -> Unit,
     onDeleteCategory: (Long) -> Unit,
     onCategoryColorSelected: (Long, String) -> Unit,
     onDeleteAllData: () -> Unit
@@ -550,7 +530,11 @@ private fun androidx.compose.foundation.lazy.LazyListScope.settingsContent(
         ProfileHeader(state)
     }
     item {
-        AccountSettingsGroup(state = state, onDelete = onDeleteAccount)
+        AccountSettingsGroup(
+            state = state,
+            onDelete = onDeleteAccount,
+            onUpdateBalance = onUpdateAccountBalance
+        )
     }
     item {
         CurrencySelector(
@@ -684,7 +668,7 @@ private fun RegistrationScreen(onComplete: (String, List<Pair<String, Double>>) 
         item {
             LargeTitle(
                 title = "Create Account",
-                subtitle = "Start with your name. Bank accounts are optional and can be added now for tracking."
+                subtitle = "Start with your name and current balance. Add each account you want tracked."
             )
         }
         item {
@@ -699,10 +683,12 @@ private fun RegistrationScreen(onComplete: (String, List<Pair<String, Double>>) 
                 shape = RoundedCornerShape(12.dp)
             )
         }
-        item { LabelText("BANK ACCOUNTS OPTIONAL") }
+        item { LabelText("BANK ACCOUNTS") }
         items(accounts.size) { index ->
             AccountDraftRow(
                 account = accounts[index],
+                accountNumber = index + 1,
+                canRemove = accounts.size > 1,
                 onNameChanged = { accounts[index] = accounts[index].copy(name = it) },
                 onBalanceChanged = { accounts[index] = accounts[index].copy(balance = it) },
                 onRemove = {
@@ -719,21 +705,25 @@ private fun RegistrationScreen(onComplete: (String, List<Pair<String, Double>>) 
             ) {
                 Icon(Icons.Rounded.Add, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
-                Text("Add Bank Account")
+                Text("Add another account")
             }
         }
         item {
+            val validAccounts = accounts.mapNotNull {
+                val amount = it.balance.toDoubleOrNull()
+                if (it.name.isBlank() || amount == null || amount < 0.0) null else it.name.trim() to amount
+            }
             Button(
                 onClick = {
                     onComplete(
                         name,
                         accounts.mapNotNull {
                             val amount = it.balance.toDoubleOrNull()
-                            if (it.name.isBlank() || amount == null) null else it.name to amount
+                            if (it.name.isBlank() || amount == null || amount < 0.0) null else it.name.trim() to amount
                         }
                     )
                 },
-                enabled = name.isNotBlank(),
+                enabled = name.isNotBlank() && validAccounts.isNotEmpty(),
                 modifier = Modifier.fillMaxWidth().height(58.dp),
                 shape = RoundedCornerShape(12.dp),
                 colors = primaryButtonColors()
@@ -749,6 +739,8 @@ private data class AccountDraft(val name: String = "", val balance: String = "")
 @Composable
 private fun AccountDraftRow(
     account: AccountDraft,
+    accountNumber: Int,
+    canRemove: Boolean,
     onNameChanged: (String) -> Unit,
     onBalanceChanged: (String) -> Unit,
     onRemove: () -> Unit
@@ -758,14 +750,23 @@ private fun AccountDraftRow(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Rounded.AccountBalance, contentDescription = null, tint = PrimarySoft)
                 Spacer(Modifier.width(8.dp))
-                Text("Bank Account", color = TextPrimary, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                TextButton(onClick = onRemove) { Text("Remove") }
+                Text(
+                    "Account $accountNumber",
+                    color = TextPrimary,
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.weight(1f)
+                )
+                if (canRemove) {
+                    TextButton(onClick = onRemove) {
+                        Text("Remove", color = LossRed)
+                    }
+                }
             }
             OutlinedTextField(
                 value = account.name,
                 onValueChange = onNameChanged,
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("Account Name") },
+                label = { Text("Account name") },
                 singleLine = true,
                 colors = inputColors(),
                 shape = RoundedCornerShape(12.dp)
@@ -774,11 +775,16 @@ private fun AccountDraftRow(
                 value = account.balance,
                 onValueChange = onBalanceChanged,
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("Current Amount") },
+                label = { Text("Current balance") },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                 singleLine = true,
                 colors = inputColors(),
                 shape = RoundedCornerShape(12.dp)
+            )
+            Text(
+                "This balance becomes the current anchor for reverse history calculation.",
+                color = TextDim,
+                style = MaterialTheme.typography.bodySmall
             )
         }
     }
@@ -1639,7 +1645,7 @@ private fun MetricGrid(state: FinanceUiState) {
             }
             SmallMetric("Expenses", money(expense, currency), LossRed, Modifier.weight(1f), boxHeight = 124.dp)
         }
-        SmallMetric("Net Total", money(net, currency), if (net >= 0) PrimarySoft else LossRed, Modifier.fillMaxWidth())
+        SmallMetric("Net cashflow", money(net, currency), if (net >= 0) PrimarySoft else LossRed, Modifier.fillMaxWidth())
         if (state.salaryShiftIncomeEnabled &&
             kotlin.math.abs(state.calendarMonthIncomeTotal - totalIncome) > 0.01
         ) {
@@ -1682,20 +1688,47 @@ private fun SummaryAccountFilterRow(
 
 @Composable
 private fun MonthBalanceStrip(state: FinanceUiState) {
+    val isCurrentMonth = state.selectedMonth == YearMonth.now()
+    val expectedClosing = state.balanceAtStartOfSelectedMonth + state.calendarMonthNet
+    val gap = state.selectedMonthReconciliationGap
     ElevatedPanel {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("Cash balance (calendar)", color = TextPrimary, style = MaterialTheme.typography.titleMedium)
+            Text("Balance reconstruction", color = TextPrimary, style = MaterialTheme.typography.titleMedium)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("Start of month", color = TextDim, style = MaterialTheme.typography.bodyMedium)
+                Text("Current anchor", color = TextDim, style = MaterialTheme.typography.bodyMedium)
+                Text(state.money(state.currentBalanceAnchor), color = PrimarySoft, style = MaterialTheme.typography.titleMedium)
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("Opening balance", color = TextDim, style = MaterialTheme.typography.bodyMedium)
                 Text(state.money(state.balanceAtStartOfSelectedMonth), color = TextPrimary, style = MaterialTheme.typography.titleMedium)
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("End of month", color = TextDim, style = MaterialTheme.typography.bodyMedium)
+                Text(if (isCurrentMonth) "Balance now" else "Closing balance", color = TextDim, style = MaterialTheme.typography.bodyMedium)
                 Text(state.money(state.balanceAtEndOfSelectedMonth), color = TextPrimary, style = MaterialTheme.typography.titleMedium)
+            }
+            HorizontalDivider(color = appBorderColor())
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("Calendar cashflow", color = TextDim, style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    state.money(state.calendarMonthNet),
+                    color = if (state.calendarMonthNet >= 0) MoneyGreen else LossRed,
+                    style = MaterialTheme.typography.titleMedium
+                )
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("Expected close", color = TextDim, style = MaterialTheme.typography.bodyMedium)
+                Text(state.money(expectedClosing), color = TextPrimary, style = MaterialTheme.typography.titleMedium)
+            }
+            if (kotlin.math.abs(gap) > 0.01) {
+                Text(
+                    "Untracked difference: ${state.money(gap)}. This usually means an SMS is missing, excluded, duplicated, or mapped to another account.",
+                    color = WarningAmber,
+                    style = MaterialTheme.typography.bodySmall
+                )
             }
             if (state.salaryShiftIncomeEnabled) {
                 Text(
-                    "Summary income includes late-month credits in the next month; balances above follow actual dates.",
+                    "Income cards may use payroll month shift; reconstruction always follows actual SMS dates.",
                     color = TextDim,
                     style = MaterialTheme.typography.bodySmall
                 )
@@ -2435,7 +2468,11 @@ private fun SettingsGroup(title: String, rows: List<String>) {
 }
 
 @Composable
-private fun AccountSettingsGroup(state: FinanceUiState, onDelete: (Long) -> Unit) {
+private fun AccountSettingsGroup(
+    state: FinanceUiState,
+    onDelete: (Long) -> Unit,
+    onUpdateBalance: (Long, Double) -> Unit
+) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         LabelText("BANK ACCOUNTS")
         ElevatedPanel {
@@ -2444,16 +2481,59 @@ private fun AccountSettingsGroup(state: FinanceUiState, onDelete: (Long) -> Unit
             } else {
                 Column {
                     state.accounts.forEachIndexed { index, account ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(start = 16.dp, top = 10.dp, end = 8.dp, bottom = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(Modifier.weight(1f)) {
-                                Text(account.name, color = TextPrimary, style = MaterialTheme.typography.titleMedium)
-                                Text(state.money(account.balance), color = TextDim, style = MaterialTheme.typography.bodyMedium)
+                        var expanded by remember(account.id) { mutableStateOf(false) }
+                        var balanceText by remember(account.id, account.balance) { mutableStateOf(account.balance.toString()) }
+                        Column {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { expanded = !expanded }
+                                    .padding(start = 16.dp, top = 10.dp, end = 8.dp, bottom = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(account.name, color = TextPrimary, style = MaterialTheme.typography.titleMedium)
+                                    Text(state.money(account.balance), color = TextDim, style = MaterialTheme.typography.bodyMedium)
+                                }
+                                Text(if (expanded) "Hide" else "Edit", color = PrimarySoft, style = MaterialTheme.typography.labelMedium)
                             }
-                            TextButton(onClick = { onDelete(account.id) }) {
-                                Text("Delete", color = LossRed)
+                            if (expanded) {
+                                Column(
+                                    Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
+                                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    OutlinedTextField(
+                                        value = balanceText,
+                                        onValueChange = { balanceText = it },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        label = { Text("Current balance anchor") },
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                        singleLine = true,
+                                        colors = inputColors(),
+                                        shape = RoundedCornerShape(12.dp)
+                                    )
+                                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                        Button(
+                                            onClick = {
+                                                balanceText.toDoubleOrNull()?.let { onUpdateBalance(account.id, it) }
+                                            },
+                                            enabled = (balanceText.toDoubleOrNull() ?: -1.0) >= 0.0,
+                                            modifier = Modifier.weight(1f),
+                                            shape = RoundedCornerShape(12.dp),
+                                            colors = primaryButtonColors()
+                                        ) {
+                                            Text("Save balance", fontWeight = FontWeight.Bold)
+                                        }
+                                        TextButton(onClick = { onDelete(account.id) }) {
+                                            Text("Delete", color = LossRed)
+                                        }
+                                    }
+                                    Text(
+                                        "This value is treated as the current balance. History is reconstructed backward from it.",
+                                        color = TextDim,
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                }
                             }
                         }
                         if (index != state.accounts.lastIndex) {
