@@ -1,11 +1,17 @@
 package com.moneymanager.app.ui
 
 import android.app.DatePickerDialog
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -126,6 +132,7 @@ import com.moneymanager.app.model.ScreenTab
 import com.moneymanager.app.model.ThemeMode
 import com.moneymanager.app.model.TransactionType
 import com.moneymanager.app.model.UiAccent
+import com.moneymanager.app.model.UiSurface
 import com.moneymanager.app.model.month
 import com.moneymanager.app.model.shortLabel
 import com.moneymanager.app.model.transactionDate
@@ -209,58 +216,75 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
             }
         }
     ) { padding ->
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .statusBarsPadding()
-                .padding(padding),
-            contentPadding = PaddingValues(start = 20.dp, top = 18.dp, end = 20.dp, bottom = 104.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            item { BrandHeader(state.userName) }
-            when (state.selectedTab) {
-                ScreenTab.Dashboard -> dashboardContent(
-                    state = state,
-                    onOpenSummary = viewModel::selectTab,
-                    onAcceptDraft = viewModel::acceptDetectedTransaction,
-                    onIgnoreDraft = viewModel::ignoreDetectedTransaction,
-                    onDeleteTransaction = viewModel::deleteTransaction,
-                    onEditTransaction = viewModel::requestEditTransactionCategory,
-                    onDashboardPageSelected = viewModel::selectDashboardTransactionPage,
-                    onDraftPageSelected = viewModel::selectDashboardDraftPage
-                )
-                ScreenTab.Activity -> activityContent(
-                    state = state,
-                    onScanNow = viewModel::scanCurrentActivityPeriod,
-                    onPopulateThreeMonths = viewModel::populateLastThreeMonths,
-                    onDateFilterSelected = viewModel::setActivityDateFilter,
-                    onDeleteTransaction = viewModel::deleteTransaction,
-                    onEditTransaction = viewModel::requestEditTransactionCategory,
-                    onLoadMore = viewModel::loadMoreTransactions
-                )
-                ScreenTab.Budget -> budgetContent(state, viewModel::setBudgetSheet, viewModel::deleteBudget)
-                ScreenTab.Summary -> summaryContent(
-                    state = state,
-                    onMonthSelected = viewModel::selectMonth,
-                    onToggleSummaryAccount = viewModel::toggleSummaryAccountInFilter,
-                    onClearSummaryAccountFilter = viewModel::clearSummaryAccountFilter
-                )
-                ScreenTab.Settings -> settingsContent(
-                    state = state,
-                    onAddCategory = viewModel::setCategorySheet,
-                    onCurrencySelected = viewModel::selectCurrency,
-                    onThemeSelected = viewModel::selectThemeMode,
-                    onUiAccentSelected = viewModel::selectUiAccent,
-                    onSalaryShiftChanged = viewModel::setSalaryShiftIncomeEnabled,
-                    onSalaryWindowDaysChanged = viewModel::setSalaryShiftWindowDays,
-                    onSalaryCategorySelected = viewModel::setSalaryCategoryId,
-                    onSalaryKeywordsToggled = viewModel::setSalaryKeywordsForUncategorized,
-                    onDeleteAccount = viewModel::deleteAccount,
-                    onUpdateAccountBalance = viewModel::updateAccountBalance,
-                    onDeleteCategory = viewModel::deleteCategory,
-                    onCategoryColorSelected = viewModel::updateCategoryColor,
-                    onDeleteAllData = viewModel::deleteAllSavedData
-                )
+        AnimatedContent(
+            targetState = state.selectedTab,
+            transitionSpec = {
+                val direction = if (targetState.ordinal >= initialState.ordinal) 1 else -1
+                (slideInHorizontally(
+                    animationSpec = tween(320, easing = FastOutSlowInEasing),
+                    initialOffsetX = { it / 5 * direction }
+                ) + fadeIn(tween(220))) togetherWith
+                    (slideOutHorizontally(
+                        animationSpec = tween(260, easing = FastOutSlowInEasing),
+                        targetOffsetX = { -it / 6 * direction }
+                    ) + fadeOut(tween(180)))
+            },
+            label = "tabTransition"
+        ) { tab ->
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .statusBarsPadding()
+                    .padding(padding),
+                contentPadding = PaddingValues(start = 20.dp, top = 18.dp, end = 20.dp, bottom = 104.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                item { BrandHeader(state.userName) }
+                when (tab) {
+                    ScreenTab.Dashboard -> dashboardContent(
+                        state = state,
+                        onOpenSummary = viewModel::selectTab,
+                        onAcceptDraft = viewModel::acceptDetectedTransaction,
+                        onIgnoreDraft = viewModel::ignoreDetectedTransaction,
+                        onDeleteTransaction = viewModel::deleteTransaction,
+                        onEditTransaction = viewModel::requestEditTransactionCategory,
+                        onDashboardPageSelected = viewModel::selectDashboardTransactionPage,
+                        onDraftPageSelected = viewModel::selectDashboardDraftPage
+                    )
+                    ScreenTab.Activity -> activityContent(
+                        state = state,
+                        onScanNow = viewModel::scanCurrentActivityPeriod,
+                        onPopulateThreeMonths = viewModel::populateLastThreeMonths,
+                        onDateFilterSelected = viewModel::setActivityDateFilter,
+                        onDeleteTransaction = viewModel::deleteTransaction,
+                        onEditTransaction = viewModel::requestEditTransactionCategory,
+                        onLoadMore = viewModel::loadMoreTransactions
+                    )
+                    ScreenTab.Budget -> budgetContent(state, viewModel::setBudgetSheet, viewModel::deleteBudget)
+                    ScreenTab.Summary -> summaryContent(
+                        state = state,
+                        onMonthSelected = viewModel::selectMonth,
+                        onToggleSummaryAccount = viewModel::toggleSummaryAccountInFilter,
+                        onClearSummaryAccountFilter = viewModel::clearSummaryAccountFilter
+                    )
+                    ScreenTab.Settings -> settingsContent(
+                        state = state,
+                        onAddCategory = viewModel::setCategorySheet,
+                        onCurrencySelected = viewModel::selectCurrency,
+                        onThemeSelected = viewModel::selectThemeMode,
+                        onUiAccentSelected = viewModel::selectUiAccent,
+                        onUiSurfaceSelected = viewModel::selectUiSurface,
+                        onSalaryShiftChanged = viewModel::setSalaryShiftIncomeEnabled,
+                        onSalaryWindowDaysChanged = viewModel::setSalaryShiftWindowDays,
+                        onSalaryCategorySelected = viewModel::setSalaryCategoryId,
+                        onSalaryKeywordsToggled = viewModel::setSalaryKeywordsForUncategorized,
+                        onDeleteAccount = viewModel::deleteAccount,
+                        onUpdateAccountBalance = viewModel::updateAccountBalance,
+                        onDeleteCategory = viewModel::deleteCategory,
+                        onCategoryColorSelected = viewModel::updateCategoryColor,
+                        onDeleteAllData = viewModel::deleteAllSavedData
+                    )
+                }
             }
         }
     }
@@ -523,6 +547,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.settingsContent(
     onCurrencySelected: (CurrencyOption) -> Unit,
     onThemeSelected: (ThemeMode) -> Unit,
     onUiAccentSelected: (UiAccent) -> Unit,
+    onUiSurfaceSelected: (UiSurface) -> Unit,
     onSalaryShiftChanged: (Boolean) -> Unit,
     onSalaryWindowDaysChanged: (Int) -> Unit,
     onSalaryCategorySelected: (Long?) -> Unit,
@@ -560,6 +585,13 @@ private fun androidx.compose.foundation.lazy.LazyListScope.settingsContent(
             selected = state.uiAccent,
             darkMode = state.themeMode == ThemeMode.Dark,
             onSelected = onUiAccentSelected
+        )
+    }
+    item {
+        UiSurfaceSelector(
+            selected = state.uiSurface,
+            darkMode = state.themeMode == ThemeMode.Dark,
+            onSelected = onUiSurfaceSelected
         )
     }
     item {
@@ -2753,6 +2785,92 @@ private fun UiAccentSelector(
 }
 
 @Composable
+private fun UiSurfaceSelector(
+    selected: UiSurface,
+    darkMode: Boolean,
+    onSelected: (UiSurface) -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        LabelText("SURFACE STYLE")
+        ElevatedPanel {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Background, sheets and large cards", color = TextMuted, style = MaterialTheme.typography.bodyMedium)
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    items(UiSurface.entries, key = { it.name }) { surface ->
+                        val bg = colorFromHex(if (darkMode) surface.darkBackgroundHex else surface.lightBackgroundHex)
+                        val card = colorFromHex(if (darkMode) surface.darkCardHex else surface.lightCardHex)
+                        val panel = colorFromHex(if (darkMode) surface.darkPanelHex else surface.lightPanelHex)
+                        val isSelected = selected == surface
+                        val scale by animateFloatAsState(
+                            targetValue = if (isSelected) 1.05f else 1f,
+                            animationSpec = tween(220, easing = FastOutSlowInEasing),
+                            label = "surfaceScale"
+                        )
+                        Column(
+                            modifier = Modifier
+                                .width(86.dp)
+                                .scale(scale)
+                                .clickable { onSelected(surface) },
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(width = 76.dp, height = 54.dp)
+                                    .clip(RoundedCornerShape(18.dp))
+                                    .background(if (isSelected) Color.White else appBorderColor())
+                                    .border(
+                                        width = if (isSelected) 3.dp else 1.dp,
+                                        color = if (isSelected) Color.White else appBorderColor(),
+                                        shape = RoundedCornerShape(18.dp)
+                                    )
+                                    .padding(4.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .clip(RoundedCornerShape(14.dp))
+                                        .background(bg)
+                                        .padding(7.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth(0.78f)
+                                            .height(13.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(card)
+                                            .align(Alignment.TopStart)
+                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth(0.58f)
+                                            .height(13.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(panel)
+                                            .align(Alignment.BottomEnd)
+                                    )
+                                }
+                                if (isSelected) {
+                                    Icon(Icons.Rounded.Check, contentDescription = null, tint = PrimaryBlue, modifier = Modifier.size(18.dp))
+                                }
+                            }
+                            Text(
+                                surface.label,
+                                color = if (isSelected) TextPrimary else TextMuted,
+                                style = MaterialTheme.typography.labelSmall,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun SectionHeader(title: String, action: String) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text(
@@ -2902,7 +3020,7 @@ private fun TransactionTypeChip(type: TransactionType, selected: Boolean, onClic
 private fun BottomNavigation(selectedTab: ScreenTab, onTabSelected: (ScreenTab) -> Unit) {
     val dark = isAmoledTheme()
     NavigationBar(
-        containerColor = if (dark) Color(0xEE171D2A) else Color(0xEEF8F9FF),
+        containerColor = Navy900,
         tonalElevation = 0.dp
     ) {
         ScreenTab.entries.forEach { tab ->
@@ -2928,7 +3046,7 @@ private fun BottomNavigation(selectedTab: ScreenTab, onTabSelected: (ScreenTab) 
                 colors = NavigationBarItemDefaults.colors(
                     selectedIconColor = PrimarySoft,
                     selectedTextColor = PrimarySoft,
-                    indicatorColor = if (dark) Color(0xFF29477F) else Color(0xFFDDE8FF),
+                    indicatorColor = PrimaryBlue.copy(alpha = if (dark) 0.32f else 0.16f),
                     unselectedIconColor = if (dark) TextDim.copy(alpha = 0.62f) else TextPrimary,
                     unselectedTextColor = if (dark) TextDim.copy(alpha = 0.62f) else TextPrimary
                 )

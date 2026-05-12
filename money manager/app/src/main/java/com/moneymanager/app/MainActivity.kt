@@ -24,7 +24,11 @@ class MainActivity : ComponentActivity() {
         requestSmsPermissions()
         setContent {
             val state by moneyViewModel.uiState.collectAsState()
-            MoneyManagerTheme(themeMode = state.themeMode, uiAccent = state.uiAccent) {
+            MoneyManagerTheme(
+                themeMode = state.themeMode,
+                uiAccent = state.uiAccent,
+                uiSurface = state.uiSurface
+            ) {
                 MoneyManagerApp(viewModel = moneyViewModel)
             }
         }

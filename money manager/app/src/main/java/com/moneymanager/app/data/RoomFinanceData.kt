@@ -24,6 +24,7 @@ import com.moneymanager.app.model.MoneyIcons
 import com.moneymanager.app.model.ThemeMode
 import com.moneymanager.app.model.TransactionType
 import com.moneymanager.app.model.UiAccent
+import com.moneymanager.app.model.UiSurface
 import java.time.YearMonth
 
 @Entity(tableName = "user_settings")
@@ -38,7 +39,8 @@ data class UserSettingsEntity(
     val salaryKeywordsForUncategorized: Boolean = true,
     val bankSmsSetupCompleted: Boolean = false,
     val summaryAccountFilterIdsCsv: String = "",
-    val uiAccent: String = "Sky"
+    val uiAccent: String = "Sky",
+    val uiSurface: String = "Midnight"
 )
 
 @Entity(tableName = "accounts")
@@ -180,7 +182,7 @@ interface FinanceDao {
         BudgetEntity::class,
         DetectedDraftEntity::class
     ],
-    version = 8
+    version = 9
 )
 abstract class FinanceDatabase : RoomDatabase() {
     abstract fun dao(): FinanceDao
@@ -202,7 +204,8 @@ abstract class FinanceDatabase : RoomDatabase() {
                         Migration4To5,
                         Migration5To6,
                         Migration6To7,
-                        Migration7To8
+                        Migration7To8,
+                        Migration8To9
                     )
                     .build()
                     .also { instance = it }
@@ -275,6 +278,12 @@ abstract class FinanceDatabase : RoomDatabase() {
                 db.execSQL("ALTER TABLE user_settings ADD COLUMN uiAccent TEXT NOT NULL DEFAULT 'Sky'")
             }
         }
+
+        private val Migration8To9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE user_settings ADD COLUMN uiSurface TEXT NOT NULL DEFAULT 'Midnight'")
+            }
+        }
     }
 }
 
@@ -293,6 +302,9 @@ class FinanceRepository(private val dao: FinanceDao) {
             uiAccent = settings?.uiAccent?.let { accent ->
                 UiAccent.entries.firstOrNull { it.name == accent }
             } ?: UiAccent.Sky,
+            uiSurface = settings?.uiSurface?.let { surface ->
+                UiSurface.entries.firstOrNull { it.name == surface }
+            } ?: UiSurface.Midnight,
             salaryShiftIncomeEnabled = settings?.salaryShiftIncomeEnabled ?: false,
             salaryShiftWindowDays = settings?.salaryShiftWindowDays?.coerceIn(1, 14) ?: 5,
             salaryCategoryId = settings?.salaryCategoryId,
@@ -410,6 +422,7 @@ private fun FinanceUiState.toSettingsEntity(): UserSettingsEntity = UserSettings
     currencyCode = currency.currencyCode,
     themeMode = themeMode.name,
     uiAccent = uiAccent.name,
+    uiSurface = uiSurface.name,
     salaryShiftIncomeEnabled = salaryShiftIncomeEnabled,
     salaryShiftWindowDays = salaryShiftWindowDays.coerceIn(1, 14),
     salaryCategoryId = salaryCategoryId,

@@ -101,6 +101,25 @@ enum class UiAccent(
     Slate("Slate", "#A7B3CC", "#526178", "#D9E2F2", "#445268")
 }
 
+enum class UiSurface(
+    val label: String,
+    val darkBackgroundHex: String,
+    val darkCardHex: String,
+    val darkPanelHex: String,
+    val darkChipHex: String,
+    val lightBackgroundHex: String,
+    val lightCardHex: String,
+    val lightPanelHex: String,
+    val lightChipHex: String
+) {
+    Midnight("Midnight", "#0C0F17", "#111620", "#171D2A", "#202737", "#F8F9FF", "#FFFFFF", "#F0F4FF", "#E3EAF8"),
+    Graphite("Graphite", "#101113", "#17191D", "#20232A", "#2A2E37", "#F7F7F5", "#FFFFFF", "#EEEEEA", "#E2E3DE"),
+    Ocean("Ocean", "#07131D", "#0D1C2A", "#14293B", "#1B354A", "#F5FAFF", "#FFFFFF", "#EAF3FB", "#DDECF7"),
+    Plum("Plum", "#160F1D", "#21172A", "#2B1F37", "#362844", "#FCF7FF", "#FFFFFF", "#F4ECFA", "#EADDF3"),
+    Forest("Forest", "#0B1510", "#111F18", "#17291F", "#203529", "#F7FBF6", "#FFFFFF", "#ECF5EA", "#DDEBDA"),
+    Warm("Warm", "#17130E", "#211A13", "#2B2218", "#382B1F", "#FFFAF5", "#FFFFFF", "#F7EFE6", "#EDE1D4")
+}
+
 data class BankAccount(
     val id: Long,
     val name: String,
@@ -170,6 +189,7 @@ data class FinanceUiState(
     val currency: CurrencyOption = CurrencyOption.INR,
     val themeMode: ThemeMode = ThemeMode.Dark,
     val uiAccent: UiAccent = UiAccent.Sky,
+    val uiSurface: UiSurface = UiSurface.Midnight,
     val selectedTab: ScreenTab = ScreenTab.Dashboard,
     val selectedMonth: YearMonth = YearMonth.now(),
     val accounts: List<BankAccount> = emptyList(),

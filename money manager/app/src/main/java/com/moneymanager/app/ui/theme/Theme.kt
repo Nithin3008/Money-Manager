@@ -10,6 +10,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.moneymanager.app.model.ThemeMode
 import com.moneymanager.app.model.UiAccent
+import com.moneymanager.app.model.UiSurface
 
 var Navy950 = Color(0xFF000000)
 var Navy900 = Color(0xFF111111)
@@ -24,68 +25,6 @@ var MoneyGreen = Color(0xFF38E68B)
 var WarningAmber = Color(0xFFFFC857)
 var LossRed = Color(0xFFFF6B7A)
 
-private val ExpressiveDarkColorScheme = darkColorScheme(
-    background = Color(0xFF0C0F17),
-    surface = Color(0xFF0C0F17),
-    surfaceContainerLowest = Color(0xFF090B10),
-    surfaceContainerLow = Color(0xFF111620),
-    surfaceContainer = Color(0xFF171D2A),
-    surfaceContainerHigh = Color(0xFF202737),
-    surfaceContainerHighest = Color(0xFF2A3345),
-    primary = Color(0xFFAFC6FF),
-    onPrimary = Color(0xFF10295C),
-    primaryContainer = Color(0xFF29477F),
-    onPrimaryContainer = Color(0xFFD9E4FF),
-    secondary = Color(0xFF61E6A4),
-    onSecondary = Color(0xFF003823),
-    secondaryContainer = Color(0xFF155C3D),
-    onSecondaryContainer = Color(0xFFB8FFD7),
-    tertiary = Color(0xFFFFD166),
-    onTertiary = Color(0xFF452B00),
-    tertiaryContainer = Color(0xFF6A4500),
-    onTertiaryContainer = Color(0xFFFFE2A3),
-    error = Color(0xFFFF7A8A),
-    onError = Color(0xFF69000B),
-    errorContainer = Color(0xFF8E1A28),
-    onErrorContainer = Color(0xFFFFDADF),
-    onBackground = Color(0xFFF8FAFF),
-    onSurface = Color(0xFFF8FAFF),
-    onSurfaceVariant = Color(0xFFC7CEDC),
-    outline = Color(0xFF596274),
-    outlineVariant = Color(0xFF343D4E)
-)
-
-private val ExpressiveLightColorScheme = lightColorScheme(
-    background = Color(0xFFF8F9FF),
-    surface = Color(0xFFF8F9FF),
-    surfaceContainerLowest = Color.White,
-    surfaceContainerLow = Color(0xFFF0F4FF),
-    surfaceContainer = Color(0xFFEAF0FC),
-    surfaceContainerHigh = Color(0xFFE3EAF8),
-    surfaceContainerHighest = Color(0xFFDCE4F3),
-    primary = Color(0xFF345CA8),
-    onPrimary = Color.White,
-    primaryContainer = Color(0xFFD9E4FF),
-    onPrimaryContainer = Color(0xFF001B3F),
-    secondary = Color(0xFF006C49),
-    onSecondary = Color.White,
-    secondaryContainer = Color(0xFFB7F4D0),
-    onSecondaryContainer = Color(0xFF002114),
-    tertiary = Color(0xFF885200),
-    onTertiary = Color.White,
-    tertiaryContainer = Color(0xFFFFDFA2),
-    onTertiaryContainer = Color(0xFF2B1700),
-    error = Color(0xFFBA1A1A),
-    onError = Color.White,
-    errorContainer = Color(0xFFFFDAD6),
-    onErrorContainer = Color(0xFF410002),
-    onBackground = Color(0xFF151923),
-    onSurface = Color(0xFF151923),
-    onSurfaceVariant = Color(0xFF4A5568),
-    outline = Color(0xFF747C8C),
-    outlineVariant = Color(0xFFC8D0DF)
-)
-
 private val ExpressiveShapes = Shapes(
     extraSmall = RoundedCornerShape(12.dp),
     small = RoundedCornerShape(16.dp),
@@ -98,11 +37,12 @@ private val ExpressiveShapes = Shapes(
 fun MoneyManagerTheme(
     themeMode: ThemeMode = ThemeMode.Dark,
     uiAccent: UiAccent = UiAccent.Sky,
+    uiSurface: UiSurface = UiSurface.Midnight,
     content: @Composable () -> Unit
 ) {
     val dark = themeMode == ThemeMode.Dark
-    val colorScheme = if (dark) ExpressiveDarkColorScheme else ExpressiveLightColorScheme
-    applyThemeTokens(dark, uiAccent)
+    applyThemeTokens(dark, uiAccent, uiSurface)
+    val colorScheme = expressiveColorScheme(dark)
 
     MaterialTheme(
         colorScheme = colorScheme,
@@ -112,12 +52,60 @@ fun MoneyManagerTheme(
     )
 }
 
-private fun applyThemeTokens(dark: Boolean, uiAccent: UiAccent) {
+private fun expressiveColorScheme(dark: Boolean) = if (dark) {
+    darkColorScheme(
+        background = Navy950,
+        surface = Navy950,
+        surfaceContainerLowest = Navy950,
+        surfaceContainerLow = Navy900,
+        surfaceContainer = Navy850,
+        surfaceContainerHigh = Navy800,
+        surfaceContainerHighest = Navy800,
+        primary = PrimarySoft,
+        onPrimary = Color(0xFF10295C),
+        primaryContainer = PrimaryBlue,
+        onPrimaryContainer = Color(0xFFEAF1FF),
+        secondary = MoneyGreen,
+        onSecondary = Color(0xFF003823),
+        tertiary = WarningAmber,
+        error = LossRed,
+        onBackground = TextPrimary,
+        onSurface = TextPrimary,
+        onSurfaceVariant = TextMuted,
+        outline = TextDim,
+        outlineVariant = Navy800
+    )
+} else {
+    lightColorScheme(
+        background = Navy950,
+        surface = Navy950,
+        surfaceContainerLowest = Navy900,
+        surfaceContainerLow = Navy850,
+        surfaceContainer = Navy850,
+        surfaceContainerHigh = Navy800,
+        surfaceContainerHighest = Navy800,
+        primary = PrimaryBlue,
+        onPrimary = Color.White,
+        primaryContainer = Color(0xFFDDE8FF),
+        onPrimaryContainer = Color(0xFF001B3F),
+        secondary = MoneyGreen,
+        onSecondary = Color.White,
+        tertiary = WarningAmber,
+        error = LossRed,
+        onBackground = TextPrimary,
+        onSurface = TextPrimary,
+        onSurfaceVariant = TextMuted,
+        outline = TextDim,
+        outlineVariant = Navy800
+    )
+}
+
+private fun applyThemeTokens(dark: Boolean, uiAccent: UiAccent, uiSurface: UiSurface) {
     if (dark) {
-        Navy950 = Color(0xFF0C0F17)
-        Navy900 = Color(0xFF111620)
-        Navy850 = Color(0xFF171D2A)
-        Navy800 = Color(0xFF202737)
+        Navy950 = uiSurface.darkBackgroundHex.toColorOr(Color(0xFF0C0F17))
+        Navy900 = uiSurface.darkCardHex.toColorOr(Color(0xFF111620))
+        Navy850 = uiSurface.darkPanelHex.toColorOr(Color(0xFF171D2A))
+        Navy800 = uiSurface.darkChipHex.toColorOr(Color(0xFF202737))
         TextPrimary = Color(0xFFF8FAFF)
         TextMuted = Color(0xFFC7CEDC)
         TextDim = Color(0xFF94A0B4)
@@ -127,10 +115,10 @@ private fun applyThemeTokens(dark: Boolean, uiAccent: UiAccent) {
         WarningAmber = Color(0xFFFFD166)
         LossRed = Color(0xFFFF7A8A)
     } else {
-        Navy950 = Color(0xFFF8F9FF)
-        Navy900 = Color(0xFFFFFFFF)
-        Navy850 = Color(0xFFF0F4FF)
-        Navy800 = Color(0xFFE3EAF8)
+        Navy950 = uiSurface.lightBackgroundHex.toColorOr(Color(0xFFF8F9FF))
+        Navy900 = uiSurface.lightCardHex.toColorOr(Color.White)
+        Navy850 = uiSurface.lightPanelHex.toColorOr(Color(0xFFF0F4FF))
+        Navy800 = uiSurface.lightChipHex.toColorOr(Color(0xFFE3EAF8))
         TextPrimary = Color(0xFF151923)
         TextMuted = Color(0xFF4A5568)
         TextDim = Color(0xFF6D7688)
