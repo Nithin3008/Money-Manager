@@ -1,17 +1,11 @@
 package com.moneymanager.app.ui
 
 import android.app.DatePickerDialog
-import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -259,19 +253,9 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
             }
         }
     ) { padding ->
-        AnimatedContent(
+        Crossfade(
             targetState = state.selectedTab,
-            transitionSpec = {
-                val direction = if (targetState.ordinal >= initialState.ordinal) 1 else -1
-                (slideInHorizontally(
-                    animationSpec = tween(320, easing = FastOutSlowInEasing),
-                    initialOffsetX = { it / 5 * direction }
-                ) + fadeIn(tween(220))) togetherWith
-                    (slideOutHorizontally(
-                        animationSpec = tween(260, easing = FastOutSlowInEasing),
-                        targetOffsetX = { -it / 6 * direction }
-                    ) + fadeOut(tween(180)))
-            },
+            animationSpec = tween(140, easing = FastOutSlowInEasing),
             label = "tabTransition"
         ) { tab ->
             LazyColumn(
@@ -324,6 +308,7 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
                         onDeleteAccount = viewModel::deleteAccount,
                         onUpdateAccountBalance = viewModel::updateAccountBalance,
                         onAddAccount = viewModel::addBankAccount,
+                        onDefaultAccountSelected = viewModel::setDefaultAccount,
                         onDeleteCategory = viewModel::deleteCategory,
                         onCategoryColorSelected = viewModel::updateCategoryColor,
                         onDeleteAllData = viewModel::deleteAllSavedData,
@@ -368,6 +353,13 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
             onSave = viewModel::updateTransactionDetails,
             onDelete = viewModel::deleteTransaction,
             onAddCustomCategory = viewModel::createCategoryForTransaction
+        )
+    }
+
+    if (state.hasCompletedRegistration && state.accounts.isNotEmpty() && state.defaultAccountId == null) {
+        DefaultBankPrompt(
+            accounts = state.accounts,
+            onSelected = viewModel::setDefaultAccount
         )
     }
 
@@ -602,6 +594,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.settingsContent(
     onDeleteAccount: (Long) -> Unit,
     onUpdateAccountBalance: (Long, Double) -> Unit,
     onAddAccount: (String, Double) -> Unit,
+    onDefaultAccountSelected: (Long?) -> Unit,
     onDeleteCategory: (Long) -> Unit,
     onCategoryColorSelected: (Long, String) -> Unit,
     onDeleteAllData: () -> Unit,
@@ -616,7 +609,8 @@ private fun androidx.compose.foundation.lazy.LazyListScope.settingsContent(
             state = state,
             onDelete = onDeleteAccount,
             onUpdateBalance = onUpdateAccountBalance,
-            onAddAccount = onAddAccount
+            onAddAccount = onAddAccount,
+            onDefaultAccountSelected = onDefaultAccountSelected
         )
     }
     item {
@@ -793,17 +787,27 @@ private fun DeleteDataPanel(onDeleteAllData: () -> Unit) {
 }
 
 @Composable
-private fun RegistrationScreen(onComplete: (String, List<Pair<String, Double>>) -> Unit) {
+private fun RegistrationScreen(onComplete: (String, List<Pair<String, Double>>, Int) -> Unit) {
     var name by remember { mutableStateOf("") }
     val accounts = remember { mutableStateListOf(AccountDraft()) }
+    var defaultAccountIndex by remember { mutableStateOf(0) }
+    val validWithOriginalIndex = accounts.mapIndexedNotNull { index, draft ->
+        val amount = draft.balance.toDoubleOrNull()
+        val accountName = draft.displayName()
+        if (accountName.isBlank() || amount == null || amount < 0.0) null else index to (accountName to amount)
+    }
+    val defaultValidIndex = validWithOriginalIndex.indexOfFirst { it.first == defaultAccountIndex }
+        .takeIf { it >= 0 }
+        ?: 0
 
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
             .background(Navy950)
-            .statusBarsPadding(),
-        contentPadding = PaddingValues(start = 20.dp, top = 18.dp, end = 20.dp, bottom = 28.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+            .statusBarsPadding()
+            .imePadding(),
+        contentPadding = PaddingValues(start = 20.dp, top = 18.dp, end = 20.dp, bottom = 180.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         item { BrandHeader(name.ifBlank { "You" }) }
         item {
@@ -831,9 +835,17 @@ private fun RegistrationScreen(onComplete: (String, List<Pair<String, Double>>) 
                 accountNumber = index + 1,
                 canRemove = accounts.size > 1,
                 onNameChanged = { accounts[index] = accounts[index].copy(name = it) },
+                onLastDigitsChanged = { accounts[index] = accounts[index].copy(lastDigits = it.filter(Char::isDigit).take(4)) },
                 onBalanceChanged = { accounts[index] = accounts[index].copy(balance = it) },
                 onRemove = {
-                    if (accounts.size > 1) accounts.removeAt(index)
+                    if (accounts.size > 1) {
+                        accounts.removeAt(index)
+                        defaultAccountIndex = when {
+                            defaultAccountIndex == index -> 0
+                            defaultAccountIndex > index -> defaultAccountIndex - 1
+                            else -> defaultAccountIndex
+                        }.coerceIn(0, accounts.lastIndex)
+                    }
                 }
             )
         }
@@ -850,21 +862,30 @@ private fun RegistrationScreen(onComplete: (String, List<Pair<String, Double>>) 
             }
         }
         item {
-            val validAccounts = accounts.mapNotNull {
-                val amount = it.balance.toDoubleOrNull()
-                if (it.name.isBlank() || amount == null || amount < 0.0) null else it.name.trim() to amount
-            }
-            Button(
-                onClick = {
-                    onComplete(
-                        name,
-                        accounts.mapNotNull {
-                            val amount = it.balance.toDoubleOrNull()
-                            if (it.name.isBlank() || amount == null || amount < 0.0) null else it.name.trim() to amount
-                        }
+            ElevatedPanel {
+                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Default bank", color = TextPrimary, style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "Used for Today, Summary, and new manual transactions. Change it later in Settings.",
+                        color = TextDim,
+                        style = MaterialTheme.typography.bodySmall
                     )
-                },
-                enabled = name.isNotBlank() && validAccounts.isNotEmpty(),
+                    ChipRow {
+                        accounts.forEachIndexed { index, account ->
+                            MoneyChip(
+                                label = account.displayName().ifBlank { "Account ${index + 1}" },
+                                selected = defaultAccountIndex == index,
+                                onClick = { defaultAccountIndex = index }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        item {
+            Button(
+                onClick = { onComplete(name, validWithOriginalIndex.map { it.second }, defaultValidIndex) },
+                enabled = name.isNotBlank() && validWithOriginalIndex.isNotEmpty(),
                 modifier = Modifier.fillMaxWidth().height(58.dp),
                 shape = RoundedCornerShape(12.dp),
                 colors = primaryButtonColors()
@@ -875,7 +896,15 @@ private fun RegistrationScreen(onComplete: (String, List<Pair<String, Double>>) 
     }
 }
 
-private data class AccountDraft(val name: String = "", val balance: String = "")
+private data class AccountDraft(
+    val name: String = "",
+    val lastDigits: String = "",
+    val balance: String = ""
+) {
+    fun displayName(): String = listOf(name.trim(), lastDigits.trim())
+        .filter { it.isNotBlank() }
+        .joinToString(" ")
+}
 
 private enum class AddMoneyMode(val label: String) {
     Expense("Expense"),
@@ -884,11 +913,60 @@ private enum class AddMoneyMode(val label: String) {
 }
 
 @Composable
+private fun DefaultBankPrompt(accounts: List<BankAccount>, onSelected: (Long?) -> Unit) {
+    AlertDialog(
+        onDismissRequest = {},
+        title = { Text("Choose default bank") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    "This bank is used for Today, Summary, and new manual transactions unless you choose another bank.",
+                    color = TextMuted
+                )
+                accounts.forEach { account ->
+                    OutlinedButton(
+                        onClick = { onSelected(account.id) },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, appBorderColor())
+                    ) {
+                        Text(account.name, color = TextPrimary)
+                        Spacer(Modifier.weight(1f))
+                        Text("Use", color = PrimarySoft)
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        containerColor = Navy850,
+        titleContentColor = TextPrimary,
+        textContentColor = TextMuted
+    )
+}
+
+private fun transferBalanceText(
+    state: FinanceUiState,
+    fromAccountId: Long?,
+    toAccountId: Long?,
+    amount: Double
+): String {
+    val from = state.accounts.firstOrNull { it.id == fromAccountId }
+    val to = state.accounts.firstOrNull { it.id == toAccountId }
+    if (from == null || to == null) {
+        return "Transfers need two different bank accounts. They are excluded from income and expense reports."
+    }
+    val debit = if (amount > 0.0) " -> ${state.money(from.balance - amount)}" else ""
+    val credit = if (amount > 0.0) " -> ${state.money(to.balance + amount)}" else ""
+    return "${from.name}: ${state.money(from.balance)}$debit | ${to.name}: ${state.money(to.balance)}$credit"
+}
+
+@Composable
 private fun AccountDraftRow(
     account: AccountDraft,
     accountNumber: Int,
     canRemove: Boolean,
     onNameChanged: (String) -> Unit,
+    onLastDigitsChanged: (String) -> Unit,
     onBalanceChanged: (String) -> Unit,
     onRemove: () -> Unit
 ) {
@@ -913,7 +991,17 @@ private fun AccountDraftRow(
                 value = account.name,
                 onValueChange = onNameChanged,
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("Account name") },
+                label = { Text("Bank name") },
+                singleLine = true,
+                colors = inputColors(),
+                shape = RoundedCornerShape(12.dp)
+            )
+            OutlinedTextField(
+                value = account.lastDigits,
+                onValueChange = onLastDigitsChanged,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Last 4 account digits") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 singleLine = true,
                 colors = inputColors(),
                 shape = RoundedCornerShape(12.dp)
@@ -929,7 +1017,7 @@ private fun AccountDraftRow(
                 shape = RoundedCornerShape(12.dp)
             )
             Text(
-                "This balance becomes the current anchor for reverse history calculation.",
+                "Example: HDFC + 4466 helps match SMS like A/c XX4466. Balance becomes the current anchor.",
                 color = TextDim,
                 style = MaterialTheme.typography.bodySmall
             )
@@ -949,11 +1037,17 @@ private fun AddTransactionSheet(
     var amount by remember { mutableStateOf("") }
     var mode by remember { mutableStateOf(AddMoneyMode.Expense) }
     var categoryId by remember { mutableStateOf(state.categories.first().id) }
-    var accountId by remember { mutableStateOf(state.accounts.firstOrNull()?.id) }
-    var fromAccountId by remember { mutableStateOf(state.accounts.firstOrNull()?.id) }
-    var toAccountId by remember { mutableStateOf(state.accounts.drop(1).firstOrNull()?.id) }
+    val defaultAccount = state.accounts.firstOrNull { it.id == state.defaultAccountId } ?: state.accounts.firstOrNull()
+    var accountId by remember(state.defaultAccountId, state.accounts) { mutableStateOf(defaultAccount?.id) }
+    var fromAccountId by remember(state.defaultAccountId, state.accounts) { mutableStateOf(defaultAccount?.id) }
+    var toAccountId by remember(state.defaultAccountId, state.accounts) {
+        mutableStateOf(state.accounts.firstOrNull { it.id != defaultAccount?.id }?.id)
+    }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val transactionType = if (mode == AddMoneyMode.Income) TransactionType.Income else TransactionType.Expense
+    val parsedAmount = amount.toDoubleOrNull() ?: 0.0
+    val transferReady = mode != AddMoneyMode.Transfer ||
+        (parsedAmount > 0.0 && fromAccountId != null && toAccountId != null && fromAccountId != toAccountId)
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -991,6 +1085,13 @@ private fun AddTransactionSheet(
                     )
                 }
             }
+            if (mode == AddMoneyMode.Transfer && state.accounts.size < 2) {
+                Text(
+                    "Add at least two bank accounts in Settings before creating transfers.",
+                    color = WarningAmber,
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
             if (mode == AddMoneyMode.Transfer) {
                 LabelText("FROM ACCOUNT")
                 ChipRow {
@@ -1011,7 +1112,7 @@ private fun AddTransactionSheet(
                     }
                 }
                 Text(
-                    "Transfers update both account balances and are excluded from income/expense reports.",
+                    transferBalanceText(state, fromAccountId, toAccountId, parsedAmount),
                     color = TextDim,
                     style = MaterialTheme.typography.bodySmall
                 )
@@ -1034,14 +1135,13 @@ private fun AddTransactionSheet(
             }
             Button(
                 onClick = {
-                    val parsedAmount = amount.toDoubleOrNull() ?: 0.0
                     if (mode == AddMoneyMode.Transfer) {
                         onTransfer(name, parsedAmount, fromAccountId, toAccountId)
                     } else {
                         onAdd(name, parsedAmount, transactionType, categoryId, accountId, null, false)
                     }
                 },
-                enabled = mode != AddMoneyMode.Transfer || (fromAccountId != null && toAccountId != null && fromAccountId != toAccountId),
+                enabled = if (mode == AddMoneyMode.Transfer) transferReady else parsedAmount > 0.0 && name.isNotBlank(),
                 modifier = Modifier.fillMaxWidth().height(56.dp),
                 shape = RoundedCornerShape(12.dp),
                 colors = primaryButtonColors()
@@ -1774,8 +1874,9 @@ private fun MetricGrid(state: FinanceUiState) {
     val salary = state.monthSalaryIncome
     val other = state.monthOtherIncome
     val expense = state.monthExpense
-    val net = state.monthNet
+    val net = state.monthReportNet
     val totalIncome = state.monthIncome
+    val reportIncome = state.monthReportIncome
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             ElevatedPanel(modifier = Modifier.weight(1f).height(124.dp)) {
@@ -1784,14 +1885,14 @@ private fun MetricGrid(state: FinanceUiState) {
                     when {
                         salary > 0.0 || other > 0.0 -> {
                             Text(
-                                money(salary, currency),
+                                money(reportIncome, currency),
                                 color = MoneyGreen,
                                 style = MaterialTheme.typography.headlineMedium,
                                 maxLines = 1
                             )
-                            if (other > 0.0) {
+                            if (salary > 0.0 || other > 0.0) {
                                 Text(
-                                    "+ ${money(other, currency)} other",
+                                    "${money(salary, currency)} salary + ${money(other, currency)} other",
                                     color = OtherIncomeGold,
                                     style = MaterialTheme.typography.bodyMedium,
                                     maxLines = 1
@@ -1800,7 +1901,7 @@ private fun MetricGrid(state: FinanceUiState) {
                         }
                         else -> {
                             Text(
-                                money(totalIncome, currency),
+                                money(reportIncome, currency),
                                 color = MoneyGreen,
                                 style = MaterialTheme.typography.headlineMedium,
                                 maxLines = 1
@@ -1812,15 +1913,11 @@ private fun MetricGrid(state: FinanceUiState) {
             SmallMetric("Expenses", money(expense, currency), LossRed, Modifier.weight(1f), boxHeight = 124.dp)
         }
         SmallMetric("Net cashflow", money(net, currency), if (net >= 0) PrimarySoft else LossRed, Modifier.fillMaxWidth())
-        if (state.salaryShiftIncomeEnabled &&
-            kotlin.math.abs(state.calendarMonthIncomeTotal - totalIncome) > 0.01
-        ) {
-            Text(
-                "Bank credits this month (calendar): ${money(state.calendarMonthIncomeTotal, currency)} - Summary income uses payroll shift.",
-                color = TextDim,
-                style = MaterialTheme.typography.bodySmall
-            )
-        }
+        Text(
+            "Income matches calendar-month deposits for the selected bank.",
+            color = TextDim,
+            style = MaterialTheme.typography.bodySmall
+        )
     }
 }
 
@@ -1830,21 +1927,19 @@ private fun SummaryAccountFilterRow(
     onToggleAccount: (Long) -> Unit,
     onClearFilter: () -> Unit
 ) {
-    val allSelected = state.summarySelectedAccountIds.isEmpty()
+    val defaultAccount = state.accounts.firstOrNull { it.id == state.defaultAccountId }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         LabelText("SUMMARY ACCOUNTS")
         ChipRow {
             MoneyChip(
-                label = "All",
-                selected = allSelected,
+                label = defaultAccount?.let { "Default: ${it.name}" } ?: "All",
+                selected = state.summarySelectedAccountIds.isEmpty(),
                 onClick = onClearFilter
             )
             state.accounts.forEach { account ->
-                val selected =
-                    !allSelected && account.id in state.summarySelectedAccountIds
                 MoneyChip(
                     label = account.name,
-                    selected = selected,
+                    selected = account.id in state.summarySelectedAccountIds,
                     onClick = { onToggleAccount(account.id) }
                 )
             }
@@ -2322,11 +2417,11 @@ private fun TransactionRow(
     val color = categoryColor(category, transaction.type)
     val cardColor = if (isAmoledTheme()) Color(0xFF171B22) else Color.White
     val neutralBorder = if (isAmoledTheme()) Color(0xFF303846) else Color(0xFFD3DBEA)
-    val animatedBorder by animateColorAsState(
-        targetValue = if (category?.name == "Uncategorized") neutralBorder else color.copy(alpha = if (isAmoledTheme()) 0.52f else 0.34f),
-        animationSpec = tween(260, easing = FastOutSlowInEasing),
-        label = "transactionBorder"
-    )
+    val borderColor = if (category?.name == "Uncategorized") {
+        neutralBorder
+    } else {
+        color.copy(alpha = if (isAmoledTheme()) 0.52f else 0.34f)
+    }
     val dateLabel = transaction.transactionDate().format(DateTimeFormatter.ofPattern("MMM d, yyyy"))
     val categoryLabel = category?.name ?: "Set category"
 
@@ -2334,9 +2429,9 @@ private fun TransactionRow(
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onSelect(transaction.id) },
-        shape = RoundedCornerShape(22.dp),
+        shape = MaterialTheme.shapes.large,
         colors = CardDefaults.cardColors(containerColor = cardColor),
-        border = BorderStroke(1.dp, animatedBorder)
+        border = BorderStroke(1.dp, borderColor)
     ) {
         Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(
@@ -2432,9 +2527,8 @@ private fun CashFlowGraph(state: FinanceUiState) {
     ElevatedPanel {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             SectionHeader("Graph", "Income vs Expense")
-            val transactions = state.monthTransactions
-            val income = transactions.filter { it.type == TransactionType.Income }.sumOf { it.amount }.toFloat()
-            val expense = transactions.filter { it.type == TransactionType.Expense }.sumOf { it.amount }.toFloat()
+            val income = state.monthReportIncome.toFloat()
+            val expense = state.monthExpense.toFloat()
             val max = maxOf(income, expense, 1f)
             Bar("Income", income / max, MoneyGreen, state.money(income.toDouble()))
             Bar("Expense", expense / max, LossRed, state.money(expense.toDouble()))
@@ -2491,15 +2585,21 @@ private fun DailyExpenseBarGraph(state: FinanceUiState) {
     val selectedMonth = state.selectedMonth
     val today = LocalDate.now()
     val lastDay = if (selectedMonth == YearMonth.now()) today.dayOfMonth else selectedMonth.lengthOfMonth()
-    val daySegments = (1..lastDay).map { day ->
-        val date = selectedMonth.atDay(day)
-        val transactions = state.transactions
-            .filter { it.type == TransactionType.Expense && it.transactionDate() == date }
-        val segments = state.categories.mapNotNull { category ->
-            val amount = transactions.filter { it.categoryId == category.id }.sumOf { it.amount }
-            if (amount > 0.0) category to amount else null
+    val scopedExpenses = state.monthExpenseTransactions
+    val daySegments = remember(scopedExpenses, state.categories, selectedMonth, lastDay) {
+        val categoriesById = state.categories.associateBy { it.id }
+        val grouped = scopedExpenses
+            .asSequence()
+            .groupBy { it.transactionDate().dayOfMonth to it.categoryId }
+            .mapValues { entry -> entry.value.sumOf { it.amount } }
+        (1..lastDay).map { day ->
+            val segments = grouped
+                .filterKeys { it.first == day }
+                .mapNotNull { (key, amount) ->
+                    categoriesById[key.second]?.takeIf { amount > 0.0 }?.let { it to amount }
+                }
+            selectedMonth.atDay(day) to segments
         }
-        date to segments
     }
     val max = daySegments.maxOfOrNull { it.second.sumOf { segment -> segment.second } }?.coerceAtLeast(1.0) ?: 1.0
 
@@ -2672,10 +2772,12 @@ private fun AccountSettingsGroup(
     state: FinanceUiState,
     onDelete: (Long) -> Unit,
     onUpdateBalance: (Long, Double) -> Unit,
-    onAddAccount: (String, Double) -> Unit
+    onAddAccount: (String, Double) -> Unit,
+    onDefaultAccountSelected: (Long?) -> Unit
 ) {
     var showAdd by remember { mutableStateOf(false) }
     var newAccountName by remember { mutableStateOf("") }
+    var newAccountLastDigits by remember { mutableStateOf("") }
     var newAccountBalance by remember { mutableStateOf("") }
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -2683,6 +2785,37 @@ private fun AccountSettingsGroup(
             Spacer(Modifier.weight(1f))
             TextButton(onClick = { showAdd = !showAdd }) {
                 Text(if (showAdd) "Cancel" else "Add bank", color = PrimarySoft)
+            }
+        }
+        if (state.accounts.isNotEmpty()) {
+            val defaultAccount = state.accounts.firstOrNull { it.id == state.defaultAccountId }
+            ElevatedPanel {
+                Column(
+                    Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text("Default bank", color = TextPrimary, style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        defaultAccount?.let { "Currently using ${it.name} for new entries and summary defaults." }
+                            ?: "Choose the bank to use first for new entries and reports.",
+                        color = TextMuted,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Text(
+                        "Only one bank can be default at a time.",
+                        color = TextDim,
+                        style = MaterialTheme.typography.labelMedium
+                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        state.accounts.forEach { account ->
+                            DefaultAccountOption(
+                                account = account,
+                                selected = state.defaultAccountId == account.id,
+                                onClick = { onDefaultAccountSelected(account.id) }
+                            )
+                        }
+                    }
+                }
             }
         }
         ElevatedPanel {
@@ -2702,6 +2835,16 @@ private fun AccountSettingsGroup(
                             shape = RoundedCornerShape(12.dp)
                         )
                         OutlinedTextField(
+                            value = newAccountLastDigits,
+                            onValueChange = { newAccountLastDigits = it.filter(Char::isDigit).take(4) },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("Last 4 account digits") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            singleLine = true,
+                            colors = inputColors(),
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                        OutlinedTextField(
                             value = newAccountBalance,
                             onValueChange = { newAccountBalance = it },
                             modifier = Modifier.fillMaxWidth(),
@@ -2713,8 +2856,12 @@ private fun AccountSettingsGroup(
                         )
                         Button(
                             onClick = {
-                                onAddAccount(newAccountName, newAccountBalance.toDoubleOrNull() ?: -1.0)
+                                val displayName = listOf(newAccountName.trim(), newAccountLastDigits.trim())
+                                    .filter { it.isNotBlank() }
+                                    .joinToString(" ")
+                                onAddAccount(displayName, newAccountBalance.toDoubleOrNull() ?: -1.0)
                                 newAccountName = ""
+                                newAccountLastDigits = ""
                                 newAccountBalance = ""
                                 showAdd = false
                             },
@@ -2781,6 +2928,24 @@ private fun AccountSettingsGroup(
                                             Text("Delete", color = LossRed)
                                         }
                                     }
+                                    OutlinedButton(
+                                        onClick = { onDefaultAccountSelected(account.id) },
+                                        enabled = state.defaultAccountId != account.id,
+                                        modifier = Modifier.fillMaxWidth(),
+                                        shape = RoundedCornerShape(12.dp),
+                                        border = BorderStroke(
+                                            1.dp,
+                                            if (state.defaultAccountId == account.id) MoneyGreen else PrimarySoft
+                                        ),
+                                        colors = ButtonDefaults.outlinedButtonColors(
+                                            contentColor = if (state.defaultAccountId == account.id) MoneyGreen else PrimarySoft
+                                        )
+                                    ) {
+                                        Text(
+                                            if (state.defaultAccountId == account.id) "Default bank" else "Set as default bank",
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
                                     Text(
                                         "This value is treated as the current balance. History is reconstructed backward from it.",
                                         color = TextDim,
@@ -2795,6 +2960,59 @@ private fun AccountSettingsGroup(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun DefaultAccountOption(
+    account: BankAccount,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(if (selected) PrimaryBlue.copy(alpha = 0.16f) else MaterialTheme.colorScheme.surfaceContainerHigh)
+            .border(
+                width = 1.dp,
+                color = if (selected) PrimarySoft else appBorderColor(),
+                shape = RoundedCornerShape(14.dp)
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(22.dp)
+                .clip(CircleShape)
+                .border(
+                    width = 2.dp,
+                    color = if (selected) PrimarySoft else TextDim,
+                    shape = CircleShape
+                )
+                .background(if (selected) PrimarySoft else Color.Transparent),
+            contentAlignment = Alignment.Center
+        ) {
+            if (selected) {
+                Icon(
+                    imageVector = Icons.Rounded.Check,
+                    contentDescription = null,
+                    tint = if (isAmoledTheme()) Color(0xFF001A42) else Color.White,
+                    modifier = Modifier.size(14.dp)
+                )
+            }
+        }
+        Column(Modifier.weight(1f)) {
+            Text(account.name, color = TextPrimary, style = MaterialTheme.typography.titleSmall)
+            Text(
+                if (selected) "Default for new entries and reports" else "Tap to make default",
+                color = if (selected) PrimarySoft else TextDim,
+                style = MaterialTheme.typography.bodySmall
+            )
         }
     }
 }
@@ -3090,7 +3308,7 @@ private fun SectionHeader(title: String, action: String) {
 @Composable
 private fun ElevatedPanel(
     modifier: Modifier = Modifier,
-    animateSize: Boolean = true,
+    animateSize: Boolean = false,
     content: @Composable () -> Unit
 ) {
     val panelModifier = if (animateSize) {
@@ -3100,7 +3318,7 @@ private fun ElevatedPanel(
     }
     Card(
         modifier = panelModifier,
-        shape = MaterialTheme.shapes.large,
+        shape = RoundedCornerShape(22.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
         border = BorderStroke(1.dp, appBorderColor())
     ) {

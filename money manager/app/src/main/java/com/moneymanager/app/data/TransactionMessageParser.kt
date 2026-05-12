@@ -26,6 +26,8 @@ object TransactionMessageParser {
     )
 
     private val accountHintRegexes = listOf(
+        Regex("""(?i)\b(?:a/c|acct|account|acc|ac)\s*(?:no\.?|number|ending|x+|xx+|[*]+)?\s*(?:x+|[*]+)?\s*([0-9]{3,6})\b"""),
+        Regex("""(?i)\b(?:a/c|acct|account|acc|ac)(?:x+|[*]+)([0-9]{3,6})\b"""),
         Regex("""(?i)\b(?:a/c|acct|account|acc|ac)\s*(?:no\.?|number|ending|x+|xx+|[*]+)?\s*([0-9]{3,6})\b"""),
         Regex("""(?i)\b(?:ending|ended|no\.?)\s*(?:with|in)?\s*([0-9]{3,6})\b"""),
         Regex("""(?i)\b(?:x{2,}|[*]{2,})([0-9]{3,6})\b""")

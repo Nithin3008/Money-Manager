@@ -40,7 +40,8 @@ data class UserSettingsEntity(
     val bankSmsSetupCompleted: Boolean = false,
     val summaryAccountFilterIdsCsv: String = "",
     val uiAccent: String = "Sky",
-    val uiSurface: String = "Midnight"
+    val uiSurface: String = "Midnight",
+    val defaultAccountId: Long? = null
 )
 
 @Entity(tableName = "accounts")
@@ -182,7 +183,7 @@ interface FinanceDao {
         BudgetEntity::class,
         DetectedDraftEntity::class
     ],
-    version = 9
+    version = 10
 )
 abstract class FinanceDatabase : RoomDatabase() {
     abstract fun dao(): FinanceDao
@@ -205,7 +206,8 @@ abstract class FinanceDatabase : RoomDatabase() {
                         Migration5To6,
                         Migration6To7,
                         Migration7To8,
-                        Migration8To9
+                        Migration8To9,
+                        Migration9To10
                     )
                     .build()
                     .also { instance = it }
@@ -284,6 +286,12 @@ abstract class FinanceDatabase : RoomDatabase() {
                 db.execSQL("ALTER TABLE user_settings ADD COLUMN uiSurface TEXT NOT NULL DEFAULT 'Midnight'")
             }
         }
+
+        private val Migration9To10 = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE user_settings ADD COLUMN defaultAccountId INTEGER")
+            }
+        }
     }
 }
 
@@ -310,6 +318,7 @@ class FinanceRepository(private val dao: FinanceDao) {
             salaryCategoryId = settings?.salaryCategoryId,
             salaryKeywordsForUncategorized = settings?.salaryKeywordsForUncategorized ?: true,
             bankSmsSetupCompleted = settings?.bankSmsSetupCompleted ?: false,
+            defaultAccountId = settings?.defaultAccountId,
             summarySelectedAccountIds = settings?.summaryAccountFilterIdsCsv
                 ?.split(",")
                 ?.mapNotNull { it.trim().toLongOrNull() }
@@ -327,8 +336,8 @@ class FinanceRepository(private val dao: FinanceDao) {
         dao.saveSettings(state.toSettingsEntity())
     }
 
-    suspend fun addAccount(name: String, balance: Double, smsMatchKey: String? = null) {
-        dao.saveAccount(
+    suspend fun addAccount(name: String, balance: Double, smsMatchKey: String? = null): Long {
+        return dao.saveAccount(
             AccountEntity(
                 name = name,
                 balance = balance,
@@ -357,6 +366,10 @@ class FinanceRepository(private val dao: FinanceDao) {
                 ?.let { TransactionMessageParser.parse(it, tx.timestampMillis)?.bankName }
             val label = parsedLabel ?: tx.smsBankLabel ?: continue
             val resolved = SmsBankKeys.resolveAccountId(label, accounts)
+            if (resolved != null) {
+                accounts.firstOrNull { it.id == resolved && it.smsMatchKey.isNullOrBlank() }
+                    ?.let { updateAccount(it.copy(smsMatchKey = SmsBankKeys.normalize(label))) }
+            }
             val next = tx.copy(
                 smsBankLabel = label,
                 accountId = resolved ?: tx.accountId
@@ -457,6 +470,7 @@ private fun FinanceUiState.toSettingsEntity(): UserSettingsEntity = UserSettings
     salaryCategoryId = salaryCategoryId,
     salaryKeywordsForUncategorized = salaryKeywordsForUncategorized,
     bankSmsSetupCompleted = bankSmsSetupCompleted,
+    defaultAccountId = defaultAccountId,
     summaryAccountFilterIdsCsv = summarySelectedAccountIds.joinToString(",")
 )
 

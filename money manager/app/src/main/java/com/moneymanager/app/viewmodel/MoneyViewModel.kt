@@ -47,17 +47,20 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
         reload()
     }
 
-    fun completeRegistration(name: String, accounts: List<Pair<String, Double>>) {
+    fun completeRegistration(name: String, accounts: List<Pair<String, Double>>, defaultAccountIndex: Int) {
         viewModelScope.launch {
+            val accountIds = accounts
+                .filter { it.first.isNotBlank() && it.second >= 0.0 }
+                .map { repository.addAccount(it.first.trim(), it.second) }
+            val defaultId = accountIds.getOrNull(defaultAccountIndex.coerceIn(0, (accountIds.size - 1).coerceAtLeast(0)))
+                ?: accountIds.firstOrNull()
             repository.persistUserSettings(
                 _uiState.value.copy(
                     userName = name.trim(),
-                    bankSmsSetupCompleted = true
+                    bankSmsSetupCompleted = true,
+                    defaultAccountId = defaultId
                 )
             )
-            accounts
-                .filter { it.first.isNotBlank() && it.second >= 0.0 }
-                .forEach { repository.addAccount(it.first.trim(), it.second) }
             reloadState()
             scanMessages(
                 range = MessageScanRange.Custom,
@@ -199,13 +202,23 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun toggleSummaryAccountInFilter(accountId: Long) {
-        val cur = _uiState.value.summarySelectedAccountIds
-        val nextSet = if (accountId in cur) cur - accountId else cur + accountId
-        setSummaryAccountFilter(nextSet)
+        setSummaryAccountFilter(setOf(accountId))
     }
 
     fun clearSummaryAccountFilter() {
         setSummaryAccountFilter(emptySet())
+    }
+
+    fun setDefaultAccount(accountId: Long?) {
+        viewModelScope.launch {
+            val validId = accountId?.takeIf { id -> _uiState.value.accounts.any { it.id == id } }
+            val next = _uiState.value.copy(
+                defaultAccountId = validId,
+                summarySelectedAccountIds = emptySet()
+            )
+            repository.persistUserSettings(next)
+            _uiState.value = next
+        }
     }
 
     fun completeBankSmsOnboarding() {
@@ -252,7 +265,12 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
     fun addBankAccount(name: String, balance: Double) {
         if (name.isBlank() || balance < 0.0) return
         viewModelScope.launch {
-            repository.addAccount(name.trim(), balance)
+            val id = repository.addAccount(name.trim(), balance)
+            val hasDefault = _uiState.value.defaultAccountId != null
+            if (!hasDefault) {
+                val next = _uiState.value.copy(defaultAccountId = id)
+                repository.persistUserSettings(next)
+            }
             reloadState()
         }
     }
@@ -385,7 +403,7 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
                     excludeFromSummary = true
                 )
             )
-            repository.updateAccount(from.copy(balance = (from.balance - amount).coerceAtLeast(0.0)))
+            repository.updateAccount(from.copy(balance = from.balance - amount))
             repository.updateAccount(to.copy(balance = to.balance + amount))
             reloadState { it.copy(showTransactionSheet = false) }
         }
@@ -409,7 +427,30 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
 
     fun deleteTransaction(id: Long) {
         viewModelScope.launch {
-            repository.deleteTransaction(id)
+            val state = _uiState.value
+            val transaction = state.transactions.firstOrNull { it.id == id }
+            val transferRows = manualTransferRowsFor(transaction, state.transactions)
+            if (transferRows.isNotEmpty()) {
+                transferRows.forEach { tx ->
+                    tx.accountId?.let { accountId ->
+                        val account = _uiState.value.accounts.firstOrNull { it.id == accountId }
+                        if (account != null) {
+                            val reversedBalance = if (tx.type == TransactionType.Expense) {
+                                account.balance + tx.amount
+                            } else {
+                                account.balance - tx.amount
+                            }
+                            repository.updateAccount(account.copy(balance = reversedBalance))
+                            _uiState.update { cur ->
+                                cur.copy(accounts = cur.accounts.map { if (it.id == account.id) it.copy(balance = reversedBalance) else it })
+                            }
+                        }
+                    }
+                    repository.deleteTransaction(tx.id)
+                }
+            } else {
+                repository.deleteTransaction(id)
+            }
             reloadState { it.copy(showTransactionDetailSheet = false, selectedTransactionId = null) }
         }
     }
@@ -449,6 +490,20 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
     fun deleteAccount(id: Long) {
         viewModelScope.launch {
             repository.deleteAccount(id)
+            val state = _uiState.value
+            if (state.defaultAccountId == id || id in state.summarySelectedAccountIds) {
+                val nextDefault = if (state.defaultAccountId == id) {
+                    state.accounts.firstOrNull { it.id != id }?.id
+                } else {
+                    state.defaultAccountId
+                }
+                repository.persistUserSettings(
+                    state.copy(
+                        defaultAccountId = nextDefault,
+                        summarySelectedAccountIds = state.summarySelectedAccountIds - id
+                    )
+                )
+            }
             reloadState()
         }
     }
@@ -544,6 +599,7 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
             val accountsSnapshot = _uiState.value.accounts
             repository.cleanupCreditCardRepaymentArtifacts()
             var importedCount = 0
+            var autoMappedCount = 0
             filteredParsed.forEach { msg ->
                 val normRaw = normalizedSmsRaw(msg.rawMessage)
                 if (normRaw.isBlank() || normRaw in normalizedExisting) return@forEach
@@ -553,6 +609,7 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
                 }?.id ?: 0L
                 val accountId = SmsBankKeys.resolveAccountId(msg.bankName, accountsSnapshot)
                     ?: accountsSnapshot.singleOrNull()?.id
+                if (accountId != null) autoMappedCount += 1
                 repository.addTransaction(
                     LedgerTransaction(
                         id = 0,
@@ -575,8 +632,8 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
                 parsedMessages.isEmpty() -> "No transaction messages found for this period."
                 filteredParsed.isEmpty() -> "Found ${parsedMessages.size} transaction-like SMS, but all were filtered as duplicates, reminders, or internal transfers."
                 importedCount == 0 -> "Found ${filteredParsed.size} transaction SMS, but no new transactions were imported."
-                importedCount == 1 -> "Imported 1 transaction."
-                else -> "Imported $importedCount transactions."
+                importedCount == 1 -> "Imported 1 transaction. Auto-mapped $autoMappedCount to bank accounts."
+                else -> "Imported $importedCount transactions. Auto-mapped $autoMappedCount to bank accounts."
             }
             val newestMonth = parsedMessages.maxByOrNull { it.transactionTimestampMillis }
                 ?.let {
@@ -586,6 +643,7 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
                             .toLocalDate()
                     )
                 }
+            repository.remapTransactionAccountsFromSmsLabels()
             reloadState {
                 it.copy(
                     isScanningMessages = false,
@@ -658,6 +716,29 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun normalizedSmsRaw(raw: String?): String =
         raw?.replace('\n', ' ')?.trim()?.replace(Regex("\\s+"), " ").orEmpty()
+
+    private fun manualTransferRowsFor(
+        transaction: LedgerTransaction?,
+        transactions: List<LedgerTransaction>
+    ): List<LedgerTransaction> {
+        val raw = transaction?.rawMessage.orEmpty()
+        if (transaction == null || !transaction.excludeFromSummary || !raw.startsWith("Manual transfer from ")) {
+            return emptyList()
+        }
+        return transactions
+            .filter {
+                it.excludeFromSummary &&
+                    it.rawMessage == raw &&
+                    it.amount == transaction.amount &&
+                    kotlin.math.abs(it.timestampMillis - transaction.timestampMillis) <= 1_000L
+            }
+            .takeIf { rows ->
+                rows.size >= 2 &&
+                    rows.any { it.type == TransactionType.Expense } &&
+                    rows.any { it.type == TransactionType.Income }
+            }
+            .orEmpty()
+    }
 
     private suspend fun reloadState(transform: (FinanceUiState) -> FinanceUiState = { it }) {
         val current = _uiState.value

@@ -218,6 +218,7 @@ data class FinanceUiState(
     val salaryCategoryId: Long? = null,
     val salaryKeywordsForUncategorized: Boolean = true,
     val bankSmsSetupCompleted: Boolean = false,
+    val defaultAccountId: Long? = null,
     /** Empty = all accounts on Summary; otherwise filter to these account ids. */
     val summarySelectedAccountIds: Set<Long> = emptySet(),
     /** Distinct SMS bank labels seen in scans/transactions; not persisted. */
@@ -226,16 +227,24 @@ data class FinanceUiState(
     val hasCompletedRegistration: Boolean = userName.isNotBlank()
 
     private fun passesSummaryAccountFilter(tx: LedgerTransaction): Boolean {
-        if (summarySelectedAccountIds.isEmpty()) return true
+        val activeIds = activeSummaryAccountIds
+        if (activeIds.isEmpty()) return true
         val aid = tx.accountId ?: return false
-        return aid in summarySelectedAccountIds
+        return aid in activeIds
     }
 
+    val activeSummaryAccountIds: Set<Long>
+        get() = when {
+            summarySelectedAccountIds.isNotEmpty() -> summarySelectedAccountIds
+            defaultAccountId != null && accounts.any { it.id == defaultAccountId } -> setOf(defaultAccountId)
+            else -> emptySet()
+        }
+
     private val selectedSummaryAccounts: List<BankAccount>
-        get() = if (summarySelectedAccountIds.isEmpty()) {
+        get() = if (activeSummaryAccountIds.isEmpty()) {
             accounts
         } else {
-            accounts.filter { it.id in summarySelectedAccountIds }
+            accounts.filter { it.id in activeSummaryAccountIds }
         }
 
     private val summaryBalanceAnchor: Double
@@ -243,7 +252,7 @@ data class FinanceUiState(
 
     private val summaryBalanceTransactions: List<LedgerTransaction>
         get() = transactions.filter { tx ->
-            !tx.excludeFromSummary && passesSummaryAccountFilter(tx)
+            passesSummaryAccountFilter(tx)
         }
 
     private fun signedMovement(tx: LedgerTransaction): Double {
@@ -257,10 +266,7 @@ data class FinanceUiState(
         return summaryBalanceAnchor - movementFromCutoffToNow
     }
 
-    /**
-     * Transactions included in Summary metrics for [selectedMonth].
-     * Expenses use the calendar month; income uses [LedgerTransaction.summaryIncomeMonth] when payroll shift is on.
-     */
+    /** Transactions included in Summary metrics for [selectedMonth], matching calendar-month bank statements. */
     val monthTransactions: List<LedgerTransaction>
         get() {
             val monthStart = selectedMonth.atDay(1)
@@ -268,16 +274,16 @@ data class FinanceUiState(
             return transactions.filter { tx ->
                 if (tx.excludeFromSummary) return@filter false
                 if (!passesSummaryAccountFilter(tx)) return@filter false
-                when (tx.type) {
-                    TransactionType.Expense -> {
-                        val d = tx.transactionDate()
-                        !d.isBefore(monthStart) && !d.isAfter(monthEnd)
-                    }
-                    TransactionType.Income ->
-                        tx.summaryIncomeMonth(salaryShiftIncomeEnabled, salaryShiftWindowDays) == selectedMonth
-                }
+                val d = tx.transactionDate()
+                !d.isBefore(monthStart) && !d.isAfter(monthEnd)
             }
         }
+
+    val monthExpenseTransactions: List<LedgerTransaction>
+        get() = monthTransactions.filter { it.type == TransactionType.Expense }
+
+    val monthIncomeTransactions: List<LedgerTransaction>
+        get() = monthTransactions.filter { it.type == TransactionType.Income }
 
     private val uncategorizedId: Long?
         get() = categories.firstOrNull { it.name == "Uncategorized" }?.id
@@ -293,18 +299,17 @@ data class FinanceUiState(
     }
 
     val monthSalaryIncome: Double
-        get() = monthTransactions
-            .filter { it.type == TransactionType.Income && incomeCountsAsSalary(it) }
+        get() = monthIncomeTransactions
+            .filter { incomeCountsAsSalary(it) }
             .sumOf { it.amount }
 
     val monthOtherIncome: Double
-        get() = monthTransactions
-            .filter { it.type == TransactionType.Income && !incomeCountsAsSalary(it) }
+        get() = monthIncomeTransactions
+            .filter { !incomeCountsAsSalary(it) }
             .sumOf { it.amount }
 
     val monthExpense: Double
-        get() = monthTransactions
-            .filter { it.type == TransactionType.Expense }
+        get() = monthExpenseTransactions
             .sumOf { it.amount }
 
     val monthNet: Double
@@ -313,6 +318,12 @@ data class FinanceUiState(
     val monthIncome: Double
         get() = monthSalaryIncome + monthOtherIncome
 
+    val monthReportIncome: Double
+        get() = monthIncome
+
+    val monthReportNet: Double
+        get() = monthReportIncome - monthExpense
+
     /** Actual credits dated inside [selectedMonth] (calendar), for comparison when payroll shift moves income. */
     val calendarMonthIncomeTotal: Double
         get() {
@@ -320,6 +331,7 @@ data class FinanceUiState(
             val monthEnd = selectedMonth.atEndOfMonth()
             return summaryBalanceTransactions
                 .filter { tx ->
+                    if (tx.excludeFromSummary) return@filter false
                     if (tx.type != TransactionType.Income) return@filter false
                     val d = tx.transactionDate()
                     !d.isBefore(monthStart) && !d.isAfter(monthEnd)
@@ -341,7 +353,16 @@ data class FinanceUiState(
 
     /** Actual calendar cashflow for the selected month. This should explain opening to closing balance. */
     val calendarMonthNet: Double
-        get() = calendarMonthIncomeTotal - monthExpense
+        get() {
+            val monthStart = selectedMonth.atDay(1)
+            val monthEnd = selectedMonth.atEndOfMonth()
+            return summaryBalanceTransactions
+                .filter { tx ->
+                    val d = tx.transactionDate()
+                    !d.isBefore(monthStart) && !d.isAfter(monthEnd)
+                }
+                .sumOf(::signedMovement)
+        }
 
     /** Difference between reconstructed closing balance and calendar cashflow math; non-zero means missing/excluded data. */
     val selectedMonthReconciliationGap: Double
@@ -354,7 +375,12 @@ data class FinanceUiState(
         get() = budgets.filter { it.month == selectedMonth }
 
     val todayTransactions: List<LedgerTransaction>
-        get() = transactions.filter { it.transactionDate() == java.time.LocalDate.now() }
+        get() = transactions.filter {
+            val activeIds = activeSummaryAccountIds
+            it.transactionDate() == java.time.LocalDate.now() &&
+                (activeIds.isEmpty() ||
+                    it.accountId in activeIds)
+        }
 
     val todayDetectedDrafts: List<DetectedTransactionDraft>
         get() = detectedDrafts.filter { it.transactionDate() == java.time.LocalDate.now() }
