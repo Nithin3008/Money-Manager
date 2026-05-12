@@ -16,7 +16,7 @@ data class ParsedTransactionMessage(
 object TransactionMessageParser {
 
     private val amountRegex = Regex(
-        """(?i)(?:rs\.?|inr|rupees?)\s*([\d,]+(?:\.\d{1,2})?)"""
+        """(?i)(?:rs\.?|r\.|inr|rupees?|₹)\s*([\d,]+(?:\.\d{1,2})?)"""
     )
 
     private val bankRegex = Regex(

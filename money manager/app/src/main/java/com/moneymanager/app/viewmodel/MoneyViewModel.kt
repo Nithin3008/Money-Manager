@@ -505,7 +505,8 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
 
             val status = when {
                 parsedMessages.isEmpty() -> "No transaction messages found for this period."
-                importedCount == 0 -> "No new transactions found. Existing messages were already imported."
+                filteredParsed.isEmpty() -> "Found ${parsedMessages.size} transaction-like SMS, but all were filtered as duplicates, reminders, or internal transfers."
+                importedCount == 0 -> "Found ${filteredParsed.size} transaction SMS, but no new transactions were imported."
                 importedCount == 1 -> "Imported 1 transaction."
                 else -> "Imported $importedCount transactions."
             }

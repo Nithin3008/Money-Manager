@@ -1,6 +1,10 @@
 package com.moneymanager.app.ui
 
 import android.app.DatePickerDialog
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -30,9 +34,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -90,10 +91,10 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -802,8 +803,14 @@ private fun AddTransactionSheet(
     var type by remember { mutableStateOf(TransactionType.Expense) }
     var categoryId by remember { mutableStateOf(state.categories.first().id) }
     var accountId by remember { mutableStateOf(state.accounts.firstOrNull()?.id) }
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
-    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = Navy900, contentColor = TextPrimary) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = Navy900,
+        contentColor = TextPrimary
+    ) {
         SheetContent(title = "Add Transaction") {
             OutlinedTextField(
                 value = name,
@@ -826,7 +833,7 @@ private fun AddTransactionSheet(
             )
             ChipRow {
                 TransactionType.entries.forEach {
-                    MoneyChip(it.name, selected = type == it, onClick = { type = it })
+                    TransactionTypeChip(it, selected = type == it, onClick = { type = it })
                 }
             }
             LabelText("CATEGORY")
@@ -910,7 +917,7 @@ private fun TransactionDetailSheet(
             }
             ChipRow {
                 TransactionType.entries.forEach {
-                    MoneyChip(it.name, selected = type == it, onClick = { type = it })
+                    TransactionTypeChip(it, selected = type == it, onClick = { type = it })
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -960,7 +967,9 @@ private fun TransactionDetailSheet(
                 OutlinedButton(
                     onClick = { showOriginalMessage = true },
                     modifier = Modifier.fillMaxWidth().height(48.dp),
-                    shape = RoundedCornerShape(12.dp)
+                    shape = RoundedCornerShape(16.dp),
+                    border = BorderStroke(1.dp, appBorderColor()),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = PrimaryBlue)
                 ) {
                     Icon(Icons.Rounded.Sms, contentDescription = null)
                     Spacer(Modifier.width(8.dp))
@@ -1010,8 +1019,14 @@ private fun AddBudgetSheet(
     var name by remember { mutableStateOf("") }
     var amount by remember { mutableStateOf("") }
     val selectedCategoryIds = remember { mutableStateListOf<Long>() }
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
-    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = Navy900, contentColor = TextPrimary) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = Navy900,
+        contentColor = TextPrimary
+    ) {
         SheetContent(title = "Create Budget") {
             Text(
                 "Suggestion: allow multiple categories for shared limits like Essentials. Keep single-category budgets for strict tracking like Grocery only.",
@@ -1067,19 +1082,8 @@ private fun AddBudgetSheet(
 @Composable
 private fun AddCategorySheet(onDismiss: () -> Unit, onAdd: (String, String, String) -> Unit) {
     var name by remember { mutableStateOf("") }
-    var selectedIconKey by remember { mutableStateOf(MoneyIcons.frequentCategoryIcons.first().key) }
+    val selectedIconKey = MoneyIcons.frequentCategoryIcons.first().key
     var selectedColor by remember { mutableStateOf(categoryPalette.first()) }
-    var iconQuery by remember { mutableStateOf("") }
-    val filteredIcons by remember(iconQuery) { derivedStateOf {
-        val query = iconQuery.trim().lowercase()
-        if (query.isBlank()) {
-            emptyList()
-        } else {
-            MoneyIcons.allCategoryIcons.filter {
-                it.label.lowercase().contains(query) || it.key.contains(query)
-            }
-        }
-    } }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     ModalBottomSheet(
@@ -1106,63 +1110,8 @@ private fun AddCategorySheet(onDismiss: () -> Unit, onAdd: (String, String, Stri
                 colors = inputColors(),
                 shape = RoundedCornerShape(12.dp)
             )
-            LabelText("FREQUENT ICONS")
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(
-                    items = MoneyIcons.frequentCategoryIcons,
-                    key = { it.key }
-                ) { option ->
-                    CategoryIconChip(
-                        option = option,
-                        selected = selectedIconKey == option.key,
-                        onClick = { selectedIconKey = option.key }
-                    )
-                }
-            }
-            OutlinedTextField(
-                value = iconQuery,
-                onValueChange = { iconQuery = it },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("Search more icons") },
-                leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
-                singleLine = true,
-                colors = inputColors(),
-                shape = RoundedCornerShape(12.dp)
-            )
             LabelText("COLOR")
             ColorSwatches(selected = selectedColor, onSelected = { selectedColor = it })
-            LabelText("ALL ICONS")
-            if (iconQuery.isBlank()) {
-                Text(
-                    "Type to search more icons",
-                    color = TextDim,
-                    style = MaterialTheme.typography.bodyMedium
-                )
-            } else if (filteredIcons.isEmpty()) {
-                Text(
-                    "No matching icons found",
-                    color = TextDim,
-                    style = MaterialTheme.typography.bodyMedium
-                )
-            } else {
-                LazyVerticalGrid(
-                    columns = GridCells.Adaptive(minSize = 128.dp),
-                    modifier = Modifier.fillMaxWidth().height(220.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    gridItems(
-                        items = filteredIcons,
-                        key = { it.key }
-                    ) { option ->
-                        CategoryIconChip(
-                            option = option,
-                            selected = selectedIconKey == option.key,
-                            onClick = { selectedIconKey = option.key }
-                        )
-                    }
-                }
-            }
             Button(
                 onClick = { onAdd(name, selectedIconKey, selectedColor) },
                 enabled = name.isNotBlank(),
@@ -1233,13 +1182,9 @@ private fun CategoryChoiceChip(
         selected = selected,
         onClick = onClick,
         label = { Text(category.name) },
-        leadingIcon = {
-            Icon(category.icon, contentDescription = null, modifier = Modifier.size(18.dp))
-        },
         colors = FilterChipDefaults.filterChipColors(
             selectedContainerColor = color,
             selectedLabelColor = if (isAmoledTheme()) Color(0xFF10131F) else Color.White,
-            selectedLeadingIconColor = if (isAmoledTheme()) Color(0xFF10131F) else Color.White,
             containerColor = Navy800,
             labelColor = TextMuted
         )
@@ -1249,7 +1194,11 @@ private fun CategoryChoiceChip(
 @Composable
 private fun SheetContent(title: String, content: @Composable ColumnScope.() -> Unit) {
     Column(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
+            .imePadding()
+            .padding(horizontal = 20.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         Text(title, color = TextPrimary, style = MaterialTheme.typography.headlineMedium)
@@ -1343,12 +1292,12 @@ private fun LargeTitle(title: String, subtitle: String) {
 @Composable
 private fun HeroMetricCard(label: String, value: String, helper: String) {
     val dark = isAmoledTheme()
-    val container = if (dark) PrimaryBlue else Color.White
-    val labelColor = if (dark) Color(0xCC00285D) else TextDim
-    val valueColor = if (dark) Color(0xFF07265C) else TextPrimary
+    val container = if (dark) PrimaryBlue else MaterialTheme.colorScheme.primaryContainer
+    val labelColor = if (dark) Color(0xFF15295A) else MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.72f)
+    val valueColor = if (dark) Color(0xFF0D1D45) else MaterialTheme.colorScheme.onPrimaryContainer
     Card(
         modifier = Modifier.fillMaxWidth().height(158.dp),
-        shape = RoundedCornerShape(16.dp),
+        shape = MaterialTheme.shapes.extraLarge,
         colors = CardDefaults.cardColors(containerColor = container),
         border = BorderStroke(1.dp, appBorderColor())
     ) {
@@ -1364,7 +1313,7 @@ private fun HeroMetricCard(label: String, value: String, helper: String) {
                 overflow = TextOverflow.Ellipsis
             )
             Spacer(Modifier.height(8.dp))
-            Text(helper, color = if (dark) Color(0xFF07265C) else PrimaryBlue, style = MaterialTheme.typography.bodyMedium)
+            Text(helper, color = if (dark) Color(0xFF132B61) else PrimarySoft, style = MaterialTheme.typography.bodyMedium)
         }
     }
 }
@@ -1378,6 +1327,11 @@ private fun TodayDonutCard(state: FinanceUiState) {
         .filter { it.type == TransactionType.Expense }
         .sumOf { it.amount }
     val total = expense.coerceAtLeast(1.0)
+    val expenseSweep by animateFloatAsState(
+        targetValue = ((expense / total) * 360f).toFloat(),
+        animationSpec = tween(700, easing = FastOutSlowInEasing),
+        label = "todayExpenseSweep"
+    )
 
     ElevatedPanel {
         Row(
@@ -1399,7 +1353,7 @@ private fun TodayDonutCard(state: FinanceUiState) {
                     drawArc(
                         color = LossRed,
                         startAngle = -90f,
-                        sweepAngle = ((expense / total) * 360f).toFloat(),
+                        sweepAngle = expenseSweep,
                         useCenter = false,
                         topLeft = Offset(20f, 20f),
                         size = Size(size.width - 40f, size.height - 40f),
@@ -2152,50 +2106,72 @@ private fun TransactionRow(
 ) {
     val category = state.categories.firstOrNull { it.id == transaction.categoryId }
     val color = categoryColor(category, transaction.type)
+    val cardColor = if (isAmoledTheme()) Color(0xFF171B22) else Color.White
+    val neutralBorder = if (isAmoledTheme()) Color(0xFF303846) else Color(0xFFD3DBEA)
+    val animatedBorder by animateColorAsState(
+        targetValue = if (category?.name == "Uncategorized") neutralBorder else color.copy(alpha = if (isAmoledTheme()) 0.52f else 0.34f),
+        animationSpec = tween(260, easing = FastOutSlowInEasing),
+        label = "transactionBorder"
+    )
     val dateLabel = transaction.transactionDate().format(DateTimeFormatter.ofPattern("MMM d, yyyy"))
+    val categoryLabel = category?.name ?: "Set category"
 
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onSelect(transaction.id) },
-        shape = RoundedCornerShape(14.dp),
-        colors = CardDefaults.cardColors(containerColor = Navy850),
-        border = BorderStroke(1.dp, color.copy(alpha = if (isAmoledTheme()) 0.82f else 0.64f))
+        shape = RoundedCornerShape(22.dp),
+        colors = CardDefaults.cardColors(containerColor = cardColor),
+        border = BorderStroke(1.dp, animatedBorder)
     ) {
-        Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.width(5.dp).height(54.dp).clip(RoundedCornerShape(8.dp)).background(color))
+        Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(color.copy(alpha = if (isAmoledTheme()) 0.18f else 0.12f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Box(Modifier.size(12.dp).clip(CircleShape).background(color))
+            }
             Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(
-                    transaction.name,
-                    color = TextPrimary,
-                    style = MaterialTheme.typography.titleMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(8.dp).clip(CircleShape).background(color))
-                    Spacer(Modifier.width(6.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                Row(verticalAlignment = Alignment.Top) {
                     Text(
-                        category?.name ?: "Set category",
-                        color = TextMuted,
-                        style = MaterialTheme.typography.labelMedium,
-                        modifier = Modifier.weight(1f, fill = false),
+                        transaction.name,
+                        color = TextPrimary,
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.weight(1f),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    Text("  |  $dateLabel", color = TextDim, style = MaterialTheme.typography.labelMedium, maxLines = 1)
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        transaction.signedAmount(state.currency),
+                        color = transaction.type.amountColor(),
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1
+                    )
                 }
-            }
-            Spacer(Modifier.width(10.dp))
-            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(
-                    transaction.signedAmount(state.currency),
-                    color = transaction.type.amountColor(),
-                    style = MaterialTheme.typography.titleMedium,
-                    maxLines = 1
-                )
-                Text("Tap to edit", color = TextDim, style = MaterialTheme.typography.labelMedium)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        categoryLabel,
+                        color = color,
+                        style = MaterialTheme.typography.labelMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text("  ·  ", color = TextDim, style = MaterialTheme.typography.labelMedium)
+                    Text(
+                        dateLabel,
+                        color = TextMuted,
+                        style = MaterialTheme.typography.labelMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text("Edit", color = PrimaryBlue, style = MaterialTheme.typography.labelMedium)
+                }
             }
         }
     }
@@ -2254,22 +2230,32 @@ private fun CashFlowGraph(state: FinanceUiState) {
 
 @Composable
 private fun Bar(label: String, progress: Float, color: Color, value: String) {
+    val animatedProgress by animateFloatAsState(
+        targetValue = progress.coerceIn(0f, 1f),
+        animationSpec = tween(650, easing = FastOutSlowInEasing),
+        label = "barProgress"
+    )
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row {
             Text(label, color = TextMuted, modifier = Modifier.weight(1f))
             Text(value, color = TextPrimary)
         }
         LinearProgressIndicator(
-            progress = { progress },
-            modifier = Modifier.fillMaxWidth().height(10.dp).clip(RoundedCornerShape(8.dp)),
+            progress = { animatedProgress },
+            modifier = Modifier.fillMaxWidth().height(12.dp).clip(RoundedCornerShape(50)),
             color = color,
-            trackColor = Navy800
+            trackColor = appTrackColor()
         )
     }
 }
 
 @Composable
 private fun SegmentAmountRow(label: String, value: String, color: Color, progress: Float) {
+    val animatedProgress by animateFloatAsState(
+        targetValue = progress.coerceIn(0.04f, 1f),
+        animationSpec = tween(650, easing = FastOutSlowInEasing),
+        label = "segmentProgress"
+    )
     Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(11.dp).clip(CircleShape).background(color))
@@ -2278,8 +2264,8 @@ private fun SegmentAmountRow(label: String, value: String, color: Color, progres
             Text(value, color = TextMuted, style = MaterialTheme.typography.bodyMedium, maxLines = 1)
         }
         LinearProgressIndicator(
-            progress = { progress.coerceIn(0.04f, 1f) },
-            modifier = Modifier.fillMaxWidth().height(7.dp).clip(RoundedCornerShape(8.dp)),
+            progress = { animatedProgress },
+            modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(50)),
             color = color,
             trackColor = appTrackColor()
         )
@@ -2320,7 +2306,7 @@ private fun DailyExpenseBarGraph(state: FinanceUiState) {
                             day = date.dayOfMonth,
                             segments = segments,
                             maxAmount = max,
-                            value = state.money(total)
+                            value = compactMoney(total, state.currency)
                         )
                     }
                 }
@@ -2333,7 +2319,7 @@ private fun DailyExpenseBarGraph(state: FinanceUiState) {
 private fun DailyExpenseBar(day: Int, segments: List<Pair<CategoryItem, Double>>, maxAmount: Double, value: String) {
     val amount = segments.sumOf { it.second }
     Column(
-        modifier = Modifier.width(34.dp).fillMaxHeight(),
+        modifier = Modifier.width(42.dp).fillMaxHeight(),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Bottom
     ) {
@@ -2343,7 +2329,7 @@ private fun DailyExpenseBar(day: Int, segments: List<Pair<CategoryItem, Double>>
                 color = TextDim,
                 style = MaterialTheme.typography.labelSmall,
                 maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+                textAlign = TextAlign.Center
             )
             Spacer(Modifier.height(6.dp))
         }
@@ -2423,7 +2409,7 @@ private fun CategoryHistoryGraph(state: FinanceUiState, totals: List<MonthlyCate
 
     ElevatedPanel {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            SectionHeader("Category History", "Spending · ${state.selectedMonth.shortLabel()}")
+            SectionHeader("Category History", "Spending - ${state.selectedMonth.shortLabel()}")
             if (visibleTotals.isEmpty()) {
                 EmptyPanel("No category expenses for this month.")
             } else {
@@ -2660,9 +2646,22 @@ private fun ThemeSelector(
 @Composable
 private fun SectionHeader(title: String, action: String) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text(title, color = TextPrimary, style = MaterialTheme.typography.headlineMedium)
-        Spacer(Modifier.weight(1f))
-        Text(action, color = PrimarySoft, style = MaterialTheme.typography.titleMedium)
+        Text(
+            title,
+            color = TextPrimary,
+            style = MaterialTheme.typography.headlineMedium,
+            modifier = Modifier.weight(1f),
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
+        )
+        Spacer(Modifier.width(12.dp))
+        Text(
+            action,
+            color = PrimaryBlue,
+            style = MaterialTheme.typography.titleMedium,
+            textAlign = TextAlign.End,
+            maxLines = 2
+        )
     }
 }
 
@@ -2670,8 +2669,8 @@ private fun SectionHeader(title: String, action: String) {
 private fun ElevatedPanel(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
     Card(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(if (isAmoledTheme()) 16.dp else 10.dp),
-        colors = CardDefaults.cardColors(containerColor = Navy850),
+        shape = MaterialTheme.shapes.large,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
         border = BorderStroke(1.dp, appBorderColor())
     ) {
         content()
@@ -2679,15 +2678,15 @@ private fun ElevatedPanel(modifier: Modifier = Modifier, content: @Composable ()
 }
 
 private fun appBorderColor(): Color {
-    return if (isAmoledTheme()) Color(0xFF33363D) else Color(0xFFC9CEDD)
+    return if (isAmoledTheme()) Color(0xFF343D4E) else Color(0xFFC9D3E6)
 }
 
 private fun appDividerColor(): Color {
-    return if (isAmoledTheme()) Color(0xFF283044) else Color(0xFFD2D7E4)
+    return if (isAmoledTheme()) Color(0xFF343D4E) else Color(0xFFD7DEED)
 }
 
 private fun appTrackColor(): Color {
-    return if (isAmoledTheme()) Navy800 else Color(0xFFE7EBF5)
+    return if (isAmoledTheme()) Navy800 else Color(0xFFDCE4F3)
 }
 
 @Composable
@@ -2697,7 +2696,7 @@ fun primaryButtonColors(): ButtonColors = ButtonDefaults.buttonColors(
 )
 
 fun isAmoledTheme(): Boolean {
-    return Navy950 == Color(0xFF000000)
+    return TextPrimary == Color(0xFFF8FAFF)
 }
 
 @Composable
@@ -2709,7 +2708,13 @@ private fun EmptyPanel(text: String) {
 
 @Composable
 private fun IconTile(icon: ImageVector, tint: Color) {
-    Box(Modifier.size(52.dp).clip(RoundedCornerShape(if (isAmoledTheme()) 14.dp else 28.dp)).background(tint.copy(alpha = if (isAmoledTheme()) 0.14f else 0.11f)), contentAlignment = Alignment.Center) {
+    Box(
+        Modifier
+            .size(54.dp)
+            .clip(MaterialTheme.shapes.large)
+            .background(tint.copy(alpha = if (isAmoledTheme()) 0.18f else 0.12f)),
+        contentAlignment = Alignment.Center
+    ) {
         Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(27.dp))
     }
 }
@@ -2731,14 +2736,44 @@ private fun ChipRow(content: @Composable RowScope.() -> Unit) {
 @Composable
 private fun MoneyChip(label: String, selected: Boolean, onClick: () -> Unit) {
     val dark = isAmoledTheme()
+    val scale by animateFloatAsState(
+        targetValue = if (selected) 1.03f else 1f,
+        animationSpec = tween(220, easing = FastOutSlowInEasing),
+        label = "chipScale"
+    )
     FilterChip(
         selected = selected,
         onClick = onClick,
+        modifier = Modifier.scale(scale),
+        shape = RoundedCornerShape(50),
         label = { Text(label) },
         colors = FilterChipDefaults.filterChipColors(
-            selectedContainerColor = if (dark) PrimaryBlue else Color(0xFFEAF2FF),
-            selectedLabelColor = if (dark) Color(0xFF001A42) else PrimaryBlue,
-            containerColor = Navy800,
+            selectedContainerColor = if (dark) Color(0xFF29477F) else Color(0xFFDDE8FF),
+            selectedLabelColor = if (dark) Color(0xFFEAF1FF) else PrimaryBlue,
+            containerColor = if (dark) Navy800 else Color.White,
+            labelColor = TextMuted
+        )
+    )
+}
+
+@Composable
+private fun TransactionTypeChip(type: TransactionType, selected: Boolean, onClick: () -> Unit) {
+    val accent = if (type == TransactionType.Income) MoneyGreen else LossRed
+    val scale by animateFloatAsState(
+        targetValue = if (selected) 1.03f else 1f,
+        animationSpec = tween(220, easing = FastOutSlowInEasing),
+        label = "typeChipScale"
+    )
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        modifier = Modifier.scale(scale),
+        shape = RoundedCornerShape(50),
+        label = { Text(type.name, fontWeight = FontWeight.Bold) },
+        colors = FilterChipDefaults.filterChipColors(
+            selectedContainerColor = accent.copy(alpha = if (isAmoledTheme()) 0.22f else 0.14f),
+            selectedLabelColor = accent,
+            containerColor = if (isAmoledTheme()) Navy800 else Color.White,
             labelColor = TextMuted
         )
     )
@@ -2747,12 +2782,21 @@ private fun MoneyChip(label: String, selected: Boolean, onClick: () -> Unit) {
 @Composable
 private fun BottomNavigation(selectedTab: ScreenTab, onTabSelected: (ScreenTab) -> Unit) {
     val dark = isAmoledTheme()
-    NavigationBar(containerColor = if (dark) Navy850 else Color(0xFFF7F9FE), tonalElevation = 0.dp) {
+    NavigationBar(
+        containerColor = if (dark) Color(0xEE171D2A) else Color(0xEEF8F9FF),
+        tonalElevation = 0.dp
+    ) {
         ScreenTab.entries.forEach { tab ->
+            val selected = selectedTab == tab
+            val scale by animateFloatAsState(
+                targetValue = if (selected) 1.08f else 1f,
+                animationSpec = tween(240, easing = FastOutSlowInEasing),
+                label = "navScale"
+            )
             NavigationBarItem(
-                selected = selectedTab == tab,
+                selected = selected,
                 onClick = { onTabSelected(tab) },
-                icon = { Icon(tab.icon, contentDescription = tab.label) },
+                icon = { Icon(tab.icon, contentDescription = tab.label, modifier = Modifier.scale(scale)) },
                 label = {
                     Text(
                         tab.label,
@@ -2765,7 +2809,7 @@ private fun BottomNavigation(selectedTab: ScreenTab, onTabSelected: (ScreenTab) 
                 colors = NavigationBarItemDefaults.colors(
                     selectedIconColor = PrimarySoft,
                     selectedTextColor = PrimarySoft,
-                    indicatorColor = if (dark) Color(0xFF112654) else Color(0xFFEAF2FF),
+                    indicatorColor = if (dark) Color(0xFF29477F) else Color(0xFFDDE8FF),
                     unselectedIconColor = if (dark) TextDim.copy(alpha = 0.62f) else TextPrimary,
                     unselectedTextColor = if (dark) TextDim.copy(alpha = 0.62f) else TextPrimary
                 )
@@ -2828,13 +2872,15 @@ private fun TransactionType.bankVerb(): String {
 
 private fun categoryColor(category: CategoryItem?, type: TransactionType): Color {
     if (category == null) return TextMuted
+    if (category.name == "Uncategorized") return if (isAmoledTheme()) Color(0xFFA7B3CC) else Color(0xFF7D889D)
+    if (type == TransactionType.Income) return MoneyGreen
     return colorFromHex(category.colorHex)
 }
 
 private fun categoryColor(category: String, type: TransactionType): Color {
     if (type == TransactionType.Income) return MoneyGreen
     return when (category) {
-        "Uncategorized" -> TextDim
+        "Uncategorized" -> if (isAmoledTheme()) Color(0xFFA7B3CC) else Color(0xFF7D889D)
         "Grocery" -> Color(0xFF38E68B)
         "Food" -> Color(0xFFFFC857)
         "Shopping" -> Color(0xFFFF4FB8)
@@ -2859,6 +2905,22 @@ private fun money(value: Double, currency: CurrencyOption): String {
     formatter.currency = Currency.getInstance(currency.currencyCode)
     formatter.maximumFractionDigits = 2
     return formatter.format(value)
+}
+
+private fun compactMoney(value: Double, currency: CurrencyOption): String {
+    val abs = kotlin.math.abs(value)
+    val suffixValue = when {
+        abs >= 1_000_000.0 -> abs / 1_000_000.0 to "M"
+        abs >= 100_000.0 -> abs / 100_000.0 to "L"
+        abs >= 1_000.0 -> abs / 1_000.0 to "K"
+        else -> abs to ""
+    }
+    val number = if (suffixValue.first >= 10 || suffixValue.second.isEmpty()) {
+        suffixValue.first.toInt().toString()
+    } else {
+        String.format(Locale.US, "%.1f", suffixValue.first).trimEnd('0').trimEnd('.')
+    }
+    return "${currency.symbol}$number${suffixValue.second}"
 }
 
 private val categoryPalette = listOf(
