@@ -1,8 +1,22 @@
 package com.moneymanager.app.ui
 
+import android.app.DatePickerDialog
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -28,9 +42,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -78,29 +89,33 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.moneymanager.app.model.BankAccount
@@ -108,16 +123,20 @@ import com.moneymanager.app.model.BudgetPlan
 import com.moneymanager.app.model.CategoryItem
 import com.moneymanager.app.model.CurrencyOption
 import com.moneymanager.app.model.DetectedTransactionDraft
+import com.moneymanager.app.model.ActivityDateFilter
 import com.moneymanager.app.model.FinanceUiState
 import com.moneymanager.app.model.LedgerTransaction
-import com.moneymanager.app.model.MessageScanRange
 import com.moneymanager.app.model.MonthlyCategoryTotal
 import com.moneymanager.app.model.MoneyIcons
 import com.moneymanager.app.model.ScreenTab
 import com.moneymanager.app.model.ThemeMode
 import com.moneymanager.app.model.TransactionType
+import com.moneymanager.app.model.UiAccent
+import com.moneymanager.app.model.UiSurface
 import com.moneymanager.app.model.month
 import com.moneymanager.app.model.shortLabel
+import com.moneymanager.app.model.transactionDate
+import com.moneymanager.app.data.SmsBankKeys
 import com.moneymanager.app.ui.theme.LossRed
 import com.moneymanager.app.ui.theme.MoneyGreen
 import com.moneymanager.app.ui.theme.Navy800
@@ -134,8 +153,11 @@ import com.moneymanager.app.viewmodel.MoneyViewModel
 import java.text.NumberFormat
 import java.time.LocalDate
 import java.time.YearMonth
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.util.Currency
 import java.util.Locale
+import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -150,6 +172,14 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
     if (!state.hasCompletedRegistration) {
         RegistrationScreen(onComplete = viewModel::completeRegistration)
         return
+    }
+
+    LaunchedEffect(Unit) {
+        viewModel.scanTodayMessages()
+        while (true) {
+            delay(5 * 60 * 1000L)
+            viewModel.scanTodayMessages()
+        }
     }
 
     Scaffold(
@@ -186,44 +216,75 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
             }
         }
     ) { padding ->
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .statusBarsPadding()
-                .padding(padding),
-            contentPadding = PaddingValues(start = 20.dp, top = 18.dp, end = 20.dp, bottom = 104.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            item { BrandHeader(state.userName) }
-            when (state.selectedTab) {
-                ScreenTab.Dashboard -> dashboardContent(
-                    state = state,
-                    onScanWithRange = viewModel::scanMessages,
-                    onMonthSelected = viewModel::selectMonth,
-                    onOpenSummary = viewModel::selectTab,
-                    onAcceptDraft = viewModel::acceptDetectedTransaction,
-                    onIgnoreDraft = viewModel::ignoreDetectedTransaction,
-                    onDeleteTransaction = viewModel::deleteTransaction,
-                    onEditTransaction = viewModel::requestEditTransactionCategory,
-                    onDashboardPageSelected = viewModel::selectDashboardTransactionPage,
-                    onDraftPageSelected = viewModel::selectDashboardDraftPage
-                )
-                ScreenTab.Activity -> activityContent(
-                    state = state,
-                    onDeleteTransaction = viewModel::deleteTransaction,
-                    onEditTransaction = viewModel::requestEditTransactionCategory,
-                    onLoadMore = viewModel::loadMoreTransactions
-                )
-                ScreenTab.Budget -> budgetContent(state, viewModel::setBudgetSheet, viewModel::deleteBudget)
-                ScreenTab.Summary -> summaryContent(state, viewModel::selectMonth)
-                ScreenTab.Settings -> settingsContent(
-                    state = state,
-                    onAddCategory = viewModel::setCategorySheet,
-                    onCurrencySelected = viewModel::selectCurrency,
-                    onThemeSelected = viewModel::selectThemeMode,
-                    onDeleteAccount = viewModel::deleteAccount,
-                    onDeleteCategory = viewModel::deleteCategory
-                )
+        AnimatedContent(
+            targetState = state.selectedTab,
+            transitionSpec = {
+                val direction = if (targetState.ordinal >= initialState.ordinal) 1 else -1
+                (slideInHorizontally(
+                    animationSpec = tween(320, easing = FastOutSlowInEasing),
+                    initialOffsetX = { it / 5 * direction }
+                ) + fadeIn(tween(220))) togetherWith
+                    (slideOutHorizontally(
+                        animationSpec = tween(260, easing = FastOutSlowInEasing),
+                        targetOffsetX = { -it / 6 * direction }
+                    ) + fadeOut(tween(180)))
+            },
+            label = "tabTransition"
+        ) { tab ->
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .statusBarsPadding()
+                    .padding(padding),
+                contentPadding = PaddingValues(start = 20.dp, top = 18.dp, end = 20.dp, bottom = 104.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                item { BrandHeader(state.userName) }
+                when (tab) {
+                    ScreenTab.Dashboard -> dashboardContent(
+                        state = state,
+                        onOpenSummary = viewModel::selectTab,
+                        onAcceptDraft = viewModel::acceptDetectedTransaction,
+                        onIgnoreDraft = viewModel::ignoreDetectedTransaction,
+                        onDeleteTransaction = viewModel::deleteTransaction,
+                        onEditTransaction = viewModel::requestEditTransactionCategory,
+                        onDashboardPageSelected = viewModel::selectDashboardTransactionPage,
+                        onDraftPageSelected = viewModel::selectDashboardDraftPage
+                    )
+                    ScreenTab.Activity -> activityContent(
+                        state = state,
+                        onScanNow = viewModel::scanCurrentActivityPeriod,
+                        onPopulateThreeMonths = viewModel::populateLastThreeMonths,
+                        onDateFilterSelected = viewModel::setActivityDateFilter,
+                        onDeleteTransaction = viewModel::deleteTransaction,
+                        onEditTransaction = viewModel::requestEditTransactionCategory,
+                        onLoadMore = viewModel::loadMoreTransactions
+                    )
+                    ScreenTab.Budget -> budgetContent(state, viewModel::setBudgetSheet, viewModel::deleteBudget)
+                    ScreenTab.Summary -> summaryContent(
+                        state = state,
+                        onMonthSelected = viewModel::selectMonth,
+                        onToggleSummaryAccount = viewModel::toggleSummaryAccountInFilter,
+                        onClearSummaryAccountFilter = viewModel::clearSummaryAccountFilter
+                    )
+                    ScreenTab.Settings -> settingsContent(
+                        state = state,
+                        onAddCategory = viewModel::setCategorySheet,
+                        onCurrencySelected = viewModel::selectCurrency,
+                        onThemeSelected = viewModel::selectThemeMode,
+                        onUiAccentSelected = viewModel::selectUiAccent,
+                        onUiSurfaceSelected = viewModel::selectUiSurface,
+                        onSalaryShiftChanged = viewModel::setSalaryShiftIncomeEnabled,
+                        onSalaryWindowDaysChanged = viewModel::setSalaryShiftWindowDays,
+                        onSalaryCategorySelected = viewModel::setSalaryCategoryId,
+                        onSalaryKeywordsToggled = viewModel::setSalaryKeywordsForUncategorized,
+                        onDeleteAccount = viewModel::deleteAccount,
+                        onUpdateAccountBalance = viewModel::updateAccountBalance,
+                        onDeleteCategory = viewModel::deleteCategory,
+                        onCategoryColorSelected = viewModel::updateCategoryColor,
+                        onDeleteAllData = viewModel::deleteAllSavedData
+                    )
+                }
             }
         }
     }
@@ -251,13 +312,15 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
         )
     }
 
-    if (state.showEditCategorySheet && state.editingTransactionId != null) {
-        val editingTransaction = state.transactions.firstOrNull { it.id == state.editingTransactionId }
-        EditTransactionCategorySheet(
+    if (state.showTransactionDetailSheet && state.selectedTransactionId != null) {
+        val selectedTransaction = state.transactions.firstOrNull { it.id == state.selectedTransactionId }
+        TransactionDetailSheet(
             state = state,
-            transaction = editingTransaction,
+            transaction = selectedTransaction,
             onDismiss = viewModel::cancelEditTransactionCategory,
-            onSave = viewModel::editTransactionCategory
+            onSave = viewModel::updateTransactionDetails,
+            onDelete = viewModel::deleteTransaction,
+            onAddCustomCategory = viewModel::createCategoryForTransaction
         )
     }
 
@@ -294,8 +357,6 @@ private fun InitialLoadingScreen() {
 
 private fun androidx.compose.foundation.lazy.LazyListScope.dashboardContent(
     state: FinanceUiState,
-    onScanWithRange: (MessageScanRange, LocalDate, LocalDate) -> Unit,
-    onMonthSelected: (YearMonth) -> Unit,
     onOpenSummary: (ScreenTab) -> Unit,
     onAcceptDraft: (Long, Long) -> Unit,
     onIgnoreDraft: (Long) -> Unit,
@@ -305,19 +366,15 @@ private fun androidx.compose.foundation.lazy.LazyListScope.dashboardContent(
     onDraftPageSelected: (Int) -> Unit
 ) {
     item {
-        HeroMetricCard(
-            label = "Tracked Balance",
-            value = state.money(state.trackedBalance),
-            helper = "${state.accounts.size} bank account${if (state.accounts.size == 1) "" else "s"} tracked"
-        )
+        TodayDonutCard(state)
     }
     item {
-        CashFlowOverviewCard(state)
+        TodayCategoryBreakdown(state)
     }
-    if (state.detectedDrafts.isNotEmpty()) {
+    if (state.todayDetectedDrafts.isNotEmpty()) {
         item {
             SectionHeader(
-                "Transactions",
+                "Today Pending",
                 "Page ${state.dashboardCurrentDraftPage} of ${state.dashboardDraftPageCount}"
             )
         }
@@ -340,15 +397,15 @@ private fun androidx.compose.foundation.lazy.LazyListScope.dashboardContent(
     } else {
         item {
             SectionHeader(
-                "Transactions",
+                "Today",
                 "Page ${state.dashboardCurrentPage} of ${state.dashboardTransactionPageCount}"
             )
         }
-        if (state.transactions.isEmpty()) {
-            item { EmptyPanel("No transactions yet. Tap + to add your first income or expense.") }
+        if (state.todayTransactions.isEmpty()) {
+            item { EmptyPanel("No transactions for today yet.") }
         } else {
             items(state.dashboardPagedTransactions, key = { "dashboard_txn_${it.id}" }) {
-                TransactionRow(transaction = it, state = state, onDelete = onDeleteTransaction, onEdit = onEditTransaction)
+                TransactionRow(transaction = it, state = state, onSelect = onEditTransaction)
             }
             item {
                 DashboardPagination(
@@ -362,41 +419,49 @@ private fun androidx.compose.foundation.lazy.LazyListScope.dashboardContent(
     }
     item {
         ActionPanel(
-            title = "Monthly Summary",
-            subtitle = "${state.selectedMonth.shortLabel()} income, expense, net total, graph, and category pie.",
+            title = "Monthly Analysis",
+            subtitle = "Open category history, monthly totals, and graphical breakdowns.",
             icon = Icons.Rounded.BarChart,
             action = "Open",
             onClick = { onOpenSummary(ScreenTab.Summary) }
         )
     }
-    item {
-        MessageScanPanel(onScan = onScanWithRange)
-    }
 }
 
 private fun androidx.compose.foundation.lazy.LazyListScope.activityContent(
     state: FinanceUiState,
+    onScanNow: () -> Unit,
+    onPopulateThreeMonths: () -> Unit,
+    onDateFilterSelected: (ActivityDateFilter, LocalDate?, LocalDate?) -> Unit,
     onDeleteTransaction: (Long) -> Unit,
     onEditTransaction: (Long) -> Unit,
     onLoadMore: () -> Unit
 ) {
-    item { LargeTitle("Activity", "Add and review income or expenses by category.") }
-    item { SearchBarSurface("Search transactions") }
+    item { LargeTitle("Activity", "Review transactions for today or pick another period.") }
     item {
-        ChipRow {
-            MoneyChip("This Month", selected = true, onClick = {})
-            MoneyChip("Categories", selected = false, onClick = {})
-            MoneyChip("Amount", selected = false, onClick = {})
-        }
+        ActivityScanPanel(
+            state = state,
+            onScanNow = onScanNow,
+            onPopulateThreeMonths = onPopulateThreeMonths
+        )
     }
-    if (state.transactions.isEmpty()) {
-        item { EmptyPanel("No transactions yet. Tap + to add your first income or expense.") }
+    item {
+        ActivityDateFilterPanel(
+            state = state,
+            onDateFilterSelected = onDateFilterSelected
+        )
+    }
+    item {
+        SearchBarSurface("Search in selected period")
+    }
+    if (state.activityTransactions.isEmpty()) {
+        item { EmptyPanel("No transactions in this period.") }
     } else {
         itemsIndexed(
             items = state.pagedTransactions,
             key = { index, transaction -> "${transaction.id}_${transaction.timestampMillis}_$index" }
         ) { _, transaction ->
-            TransactionRow(transaction = transaction, state = state, onDelete = onDeleteTransaction, onEdit = onEditTransaction)
+            TransactionRow(transaction = transaction, state = state, onSelect = onEditTransaction)
         }
         if (state.hasMoreTransactions) {
             item {
@@ -445,7 +510,9 @@ private fun androidx.compose.foundation.lazy.LazyListScope.budgetContent(
 
 private fun androidx.compose.foundation.lazy.LazyListScope.summaryContent(
     state: FinanceUiState,
-    onMonthSelected: (YearMonth) -> Unit
+    onMonthSelected: (YearMonth) -> Unit,
+    onToggleSummaryAccount: (Long) -> Unit,
+    onClearSummaryAccountFilter: () -> Unit
 ) {
     item { LargeTitle("Monthly Summary", state.selectedMonth.shortLabel()) }
     item {
@@ -455,16 +522,23 @@ private fun androidx.compose.foundation.lazy.LazyListScope.summaryContent(
             onSelected = onMonthSelected
         )
     }
-    item {
-        MetricGrid(
-            income = state.monthIncome,
-            expense = state.monthExpense,
-            net = state.monthNet,
-            currency = state.currency
-        )
+    if (state.accounts.isNotEmpty()) {
+        item {
+            SummaryAccountFilterRow(
+                state = state,
+                onToggleAccount = onToggleSummaryAccount,
+                onClearFilter = onClearSummaryAccountFilter
+            )
+        }
     }
+    item {
+        MetricGrid(state = state)
+    }
+    item { MonthBalanceStrip(state) }
     item { CashFlowGraph(state) }
+    item { DailyExpenseBarGraph(state) }
     item { CategoryPieChart(state, categoryTotals(state)) }
+    item { CategoryHistoryGraph(state, categoryTotals(state)) }
 }
 
 private fun androidx.compose.foundation.lazy.LazyListScope.settingsContent(
@@ -472,14 +546,27 @@ private fun androidx.compose.foundation.lazy.LazyListScope.settingsContent(
     onAddCategory: (Boolean) -> Unit,
     onCurrencySelected: (CurrencyOption) -> Unit,
     onThemeSelected: (ThemeMode) -> Unit,
+    onUiAccentSelected: (UiAccent) -> Unit,
+    onUiSurfaceSelected: (UiSurface) -> Unit,
+    onSalaryShiftChanged: (Boolean) -> Unit,
+    onSalaryWindowDaysChanged: (Int) -> Unit,
+    onSalaryCategorySelected: (Long?) -> Unit,
+    onSalaryKeywordsToggled: (Boolean) -> Unit,
     onDeleteAccount: (Long) -> Unit,
-    onDeleteCategory: (Long) -> Unit
+    onUpdateAccountBalance: (Long, Double) -> Unit,
+    onDeleteCategory: (Long) -> Unit,
+    onCategoryColorSelected: (Long, String) -> Unit,
+    onDeleteAllData: () -> Unit
 ) {
     item {
         ProfileHeader(state)
     }
     item {
-        AccountSettingsGroup(state = state, onDelete = onDeleteAccount)
+        AccountSettingsGroup(
+            state = state,
+            onDelete = onDeleteAccount,
+            onUpdateBalance = onUpdateAccountBalance
+        )
     }
     item {
         CurrencySelector(
@@ -494,7 +581,40 @@ private fun androidx.compose.foundation.lazy.LazyListScope.settingsContent(
         )
     }
     item {
-        CategorySettingsGroup(categories = state.categories, onDelete = onDeleteCategory)
+        UiAccentSelector(
+            selected = state.uiAccent,
+            darkMode = state.themeMode == ThemeMode.Dark,
+            onSelected = onUiAccentSelected
+        )
+    }
+    item {
+        UiSurfaceSelector(
+            selected = state.uiSurface,
+            darkMode = state.themeMode == ThemeMode.Dark,
+            onSelected = onUiSurfaceSelected
+        )
+    }
+    item {
+        SummaryBehaviorSettings(
+            salaryShiftEnabled = state.salaryShiftIncomeEnabled,
+            windowDays = state.salaryShiftWindowDays,
+            onSalaryShiftChanged = onSalaryShiftChanged,
+            onWindowDaysChanged = onSalaryWindowDaysChanged
+        )
+    }
+    item {
+        SalaryCategorySettings(
+            state = state,
+            onSalaryCategorySelected = onSalaryCategorySelected,
+            onSalaryKeywordsToggled = onSalaryKeywordsToggled
+        )
+    }
+    item {
+        CategorySettingsGroup(
+            categories = state.categories,
+            onDelete = onDeleteCategory,
+            onColorSelected = onCategoryColorSelected
+        )
     }
     item {
         Button(
@@ -507,6 +627,73 @@ private fun androidx.compose.foundation.lazy.LazyListScope.settingsContent(
             Spacer(Modifier.width(8.dp))
             Text("Create Category", fontWeight = FontWeight.Bold)
         }
+    }
+    item {
+        DeleteDataPanel(onDeleteAllData = onDeleteAllData)
+    }
+}
+
+@Composable
+private fun DeleteDataPanel(onDeleteAllData: () -> Unit) {
+    var showConfirm by remember { mutableStateOf(false) }
+
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        LabelText("DATA")
+        ElevatedPanel {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconTile(Icons.Rounded.Warning, LossRed)
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Saved app data", color = TextPrimary, style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            "Clear scanned SMS transactions, accounts, budgets, categories, and settings.",
+                            color = TextDim,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                }
+                OutlinedButton(
+                    onClick = { showConfirm = true },
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, LossRed)
+                ) {
+                    Text("Delete All Saved Data", color = LossRed, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+
+    if (showConfirm) {
+        AlertDialog(
+            onDismissRequest = { showConfirm = false },
+            title = { Text("Delete all saved data?") },
+            text = {
+                Text(
+                    "This removes the local app database: transactions, detected drafts, accounts, budgets, custom categories, and setup choices.",
+                    color = TextMuted
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showConfirm = false
+                        onDeleteAllData()
+                    }
+                ) {
+                    Text("Delete", color = LossRed, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showConfirm = false }) {
+                    Text("Cancel")
+                }
+            },
+            containerColor = Navy850,
+            titleContentColor = TextPrimary,
+            textContentColor = TextMuted
+        )
     }
 }
 
@@ -527,7 +714,7 @@ private fun RegistrationScreen(onComplete: (String, List<Pair<String, Double>>) 
         item {
             LargeTitle(
                 title = "Create Account",
-                subtitle = "Start with your name. Bank accounts are optional and can be added now for tracking."
+                subtitle = "Start with your name and current balance. Add each account you want tracked."
             )
         }
         item {
@@ -542,10 +729,12 @@ private fun RegistrationScreen(onComplete: (String, List<Pair<String, Double>>) 
                 shape = RoundedCornerShape(12.dp)
             )
         }
-        item { LabelText("BANK ACCOUNTS OPTIONAL") }
+        item { LabelText("BANK ACCOUNTS") }
         items(accounts.size) { index ->
             AccountDraftRow(
                 account = accounts[index],
+                accountNumber = index + 1,
+                canRemove = accounts.size > 1,
                 onNameChanged = { accounts[index] = accounts[index].copy(name = it) },
                 onBalanceChanged = { accounts[index] = accounts[index].copy(balance = it) },
                 onRemove = {
@@ -562,21 +751,25 @@ private fun RegistrationScreen(onComplete: (String, List<Pair<String, Double>>) 
             ) {
                 Icon(Icons.Rounded.Add, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
-                Text("Add Bank Account")
+                Text("Add another account")
             }
         }
         item {
+            val validAccounts = accounts.mapNotNull {
+                val amount = it.balance.toDoubleOrNull()
+                if (it.name.isBlank() || amount == null || amount < 0.0) null else it.name.trim() to amount
+            }
             Button(
                 onClick = {
                     onComplete(
                         name,
                         accounts.mapNotNull {
                             val amount = it.balance.toDoubleOrNull()
-                            if (it.name.isBlank() || amount == null) null else it.name to amount
+                            if (it.name.isBlank() || amount == null || amount < 0.0) null else it.name.trim() to amount
                         }
                     )
                 },
-                enabled = name.isNotBlank(),
+                enabled = name.isNotBlank() && validAccounts.isNotEmpty(),
                 modifier = Modifier.fillMaxWidth().height(58.dp),
                 shape = RoundedCornerShape(12.dp),
                 colors = primaryButtonColors()
@@ -592,6 +785,8 @@ private data class AccountDraft(val name: String = "", val balance: String = "")
 @Composable
 private fun AccountDraftRow(
     account: AccountDraft,
+    accountNumber: Int,
+    canRemove: Boolean,
     onNameChanged: (String) -> Unit,
     onBalanceChanged: (String) -> Unit,
     onRemove: () -> Unit
@@ -601,14 +796,23 @@ private fun AccountDraftRow(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Rounded.AccountBalance, contentDescription = null, tint = PrimarySoft)
                 Spacer(Modifier.width(8.dp))
-                Text("Bank Account", color = TextPrimary, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                TextButton(onClick = onRemove) { Text("Remove") }
+                Text(
+                    "Account $accountNumber",
+                    color = TextPrimary,
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.weight(1f)
+                )
+                if (canRemove) {
+                    TextButton(onClick = onRemove) {
+                        Text("Remove", color = LossRed)
+                    }
+                }
             }
             OutlinedTextField(
                 value = account.name,
                 onValueChange = onNameChanged,
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("Account Name") },
+                label = { Text("Account name") },
                 singleLine = true,
                 colors = inputColors(),
                 shape = RoundedCornerShape(12.dp)
@@ -617,11 +821,16 @@ private fun AccountDraftRow(
                 value = account.balance,
                 onValueChange = onBalanceChanged,
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("Current Amount") },
+                label = { Text("Current balance") },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                 singleLine = true,
                 colors = inputColors(),
                 shape = RoundedCornerShape(12.dp)
+            )
+            Text(
+                "This balance becomes the current anchor for reverse history calculation.",
+                color = TextDim,
+                style = MaterialTheme.typography.bodySmall
             )
         }
     }
@@ -639,8 +848,14 @@ private fun AddTransactionSheet(
     var type by remember { mutableStateOf(TransactionType.Expense) }
     var categoryId by remember { mutableStateOf(state.categories.first().id) }
     var accountId by remember { mutableStateOf(state.accounts.firstOrNull()?.id) }
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
-    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = Navy900, contentColor = TextPrimary) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = Navy900,
+        contentColor = TextPrimary
+    ) {
         SheetContent(title = "Add Transaction") {
             OutlinedTextField(
                 value = name,
@@ -663,13 +878,13 @@ private fun AddTransactionSheet(
             )
             ChipRow {
                 TransactionType.entries.forEach {
-                    MoneyChip(it.name, selected = type == it, onClick = { type = it })
+                    TransactionTypeChip(it, selected = type == it, onClick = { type = it })
                 }
             }
             LabelText("CATEGORY")
             ChipRow {
                 state.categories.forEach {
-                    MoneyChip(it.name, selected = categoryId == it.id, onClick = { categoryId = it.id })
+                    CategoryChoiceChip(it, type, selected = categoryId == it.id, onClick = { categoryId = it.id })
                 }
             }
             if (state.accounts.isNotEmpty()) {
@@ -697,44 +912,145 @@ private fun AddTransactionSheet(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun EditTransactionCategorySheet(
+private fun TransactionDetailSheet(
     state: FinanceUiState,
     transaction: LedgerTransaction?,
     onDismiss: () -> Unit,
-    onSave: (Long, Long) -> Unit
+    onSave: (Long, TransactionType, Long) -> Unit,
+    onDelete: (Long) -> Unit,
+    onAddCustomCategory: (Long, String, String, String) -> Unit
 ) {
     if (transaction == null) return
     var categoryId by remember { mutableStateOf(transaction.categoryId) }
+    var type by remember { mutableStateOf(transaction.type) }
+    var showAllCategories by remember { mutableStateOf(false) }
+    var showOriginalMessage by remember { mutableStateOf(false) }
+    var showCustomCategoryForm by remember { mutableStateOf(false) }
+    var customCategoryName by remember { mutableStateOf("") }
+    var customColor by remember { mutableStateOf(categoryPalette.first()) }
+    val categoryRanking = remember(state.transactions, state.categories) {
+        state.transactions
+            .groupingBy { it.categoryId }
+            .eachCount()
+    }
+    val uncategorizedId = state.categories.firstOrNull { it.name == "Uncategorized" }?.id
+    val frequentCategories = state.categories
+        .filter { it.id == categoryId || it.id == uncategorizedId || categoryRanking.containsKey(it.id) }
+        .sortedWith(
+            compareByDescending<CategoryItem> { it.id == categoryId }
+                .thenByDescending { categoryRanking[it.id] ?: 0 }
+                .thenBy { it.id }
+        )
+        .take(7)
+    val visibleCategories = if (showAllCategories) state.categories else frequentCategories
+    val dateLabel = transaction.transactionDate().format(DateTimeFormatter.ofPattern("MMM d, yyyy"))
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
-    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = Navy900, contentColor = TextPrimary) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = Navy900,
+        contentColor = TextPrimary
+    ) {
         SheetContent(title = "Edit Category") {
-            Text(
-                "Change the category for this transaction only.",
-                color = TextMuted,
-                style = MaterialTheme.typography.bodyMedium
-            )
-            Spacer(Modifier.height(12.dp))
-            Text(transaction.name, color = TextPrimary, style = MaterialTheme.typography.titleMedium)
-            Spacer(Modifier.height(16.dp))
-            LabelText("CATEGORY")
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(transaction.name, color = TextPrimary, style = MaterialTheme.typography.titleLarge)
+                    Text("$dateLabel | ${state.money(transaction.amount)}", color = TextMuted, style = MaterialTheme.typography.bodyMedium)
+                }
+                Text(signedAmount(transaction.amount, type, state.currency), color = type.amountColor(), style = MaterialTheme.typography.titleMedium)
+            }
             ChipRow {
-                state.categories.forEach { category ->
-                    MoneyChip(
-                        label = category.name,
+                TransactionType.entries.forEach {
+                    TransactionTypeChip(it, selected = type == it, onClick = { type = it })
+                }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                LabelText("CATEGORY")
+                Spacer(Modifier.weight(1f))
+                TextButton(onClick = { showAllCategories = !showAllCategories }) {
+                    Text(if (showAllCategories) "Frequent" else "Show all", color = PrimarySoft)
+                }
+            }
+            ChipRow {
+                visibleCategories.forEach { category ->
+                    CategoryChoiceChip(
+                        category = category,
+                        type = type,
                         selected = categoryId == category.id,
                         onClick = { categoryId = category.id }
                     )
                 }
+                MoneyChip("Custom +", selected = showCustomCategoryForm, onClick = { showCustomCategoryForm = !showCustomCategoryForm })
+            }
+            if (showCustomCategoryForm) {
+                OutlinedTextField(
+                    value = customCategoryName,
+                    onValueChange = { customCategoryName = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Custom category") },
+                    singleLine = true,
+                    colors = inputColors(),
+                    shape = RoundedCornerShape(12.dp)
+                )
+                ColorSwatches(selected = customColor, onSelected = { customColor = it })
+                Button(
+                    onClick = {
+                        onAddCustomCategory(transaction.id, customCategoryName, "category", customColor)
+                        customCategoryName = ""
+                        showCustomCategoryForm = false
+                    },
+                    enabled = customCategoryName.isNotBlank(),
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = primaryButtonColors()
+                ) {
+                    Text("Create Custom Category", fontWeight = FontWeight.Bold)
+                }
+            }
+            if (transaction.rawMessage != null) {
+                OutlinedButton(
+                    onClick = { showOriginalMessage = true },
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    border = BorderStroke(1.dp, appBorderColor()),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = PrimaryBlue)
+                ) {
+                    Icon(Icons.Rounded.Sms, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Show Original Message")
+                }
             }
             Button(
-                onClick = { onSave(transaction.id, categoryId) },
+                onClick = { onSave(transaction.id, type, categoryId) },
                 modifier = Modifier.fillMaxWidth().height(56.dp),
                 shape = RoundedCornerShape(12.dp),
                 colors = primaryButtonColors()
             ) {
-                Text("Update Category", fontWeight = FontWeight.Bold)
+                Text("Save Changes", fontWeight = FontWeight.Bold)
+            }
+            TextButton(onClick = { onDelete(transaction.id) }, modifier = Modifier.fillMaxWidth()) {
+                Text("Delete Transaction", color = LossRed, fontWeight = FontWeight.Bold)
             }
         }
+    }
+
+    if (showOriginalMessage) {
+        AlertDialog(
+            onDismissRequest = { showOriginalMessage = false },
+            title = { Text("Original SMS") },
+            text = {
+                Text(transaction.rawMessage.orEmpty(), color = TextMuted)
+            },
+            confirmButton = {
+                TextButton(onClick = { showOriginalMessage = false }) {
+                    Text("Close")
+                }
+            },
+            containerColor = Navy850,
+            titleContentColor = TextPrimary,
+            textContentColor = TextMuted
+        )
     }
 }
 
@@ -748,8 +1064,14 @@ private fun AddBudgetSheet(
     var name by remember { mutableStateOf("") }
     var amount by remember { mutableStateOf("") }
     val selectedCategoryIds = remember { mutableStateListOf<Long>() }
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
-    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = Navy900, contentColor = TextPrimary) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = Navy900,
+        contentColor = TextPrimary
+    ) {
         SheetContent(title = "Create Budget") {
             Text(
                 "Suggestion: allow multiple categories for shared limits like Essentials. Keep single-category budgets for strict tracking like Grocery only.",
@@ -803,20 +1125,10 @@ private fun AddBudgetSheet(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun AddCategorySheet(onDismiss: () -> Unit, onAdd: (String, String) -> Unit) {
+private fun AddCategorySheet(onDismiss: () -> Unit, onAdd: (String, String, String) -> Unit) {
     var name by remember { mutableStateOf("") }
-    var selectedIconKey by remember { mutableStateOf(MoneyIcons.frequentCategoryIcons.first().key) }
-    var iconQuery by remember { mutableStateOf("") }
-    val filteredIcons by remember(iconQuery) { derivedStateOf {
-        val query = iconQuery.trim().lowercase()
-        if (query.isBlank()) {
-            emptyList()
-        } else {
-            MoneyIcons.allCategoryIcons.filter {
-                it.label.lowercase().contains(query) || it.key.contains(query)
-            }
-        }
-    } }
+    val selectedIconKey = MoneyIcons.frequentCategoryIcons.first().key
+    var selectedColor by remember { mutableStateOf(categoryPalette.first()) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     ModalBottomSheet(
@@ -843,63 +1155,10 @@ private fun AddCategorySheet(onDismiss: () -> Unit, onAdd: (String, String) -> U
                 colors = inputColors(),
                 shape = RoundedCornerShape(12.dp)
             )
-            LabelText("FREQUENT ICONS")
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(
-                    items = MoneyIcons.frequentCategoryIcons,
-                    key = { it.key }
-                ) { option ->
-                    CategoryIconChip(
-                        option = option,
-                        selected = selectedIconKey == option.key,
-                        onClick = { selectedIconKey = option.key }
-                    )
-                }
-            }
-            OutlinedTextField(
-                value = iconQuery,
-                onValueChange = { iconQuery = it },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("Search more icons") },
-                leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
-                singleLine = true,
-                colors = inputColors(),
-                shape = RoundedCornerShape(12.dp)
-            )
-            LabelText("ALL ICONS")
-            if (iconQuery.isBlank()) {
-                Text(
-                    "Type to search more icons",
-                    color = TextDim,
-                    style = MaterialTheme.typography.bodyMedium
-                )
-            } else if (filteredIcons.isEmpty()) {
-                Text(
-                    "No matching icons found",
-                    color = TextDim,
-                    style = MaterialTheme.typography.bodyMedium
-                )
-            } else {
-                LazyVerticalGrid(
-                    columns = GridCells.Adaptive(minSize = 128.dp),
-                    modifier = Modifier.fillMaxWidth().height(220.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    gridItems(
-                        items = filteredIcons,
-                        key = { it.key }
-                    ) { option ->
-                        CategoryIconChip(
-                            option = option,
-                            selected = selectedIconKey == option.key,
-                            onClick = { selectedIconKey = option.key }
-                        )
-                    }
-                }
-            }
+            LabelText("COLOR")
+            ColorSwatches(selected = selectedColor, onSelected = { selectedColor = it })
             Button(
-                onClick = { onAdd(name, selectedIconKey) },
+                onClick = { onAdd(name, selectedIconKey, selectedColor) },
                 enabled = name.isNotBlank(),
                 modifier = Modifier.fillMaxWidth().height(56.dp),
                 shape = RoundedCornerShape(12.dp),
@@ -936,9 +1195,76 @@ private fun CategoryIconChip(
 }
 
 @Composable
+private fun ColorSwatches(selected: String, onSelected: (String) -> Unit) {
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        items(categoryPalette, key = { it }) { colorHex ->
+            val color = colorFromHex(colorHex)
+            val selectedColor = selected == colorHex
+            val scale by animateFloatAsState(
+                targetValue = if (selectedColor) 1.08f else 1f,
+                animationSpec = tween(220, easing = FastOutSlowInEasing),
+                label = "swatchScale"
+            )
+            Box(
+                modifier = Modifier
+                    .size(46.dp)
+                    .scale(scale)
+                    .clip(CircleShape)
+                    .background(if (selectedColor) Color.White else color.copy(alpha = 0.16f))
+                    .border(
+                        width = if (selectedColor) 3.dp else 1.dp,
+                        color = if (selectedColor) Color.White else color.copy(alpha = 0.72f),
+                        shape = CircleShape
+                    )
+                    .clickable { onSelected(colorHex) },
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(if (selectedColor) 32.dp else 34.dp)
+                        .clip(CircleShape)
+                        .background(color),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (selectedColor) {
+                        Icon(Icons.Rounded.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CategoryChoiceChip(
+    category: CategoryItem,
+    type: TransactionType,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    val color = categoryColor(category, type)
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        label = { Text(category.name) },
+        colors = FilterChipDefaults.filterChipColors(
+            selectedContainerColor = color,
+            selectedLabelColor = if (isAmoledTheme()) Color(0xFF10131F) else Color.White,
+            containerColor = Navy800,
+            labelColor = TextMuted
+        )
+    )
+}
+
+@Composable
 private fun SheetContent(title: String, content: @Composable ColumnScope.() -> Unit) {
     Column(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
+            .animateContentSize(tween(260, easing = FastOutSlowInEasing))
+            .imePadding()
+            .padding(horizontal = 20.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         Text(title, color = TextPrimary, style = MaterialTheme.typography.headlineMedium)
@@ -955,6 +1281,7 @@ private fun DetectedDraftRow(
     onIgnore: (Long) -> Unit
 ) {
     var categoryId by remember { mutableStateOf(draft.suggestedCategoryId ?: state.categories.first().id) }
+    val dateLabel = draft.transactionDate().format(DateTimeFormatter.ofPattern("MMM d, yyyy"))
 
     ElevatedPanel {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -963,15 +1290,20 @@ private fun DetectedDraftRow(
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     Text(draft.bankName, color = TextPrimary, style = MaterialTheme.typography.titleMedium)
-                    Text(draft.type.bankVerb(), color = TextDim, style = MaterialTheme.typography.bodyMedium)
+                    Text("${draft.type.bankVerb()} | $dateLabel", color = TextDim, style = MaterialTheme.typography.bodyMedium)
                 }
                 Text(draft.signedAmount(state.currency), color = draft.type.amountColor(), style = MaterialTheme.typography.titleLarge)
             }
             Text(draft.counterparty, color = TextPrimary, style = MaterialTheme.typography.headlineMedium)
             LabelText("CATEGORY")
             ChipRow {
-                state.categories.forEach {
-                    MoneyChip(it.name, selected = categoryId == it.id, onClick = { categoryId = it.id })
+                state.categories.forEach { category ->
+                    CategoryChoiceChip(
+                        category = category,
+                        type = draft.type,
+                        selected = categoryId == category.id,
+                        onClick = { categoryId = category.id }
+                    )
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -1026,12 +1358,12 @@ private fun LargeTitle(title: String, subtitle: String) {
 @Composable
 private fun HeroMetricCard(label: String, value: String, helper: String) {
     val dark = isAmoledTheme()
-    val container = if (dark) PrimaryBlue else Color.White
-    val labelColor = if (dark) Color(0xCC00285D) else TextDim
-    val valueColor = if (dark) Color(0xFF07265C) else TextPrimary
+    val container = if (dark) PrimaryBlue else MaterialTheme.colorScheme.primaryContainer
+    val labelColor = if (dark) Color(0xFF15295A) else MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.72f)
+    val valueColor = if (dark) Color(0xFF0D1D45) else MaterialTheme.colorScheme.onPrimaryContainer
     Card(
         modifier = Modifier.fillMaxWidth().height(158.dp),
-        shape = RoundedCornerShape(16.dp),
+        shape = MaterialTheme.shapes.extraLarge,
         colors = CardDefaults.cardColors(containerColor = container),
         border = BorderStroke(1.dp, appBorderColor())
     ) {
@@ -1047,25 +1379,619 @@ private fun HeroMetricCard(label: String, value: String, helper: String) {
                 overflow = TextOverflow.Ellipsis
             )
             Spacer(Modifier.height(8.dp))
-            Text(helper, color = if (dark) Color(0xFF07265C) else PrimaryBlue, style = MaterialTheme.typography.bodyMedium)
+            Text(helper, color = if (dark) Color(0xFF132B61) else PrimarySoft, style = MaterialTheme.typography.bodyMedium)
         }
     }
 }
 
 @Composable
-private fun MetricGrid(income: Double, expense: Double, net: Double, currency: CurrencyOption) {
+private fun TodayDonutCard(state: FinanceUiState) {
+    val income = state.todayTransactions
+        .filter { it.type == TransactionType.Income }
+        .sumOf { it.amount }
+    val expense = state.todayTransactions
+        .filter { it.type == TransactionType.Expense }
+        .sumOf { it.amount }
+    val total = expense.coerceAtLeast(1.0)
+    val expenseSweep by animateFloatAsState(
+        targetValue = ((expense / total) * 360f).toFloat(),
+        animationSpec = tween(700, easing = FastOutSlowInEasing),
+        label = "todayExpenseSweep"
+    )
+
+    ElevatedPanel {
+        Row(
+            modifier = Modifier.padding(18.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(Modifier.size(176.dp), contentAlignment = Alignment.Center) {
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    val stroke = Stroke(width = 34f, cap = StrokeCap.Round)
+                    drawArc(
+                        color = appTrackColor(),
+                        startAngle = -90f,
+                        sweepAngle = 360f,
+                        useCenter = false,
+                        topLeft = Offset(20f, 20f),
+                        size = Size(size.width - 40f, size.height - 40f),
+                        style = stroke
+                    )
+                    drawArc(
+                        color = LossRed,
+                        startAngle = -90f,
+                        sweepAngle = expenseSweep,
+                        useCenter = false,
+                        topLeft = Offset(20f, 20f),
+                        size = Size(size.width - 40f, size.height - 40f),
+                        style = stroke
+                    )
+                }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("Today", color = TextDim, style = MaterialTheme.typography.labelMedium)
+                    Text(state.money(expense), color = LossRed, style = MaterialTheme.typography.titleMedium, maxLines = 1)
+                    Text("spent", color = TextDim, style = MaterialTheme.typography.labelMedium, maxLines = 1)
+                }
+            }
+            Spacer(Modifier.width(18.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Today Spend", color = TextPrimary, style = MaterialTheme.typography.titleLarge)
+                Text(
+                    "${state.todayTransactions.size} transaction${if (state.todayTransactions.size == 1) "" else "s"} detected today",
+                    color = TextMuted,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                LegendDot(LossRed, "Expense")
+                Text(
+                    "Net movement: ${state.money(income - expense)}",
+                    color = if (income >= expense) PrimarySoft else LossRed,
+                    style = MaterialTheme.typography.titleMedium
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TodayCategoryBreakdown(state: FinanceUiState) {
+    val totals = state.categories.map { category ->
+        val transactions = state.todayTransactions.filter { it.categoryId == category.id }
+        MonthlyCategoryTotal(
+            category = category,
+            income = transactions.filter { it.type == TransactionType.Income }.sumOf { it.amount },
+            expense = transactions.filter { it.type == TransactionType.Expense }.sumOf { it.amount }
+        )
+    }.filter { it.income > 0.0 || it.expense > 0.0 }
+
+    ElevatedPanel {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            SectionHeader("Today Segments", LocalDate.now().format(DateTimeFormatter.ofPattern("MMM d")))
+            if (totals.isEmpty()) {
+                Text("No categorized movement today.", color = TextDim, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+            } else {
+                val max = totals.maxOf { it.income + it.expense }.coerceAtLeast(1.0)
+                totals.forEach { item ->
+                    val amount = item.income + item.expense
+                    SegmentAmountRow(
+                        label = item.category.name,
+                        value = state.money(amount),
+                        color = categoryColor(item.category, if (item.expense > 0.0) TransactionType.Expense else TransactionType.Income),
+                        progress = (amount / max).toFloat()
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ActivityScanPanel(
+    state: FinanceUiState,
+    onScanNow: () -> Unit,
+    onPopulateThreeMonths: () -> Unit
+) {
+    ElevatedPanel {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            SectionHeader("Message Import", if (state.isScanningMessages) "Scanning" else "Ready")
+            Text(
+                if (state.scanStatusMessage.isBlank()) {
+                    "Scan the selected period or populate the last 3 months from SMS."
+                } else {
+                    state.scanStatusMessage
+                },
+                color = TextMuted,
+                style = MaterialTheme.typography.bodyMedium
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Button(
+                    onClick = onScanNow,
+                    enabled = !state.isScanningMessages,
+                    modifier = Modifier.weight(1f).height(52.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp),
+                    colors = primaryButtonColors()
+                ) {
+                    Icon(Icons.Rounded.Sms, contentDescription = null)
+                    Spacer(Modifier.width(6.dp))
+                    Text("Scan", fontWeight = FontWeight.Bold, maxLines = 1)
+                }
+                OutlinedButton(
+                    onClick = onPopulateThreeMonths,
+                    enabled = !state.isScanningMessages,
+                    modifier = Modifier.weight(1f).height(52.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp),
+                    border = BorderStroke(1.dp, PrimaryBlue),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = PrimaryBlue)
+                ) {
+                    Icon(Icons.Rounded.CalendarMonth, contentDescription = null)
+                    Spacer(Modifier.width(6.dp))
+                    Text("3 Months", fontWeight = FontWeight.Bold, maxLines = 1)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ActivityDateFilterPanel(
+    state: FinanceUiState,
+    onDateFilterSelected: (ActivityDateFilter, LocalDate?, LocalDate?) -> Unit
+) {
+    val formatter = DateTimeFormatter.ofPattern("MMM d, yyyy")
+    val today = LocalDate.now()
+    var startDate by remember(state.activityStartDate) { mutableStateOf(state.activityStartDate) }
+    var endDate by remember(state.activityEndDate) { mutableStateOf(state.activityEndDate) }
+    var showStartPicker by remember { mutableStateOf(false) }
+    var showEndPicker by remember { mutableStateOf(false) }
+
+    ElevatedPanel {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            SectionHeader("Period", "${formatter.format(state.activityStartDate)} - ${formatter.format(state.activityEndDate)}")
+            ChipRow {
+                ActivityDateFilter.entries.forEach { filter ->
+                    MoneyChip(
+                        label = filter.label,
+                        selected = state.activityDateFilter == filter,
+                        onClick = { onDateFilterSelected(filter, startDate, endDate) }
+                    )
+                }
+            }
+            if (state.activityDateFilter == ActivityDateFilter.Custom) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = { showStartPicker = true },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(Icons.Rounded.CalendarMonth, contentDescription = null)
+                        Spacer(Modifier.width(6.dp))
+                        Text(formatter.format(startDate), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    OutlinedButton(
+                        onClick = { showEndPicker = true },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(Icons.Rounded.CalendarMonth, contentDescription = null)
+                        Spacer(Modifier.width(6.dp))
+                        Text(formatter.format(endDate), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+            }
+        }
+    }
+
+    if (showStartPicker) {
+        val context = LocalContext.current
+        LaunchedEffect(showStartPicker) {
+            DatePickerDialog(
+                context,
+                { _, year, month, day ->
+                    startDate = LocalDate.of(year, month + 1, day)
+                    if (startDate.isAfter(endDate)) endDate = startDate
+                    onDateFilterSelected(ActivityDateFilter.Custom, startDate, endDate)
+                    showStartPicker = false
+                },
+                startDate.year,
+                startDate.monthValue - 1,
+                startDate.dayOfMonth
+            ).apply {
+                datePicker.maxDate = today.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+                show()
+            }
+        }
+    }
+
+    if (showEndPicker) {
+        val context = LocalContext.current
+        LaunchedEffect(showEndPicker) {
+            DatePickerDialog(
+                context,
+                { _, year, month, day ->
+                    endDate = LocalDate.of(year, month + 1, day).coerceAtMost(today)
+                    if (startDate.isAfter(endDate)) startDate = endDate
+                    onDateFilterSelected(ActivityDateFilter.Custom, startDate, endDate)
+                    showEndPicker = false
+                },
+                endDate.year,
+                endDate.monthValue - 1,
+                endDate.dayOfMonth
+            ).apply {
+                datePicker.maxDate = today.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+                show()
+            }
+        }
+    }
+}
+
+private val OtherIncomeGold = Color(0xFFFFC857)
+
+@Composable
+private fun MetricGrid(state: FinanceUiState) {
+    val currency = state.currency
+    val salary = state.monthSalaryIncome
+    val other = state.monthOtherIncome
+    val expense = state.monthExpense
+    val net = state.monthNet
+    val totalIncome = state.monthIncome
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            SmallMetric("Income", money(income, currency), MoneyGreen, Modifier.weight(1f))
-            SmallMetric("Expenses", money(expense, currency), LossRed, Modifier.weight(1f))
+            ElevatedPanel(modifier = Modifier.weight(1f).height(124.dp)) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.Center) {
+                    Text("Income", color = TextDim, style = MaterialTheme.typography.bodyMedium)
+                    when {
+                        salary > 0.0 || other > 0.0 -> {
+                            Text(
+                                money(salary, currency),
+                                color = MoneyGreen,
+                                style = MaterialTheme.typography.headlineMedium,
+                                maxLines = 1
+                            )
+                            if (other > 0.0) {
+                                Text(
+                                    "+ ${money(other, currency)} other",
+                                    color = OtherIncomeGold,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                        else -> {
+                            Text(
+                                money(totalIncome, currency),
+                                color = MoneyGreen,
+                                style = MaterialTheme.typography.headlineMedium,
+                                maxLines = 1
+                            )
+                        }
+                    }
+                }
+            }
+            SmallMetric("Expenses", money(expense, currency), LossRed, Modifier.weight(1f), boxHeight = 124.dp)
         }
-        SmallMetric("Net Total", money(net, currency), if (net >= 0) PrimarySoft else LossRed, Modifier.fillMaxWidth())
+        SmallMetric("Net cashflow", money(net, currency), if (net >= 0) PrimarySoft else LossRed, Modifier.fillMaxWidth())
+        if (state.salaryShiftIncomeEnabled &&
+            kotlin.math.abs(state.calendarMonthIncomeTotal - totalIncome) > 0.01
+        ) {
+            Text(
+                "Bank credits this month (calendar): ${money(state.calendarMonthIncomeTotal, currency)} - Summary income uses payroll shift.",
+                color = TextDim,
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
     }
 }
 
 @Composable
-private fun SmallMetric(label: String, value: String, valueColor: Color, modifier: Modifier) {
-    ElevatedPanel(modifier = modifier.height(104.dp)) {
+private fun SummaryAccountFilterRow(
+    state: FinanceUiState,
+    onToggleAccount: (Long) -> Unit,
+    onClearFilter: () -> Unit
+) {
+    val allSelected = state.summarySelectedAccountIds.isEmpty()
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        LabelText("SUMMARY ACCOUNTS")
+        ChipRow {
+            MoneyChip(
+                label = "All",
+                selected = allSelected,
+                onClick = onClearFilter
+            )
+            state.accounts.forEach { account ->
+                val selected =
+                    !allSelected && account.id in state.summarySelectedAccountIds
+                MoneyChip(
+                    label = account.name,
+                    selected = selected,
+                    onClick = { onToggleAccount(account.id) }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun MonthBalanceStrip(state: FinanceUiState) {
+    val isCurrentMonth = state.selectedMonth == YearMonth.now()
+    val expectedClosing = state.balanceAtStartOfSelectedMonth + state.calendarMonthNet
+    val gap = state.selectedMonthReconciliationGap
+    ElevatedPanel {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("Balance reconstruction", color = TextPrimary, style = MaterialTheme.typography.titleMedium)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("Current anchor", color = TextDim, style = MaterialTheme.typography.bodyMedium)
+                Text(state.money(state.currentBalanceAnchor), color = PrimarySoft, style = MaterialTheme.typography.titleMedium)
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("Opening balance", color = TextDim, style = MaterialTheme.typography.bodyMedium)
+                Text(state.money(state.balanceAtStartOfSelectedMonth), color = TextPrimary, style = MaterialTheme.typography.titleMedium)
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(if (isCurrentMonth) "Balance now" else "Closing balance", color = TextDim, style = MaterialTheme.typography.bodyMedium)
+                Text(state.money(state.balanceAtEndOfSelectedMonth), color = TextPrimary, style = MaterialTheme.typography.titleMedium)
+            }
+            HorizontalDivider(color = appBorderColor())
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("Calendar cashflow", color = TextDim, style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    state.money(state.calendarMonthNet),
+                    color = if (state.calendarMonthNet >= 0) MoneyGreen else LossRed,
+                    style = MaterialTheme.typography.titleMedium
+                )
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("Expected close", color = TextDim, style = MaterialTheme.typography.bodyMedium)
+                Text(state.money(expectedClosing), color = TextPrimary, style = MaterialTheme.typography.titleMedium)
+            }
+            if (kotlin.math.abs(gap) > 0.01) {
+                Text(
+                    "Untracked difference: ${state.money(gap)}. This usually means an SMS is missing, excluded, duplicated, or mapped to another account.",
+                    color = WarningAmber,
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+            if (state.salaryShiftIncomeEnabled) {
+                Text(
+                    "Income cards may use payroll month shift; reconstruction always follows actual SMS dates.",
+                    color = TextDim,
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SummaryBehaviorSettings(
+    salaryShiftEnabled: Boolean,
+    windowDays: Int,
+    onSalaryShiftChanged: (Boolean) -> Unit,
+    onWindowDaysChanged: (Int) -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        LabelText("MONTHLY SUMMARY")
+        ElevatedPanel {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Payroll month for income", color = TextPrimary, style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            "Credits in the last days of a month can count toward the next month on Summary.",
+                            color = TextDim,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                    Switch(
+                        checked = salaryShiftEnabled,
+                        onCheckedChange = onSalaryShiftChanged,
+                        colors = appSwitchColors()
+                    )
+                }
+                if (salaryShiftEnabled) {
+                    Text("Payday window (last N days)", color = TextMuted, style = MaterialTheme.typography.labelMedium)
+                    ChipRow {
+                        listOf(3, 5, 7, 10, 14).forEach { days ->
+                            MoneyChip(
+                                "$days d",
+                                selected = windowDays == days,
+                                onClick = { onWindowDaysChanged(days) }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BankSmsSetupScreen(
+    state: FinanceUiState,
+    onMapBank: (String, Long) -> Unit,
+    onCreateAccount: (String, String) -> Unit,
+    onSkip: () -> Unit,
+    onDone: () -> Unit
+) {
+    val banks = remember(state.discoveredSmsBanks, state.transactions) {
+        val fromDiscovery = state.discoveredSmsBanks
+        val fromTx = state.transactions.mapNotNull { it.smsBankLabel }.distinct()
+        usefulSmsAccountLabels(fromDiscovery + fromTx)
+    }
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Navy950)
+            .statusBarsPadding()
+            .verticalScroll(rememberScrollState())
+            .padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        LargeTitle("Link bank SMS", "Map each detected SMS account label to a saved account, or name it now.")
+        if (banks.isEmpty()) {
+            Text(
+                "We will detect bank names from transaction SMS after you use the app. You can skip and map accounts anytime.",
+                color = TextDim,
+                style = MaterialTheme.typography.bodyMedium
+            )
+        } else {
+            banks.forEach { bank ->
+                var newAccountName by remember(bank) { mutableStateOf("") }
+                val examples = remember(bank, state.transactions) {
+                    state.transactions
+                        .filter { SmsBankKeys.normalize(it.smsBankLabel.orEmpty()) == SmsBankKeys.normalize(bank) }
+                        .take(2)
+                }
+                ElevatedPanel {
+                    Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text(bank, color = TextPrimary, style = MaterialTheme.typography.titleMedium)
+                        if (examples.isNotEmpty()) {
+                            examples.forEach { tx ->
+                                Text(
+                                    "${tx.name} - ${state.money(tx.amount)}",
+                                    color = TextDim,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                        LabelText("MAP TO ACCOUNT")
+                        ChipRow {
+                            state.accounts.forEach { account ->
+                                val keyMatch =
+                                    account.smsMatchKey?.let { SmsBankKeys.normalize(it) == SmsBankKeys.normalize(bank) } == true
+                                MoneyChip(
+                                    label = account.name,
+                                    selected = keyMatch,
+                                    onClick = { onMapBank(bank, account.id) }
+                                )
+                            }
+                        }
+                        LabelText("OR CREATE ACCOUNT")
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            OutlinedTextField(
+                                value = newAccountName,
+                                onValueChange = { newAccountName = it },
+                                modifier = Modifier.weight(1f),
+                                label = { Text("Account name") },
+                                singleLine = true,
+                                colors = inputColors(),
+                                shape = RoundedCornerShape(12.dp)
+                            )
+                            Button(
+                                onClick = {
+                                    onCreateAccount(bank, newAccountName)
+                                    newAccountName = ""
+                                },
+                                enabled = newAccountName.isNotBlank(),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = primaryButtonColors()
+                            ) {
+                                Text("Add")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            OutlinedButton(onClick = onSkip, modifier = Modifier.weight(1f)) {
+                Text("Skip")
+            }
+            Button(onClick = onDone, modifier = Modifier.weight(1f), colors = primaryButtonColors()) {
+                Text("Continue")
+            }
+        }
+    }
+}
+
+private fun usefulSmsAccountLabels(labels: List<String>): List<String> {
+    val cleaned = labels
+        .map { it.trim() }
+        .filter { it.isNotEmpty() }
+        .distinct()
+    val accountSpecific = cleaned.filter { it.contains(" A/C ", ignoreCase = true) }
+    val accountSpecificBases = accountSpecific
+        .map { SmsBankKeys.normalize(it.substringBefore(" A/C ")) }
+        .toSet()
+    return cleaned
+        .filterNot { SmsBankKeys.normalize(it) in setOf("BANK", "ACCOUNT", "A/C", "CARD") }
+        .filterNot { label ->
+            !label.contains(" A/C ", ignoreCase = true) &&
+                SmsBankKeys.normalize(label) in accountSpecificBases
+        }
+        .sortedWith(compareByDescending<String> { it.contains(" A/C ", ignoreCase = true) }.thenBy { it })
+}
+
+@Composable
+private fun SalaryCategorySettings(
+    state: FinanceUiState,
+    onSalaryCategorySelected: (Long?) -> Unit,
+    onSalaryKeywordsToggled: (Boolean) -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        LabelText("SALARY ON SUMMARY")
+        ElevatedPanel {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    "The income tile highlights salary separately; other income appears in gold.",
+                    color = TextDim,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                LabelText("SALARY CATEGORY")
+                ChipRow {
+                    MoneyChip(
+                        "None",
+                        selected = state.salaryCategoryId == null,
+                        onClick = { onSalaryCategorySelected(null) }
+                    )
+                    state.categories.forEach { cat ->
+                        MoneyChip(
+                            cat.name,
+                            selected = state.salaryCategoryId == cat.id,
+                            onClick = { onSalaryCategorySelected(cat.id) }
+                        )
+                    }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            "Salary keywords for Uncategorized",
+                            color = TextPrimary,
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        Text(
+                            "Treat matching payroll SMS as salary when still Uncategorized.",
+                            color = TextDim,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                    Switch(
+                        checked = state.salaryKeywordsForUncategorized,
+                        onCheckedChange = onSalaryKeywordsToggled,
+                        colors = appSwitchColors()
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SmallMetric(
+    label: String,
+    value: String,
+    valueColor: Color,
+    modifier: Modifier,
+    boxHeight: Dp = 104.dp
+) {
+    ElevatedPanel(modifier = modifier.height(boxHeight)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.Center) {
             Text(label, color = TextDim, style = MaterialTheme.typography.bodyMedium)
             Text(value, color = valueColor, style = MaterialTheme.typography.headlineMedium, maxLines = 1)
@@ -1248,46 +2174,75 @@ private fun LegendDot(color: Color, label: String) {
 private fun TransactionRow(
     transaction: LedgerTransaction,
     state: FinanceUiState,
-    onDelete: (Long) -> Unit,
-    onEdit: (Long) -> Unit
+    onSelect: (Long) -> Unit
 ) {
     val category = state.categories.firstOrNull { it.id == transaction.categoryId }
-    var menuExpanded by remember { mutableStateOf(false) }
+    val color = categoryColor(category, transaction.type)
+    val cardColor = if (isAmoledTheme()) Color(0xFF171B22) else Color.White
+    val neutralBorder = if (isAmoledTheme()) Color(0xFF303846) else Color(0xFFD3DBEA)
+    val animatedBorder by animateColorAsState(
+        targetValue = if (category?.name == "Uncategorized") neutralBorder else color.copy(alpha = if (isAmoledTheme()) 0.52f else 0.34f),
+        animationSpec = tween(260, easing = FastOutSlowInEasing),
+        label = "transactionBorder"
+    )
+    val dateLabel = transaction.transactionDate().format(DateTimeFormatter.ofPattern("MMM d, yyyy"))
+    val categoryLabel = category?.name ?: "Set category"
 
-    ElevatedPanel {
-        Row(Modifier.padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconTile(category?.icon ?: Icons.AutoMirrored.Rounded.ReceiptLong, categoryColor(category?.name.orEmpty(), transaction.type))
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
-                Text(transaction.name, color = TextPrimary, style = MaterialTheme.typography.titleMedium, maxLines = 1)
-                Text(
-                    "${category?.name ?: "Miscellaneous"} | ${transaction.month().shortLabel()}${if (transaction.isAutoDetected) " | Auto" else ""}",
-                    color = TextDim,
-                    style = MaterialTheme.typography.bodyMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onSelect(transaction.id) },
+        shape = RoundedCornerShape(22.dp),
+        colors = CardDefaults.cardColors(containerColor = cardColor),
+        border = BorderStroke(1.dp, animatedBorder)
+    ) {
+        Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(color.copy(alpha = if (isAmoledTheme()) 0.18f else 0.12f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Box(Modifier.size(12.dp).clip(CircleShape).background(color))
             }
-            Column(horizontalAlignment = Alignment.End) {
-                Text(transaction.signedAmount(state.currency), color = transaction.type.amountColor(), style = MaterialTheme.typography.titleMedium)
-                IconButton(onClick = { menuExpanded = true }) {
-                    Icon(Icons.Rounded.MoreVert, contentDescription = "Transaction options", tint = TextDim)
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                Row(verticalAlignment = Alignment.Top) {
+                    Text(
+                        transaction.name,
+                        color = TextPrimary,
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.weight(1f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        transaction.signedAmount(state.currency),
+                        color = transaction.type.amountColor(),
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1
+                    )
                 }
-                DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
-                    DropdownMenuItem(
-                        text = { Text("Edit Category") },
-                        onClick = {
-                            menuExpanded = false
-                            onEdit(transaction.id)
-                        }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        categoryLabel,
+                        color = color,
+                        style = MaterialTheme.typography.labelMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
-                    DropdownMenuItem(
-                        text = { Text("Delete") },
-                        onClick = {
-                            menuExpanded = false
-                            onDelete(transaction.id)
-                        }
+                    Text("  ·  ", color = TextDim, style = MaterialTheme.typography.labelMedium)
+                    Text(
+                        dateLabel,
+                        color = TextMuted,
+                        style = MaterialTheme.typography.labelMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
                     )
+                    Text("Edit", color = PrimaryBlue, style = MaterialTheme.typography.labelMedium)
                 }
             }
         }
@@ -1347,17 +2302,131 @@ private fun CashFlowGraph(state: FinanceUiState) {
 
 @Composable
 private fun Bar(label: String, progress: Float, color: Color, value: String) {
+    val animatedProgress by animateFloatAsState(
+        targetValue = progress.coerceIn(0f, 1f),
+        animationSpec = tween(650, easing = FastOutSlowInEasing),
+        label = "barProgress"
+    )
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row {
             Text(label, color = TextMuted, modifier = Modifier.weight(1f))
             Text(value, color = TextPrimary)
         }
         LinearProgressIndicator(
-            progress = { progress },
-            modifier = Modifier.fillMaxWidth().height(10.dp).clip(RoundedCornerShape(8.dp)),
+            progress = { animatedProgress },
+            modifier = Modifier.fillMaxWidth().height(12.dp).clip(RoundedCornerShape(50)),
             color = color,
-            trackColor = Navy800
+            trackColor = appTrackColor()
         )
+    }
+}
+
+@Composable
+private fun SegmentAmountRow(label: String, value: String, color: Color, progress: Float) {
+    val animatedProgress by animateFloatAsState(
+        targetValue = progress.coerceIn(0.04f, 1f),
+        animationSpec = tween(650, easing = FastOutSlowInEasing),
+        label = "segmentProgress"
+    )
+    Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(11.dp).clip(CircleShape).background(color))
+            Spacer(Modifier.width(8.dp))
+            Text(label, color = TextPrimary, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f), maxLines = 1)
+            Text(value, color = TextMuted, style = MaterialTheme.typography.bodyMedium, maxLines = 1)
+        }
+        LinearProgressIndicator(
+            progress = { animatedProgress },
+            modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(50)),
+            color = color,
+            trackColor = appTrackColor()
+        )
+    }
+}
+
+@Composable
+private fun DailyExpenseBarGraph(state: FinanceUiState) {
+    val selectedMonth = state.selectedMonth
+    val today = LocalDate.now()
+    val lastDay = if (selectedMonth == YearMonth.now()) today.dayOfMonth else selectedMonth.lengthOfMonth()
+    val daySegments = (1..lastDay).map { day ->
+        val date = selectedMonth.atDay(day)
+        val transactions = state.transactions
+            .filter { it.type == TransactionType.Expense && it.transactionDate() == date }
+        val segments = state.categories.mapNotNull { category ->
+            val amount = transactions.filter { it.categoryId == category.id }.sumOf { it.amount }
+            if (amount > 0.0) category to amount else null
+        }
+        date to segments
+    }
+    val max = daySegments.maxOfOrNull { it.second.sumOf { segment -> segment.second } }?.coerceAtLeast(1.0) ?: 1.0
+
+    ElevatedPanel {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            SectionHeader("Daily Expenses", selectedMonth.shortLabel())
+            if (daySegments.all { it.second.isEmpty() }) {
+                EmptyPanel("No daily expenses for this month.")
+            } else {
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth().height(190.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.Bottom
+                ) {
+                    items(daySegments, key = { it.first.toString() }) { (date, segments) ->
+                        val total = segments.sumOf { it.second }
+                        DailyExpenseBar(
+                            day = date.dayOfMonth,
+                            segments = segments,
+                            maxAmount = max,
+                            value = compactMoney(total, state.currency)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DailyExpenseBar(day: Int, segments: List<Pair<CategoryItem, Double>>, maxAmount: Double, value: String) {
+    val amount = segments.sumOf { it.second }
+    Column(
+        modifier = Modifier.width(42.dp).fillMaxHeight(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Bottom
+    ) {
+        if (amount > 0.0) {
+            Text(
+                value,
+                color = TextDim,
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1,
+                textAlign = TextAlign.Center
+            )
+            Spacer(Modifier.height(6.dp))
+        }
+        Column(
+            modifier = Modifier
+                .width(22.dp)
+                .height((112 * (amount / maxAmount).toFloat().coerceIn(0.05f, 1f)).dp)
+                .clip(RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp))
+                .background(appTrackColor()),
+            verticalArrangement = Arrangement.Bottom
+        ) {
+            if (amount > 0.0) {
+                segments.forEach { (category, segmentAmount) ->
+                    val segmentHeight = (112 * (segmentAmount / maxAmount).toFloat()).coerceAtLeast(3f).dp
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(segmentHeight)
+                            .background(categoryColor(category, TransactionType.Expense))
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(day.toString(), color = TextMuted, style = MaterialTheme.typography.labelMedium)
     }
 }
 
@@ -1365,7 +2434,7 @@ private fun Bar(label: String, progress: Float, color: Color, value: String) {
 private fun CategoryPieChart(state: FinanceUiState, totals: List<MonthlyCategoryTotal>) {
     ElevatedPanel {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            SectionHeader("Pie Chart", "Outgoing by Category")
+            SectionHeader("Pie Chart", "Expenses by category")
             val expenses = totals.filter { it.expense > 0.0 }
             val total = expenses.sumOf { it.expense }.toFloat()
             if (total <= 0f) {
@@ -1373,10 +2442,10 @@ private fun CategoryPieChart(state: FinanceUiState, totals: List<MonthlyCategory
             } else {
                 Canvas(modifier = Modifier.align(Alignment.CenterHorizontally).size(170.dp)) {
                     var startAngle = -90f
-                    expenses.forEachIndexed { index, item ->
+                    expenses.forEach { item ->
                         val sweep = (item.expense.toFloat() / total) * 360f
                         drawArc(
-                            color = chartColors[index % chartColors.size],
+                            color = categoryColor(item.category, TransactionType.Expense),
                             startAngle = startAngle,
                             sweepAngle = sweep,
                             useCenter = false,
@@ -1387,13 +2456,42 @@ private fun CategoryPieChart(state: FinanceUiState, totals: List<MonthlyCategory
                         startAngle += sweep
                     }
                 }
-                expenses.forEachIndexed { index, item ->
+                expenses.forEach { item ->
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(10.dp).clip(CircleShape).background(chartColors[index % chartColors.size]))
+                        Box(
+                            Modifier.size(10.dp).clip(CircleShape)
+                                .background(categoryColor(item.category, TransactionType.Expense))
+                        )
                         Spacer(Modifier.width(8.dp))
                         Text(item.category.name, color = TextMuted, modifier = Modifier.weight(1f))
                         Text(state.money(item.expense), color = TextPrimary)
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CategoryHistoryGraph(state: FinanceUiState, totals: List<MonthlyCategoryTotal>) {
+    val visibleTotals = totals
+        .filter { it.expense > 0.0 }
+        .sortedByDescending { it.expense }
+    val max = visibleTotals.maxOfOrNull { it.expense }?.coerceAtLeast(1.0) ?: 1.0
+
+    ElevatedPanel {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            SectionHeader("Category History", "Spending - ${state.selectedMonth.shortLabel()}")
+            if (visibleTotals.isEmpty()) {
+                EmptyPanel("No category expenses for this month.")
+            } else {
+                visibleTotals.forEach { item ->
+                    SegmentAmountRow(
+                        label = item.category.name,
+                        value = state.money(item.expense),
+                        color = categoryColor(item.category, TransactionType.Expense),
+                        progress = (item.expense / max).toFloat()
+                    )
                 }
             }
         }
@@ -1428,7 +2526,11 @@ private fun SettingsGroup(title: String, rows: List<String>) {
 }
 
 @Composable
-private fun AccountSettingsGroup(state: FinanceUiState, onDelete: (Long) -> Unit) {
+private fun AccountSettingsGroup(
+    state: FinanceUiState,
+    onDelete: (Long) -> Unit,
+    onUpdateBalance: (Long, Double) -> Unit
+) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         LabelText("BANK ACCOUNTS")
         ElevatedPanel {
@@ -1437,16 +2539,59 @@ private fun AccountSettingsGroup(state: FinanceUiState, onDelete: (Long) -> Unit
             } else {
                 Column {
                     state.accounts.forEachIndexed { index, account ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(start = 16.dp, top = 10.dp, end = 8.dp, bottom = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(Modifier.weight(1f)) {
-                                Text(account.name, color = TextPrimary, style = MaterialTheme.typography.titleMedium)
-                                Text(state.money(account.balance), color = TextDim, style = MaterialTheme.typography.bodyMedium)
+                        var expanded by remember(account.id) { mutableStateOf(false) }
+                        var balanceText by remember(account.id, account.balance) { mutableStateOf(account.balance.toString()) }
+                        Column {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { expanded = !expanded }
+                                    .padding(start = 16.dp, top = 10.dp, end = 8.dp, bottom = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(account.name, color = TextPrimary, style = MaterialTheme.typography.titleMedium)
+                                    Text(state.money(account.balance), color = TextDim, style = MaterialTheme.typography.bodyMedium)
+                                }
+                                Text(if (expanded) "Hide" else "Edit", color = PrimarySoft, style = MaterialTheme.typography.labelMedium)
                             }
-                            TextButton(onClick = { onDelete(account.id) }) {
-                                Text("Delete", color = LossRed)
+                            if (expanded) {
+                                Column(
+                                    Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
+                                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    OutlinedTextField(
+                                        value = balanceText,
+                                        onValueChange = { balanceText = it },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        label = { Text("Current balance anchor") },
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                        singleLine = true,
+                                        colors = inputColors(),
+                                        shape = RoundedCornerShape(12.dp)
+                                    )
+                                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                        Button(
+                                            onClick = {
+                                                balanceText.toDoubleOrNull()?.let { onUpdateBalance(account.id, it) }
+                                            },
+                                            enabled = (balanceText.toDoubleOrNull() ?: -1.0) >= 0.0,
+                                            modifier = Modifier.weight(1f),
+                                            shape = RoundedCornerShape(12.dp),
+                                            colors = primaryButtonColors()
+                                        ) {
+                                            Text("Save balance", fontWeight = FontWeight.Bold)
+                                        }
+                                        TextButton(onClick = { onDelete(account.id) }) {
+                                            Text("Delete", color = LossRed)
+                                        }
+                                    }
+                                    Text(
+                                        "This value is treated as the current balance. History is reconstructed backward from it.",
+                                        color = TextDim,
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                }
                             }
                         }
                         if (index != state.accounts.lastIndex) {
@@ -1460,25 +2605,46 @@ private fun AccountSettingsGroup(state: FinanceUiState, onDelete: (Long) -> Unit
 }
 
 @Composable
-private fun CategorySettingsGroup(categories: List<CategoryItem>, onDelete: (Long) -> Unit) {
+private fun CategorySettingsGroup(
+    categories: List<CategoryItem>,
+    onDelete: (Long) -> Unit,
+    onColorSelected: (Long, String) -> Unit
+) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         LabelText("CATEGORIES")
         ElevatedPanel {
             Column {
                 categories.forEachIndexed { index, category ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, top = 10.dp, end = 8.dp, bottom = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            category.name,
-                            color = TextPrimary,
-                            modifier = Modifier.weight(1f),
-                            style = MaterialTheme.typography.bodyLarge
-                        )
-                        if (!category.isDefault) {
-                            TextButton(onClick = { onDelete(category.id) }) {
-                                Text("Delete", color = LossRed)
+                    var expanded by remember { mutableStateOf(false) }
+                    Column {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { expanded = !expanded }
+                                .padding(start = 16.dp, top = 12.dp, end = 16.dp, bottom = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(Modifier.size(12.dp).clip(CircleShape).background(categoryColor(category, TransactionType.Expense)))
+                            Spacer(Modifier.width(10.dp))
+                            Text(
+                                category.name,
+                                color = TextPrimary,
+                                modifier = Modifier.weight(1f),
+                                style = MaterialTheme.typography.bodyLarge
+                            )
+                            Text(if (expanded) "Hide" else "Edit", color = PrimarySoft, style = MaterialTheme.typography.labelMedium)
+                        }
+                        if (expanded) {
+                            Column(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                ColorSwatches(
+                                    selected = category.colorHex,
+                                    onSelected = { onColorSelected(category.id, it) }
+                                )
+                                if (!category.isDefault) {
+                                    TextButton(onClick = { onDelete(category.id) }) {
+                                        Text("Delete Category", color = LossRed)
+                                    }
+                                }
                             }
                         }
                     }
@@ -1542,8 +2708,163 @@ private fun ThemeSelector(
                 }
                 Switch(
                     checked = dark,
-                    onCheckedChange = { onSelected(if (it) ThemeMode.Dark else ThemeMode.Light) }
+                    onCheckedChange = { onSelected(if (it) ThemeMode.Dark else ThemeMode.Light) },
+                    colors = appSwitchColors()
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun UiAccentSelector(
+    selected: UiAccent,
+    darkMode: Boolean,
+    onSelected: (UiAccent) -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        LabelText("UI ACCENT")
+        ElevatedPanel {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Buttons, toggles, tabs and highlights", color = TextMuted, style = MaterialTheme.typography.bodyMedium)
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    items(UiAccent.entries, key = { it.name }) { accent ->
+                        val color = colorFromHex(if (darkMode) accent.darkHex else accent.lightHex)
+                        val isSelected = selected == accent
+                        val scale by animateFloatAsState(
+                            targetValue = if (isSelected) 1.08f else 1f,
+                            animationSpec = tween(220, easing = FastOutSlowInEasing),
+                            label = "accentScale"
+                        )
+                        Column(
+                            modifier = Modifier
+                                .width(58.dp)
+                                .scale(scale)
+                                .clickable { onSelected(accent) },
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(46.dp)
+                                    .clip(CircleShape)
+                                    .background(if (isSelected) Color.White else color.copy(alpha = 0.16f))
+                                    .border(
+                                        width = if (isSelected) 3.dp else 1.dp,
+                                        color = if (isSelected) Color.White else color.copy(alpha = 0.72f),
+                                        shape = CircleShape
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(if (isSelected) 32.dp else 34.dp)
+                                        .clip(CircleShape)
+                                        .background(color),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (isSelected) {
+                                        Icon(Icons.Rounded.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+                                    }
+                                }
+                            }
+                            Text(
+                                accent.label,
+                                color = if (isSelected) TextPrimary else TextMuted,
+                                style = MaterialTheme.typography.labelSmall,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun UiSurfaceSelector(
+    selected: UiSurface,
+    darkMode: Boolean,
+    onSelected: (UiSurface) -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        LabelText("SURFACE STYLE")
+        ElevatedPanel {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Background, sheets and large cards", color = TextMuted, style = MaterialTheme.typography.bodyMedium)
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    items(UiSurface.entries, key = { it.name }) { surface ->
+                        val bg = colorFromHex(if (darkMode) surface.darkBackgroundHex else surface.lightBackgroundHex)
+                        val card = colorFromHex(if (darkMode) surface.darkCardHex else surface.lightCardHex)
+                        val panel = colorFromHex(if (darkMode) surface.darkPanelHex else surface.lightPanelHex)
+                        val isSelected = selected == surface
+                        val scale by animateFloatAsState(
+                            targetValue = if (isSelected) 1.05f else 1f,
+                            animationSpec = tween(220, easing = FastOutSlowInEasing),
+                            label = "surfaceScale"
+                        )
+                        Column(
+                            modifier = Modifier
+                                .width(86.dp)
+                                .scale(scale)
+                                .clickable { onSelected(surface) },
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(width = 76.dp, height = 54.dp)
+                                    .clip(RoundedCornerShape(18.dp))
+                                    .background(if (isSelected) Color.White else appBorderColor())
+                                    .border(
+                                        width = if (isSelected) 3.dp else 1.dp,
+                                        color = if (isSelected) Color.White else appBorderColor(),
+                                        shape = RoundedCornerShape(18.dp)
+                                    )
+                                    .padding(4.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .clip(RoundedCornerShape(14.dp))
+                                        .background(bg)
+                                        .padding(7.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth(0.78f)
+                                            .height(13.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(card)
+                                            .align(Alignment.TopStart)
+                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth(0.58f)
+                                            .height(13.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(panel)
+                                            .align(Alignment.BottomEnd)
+                                    )
+                                }
+                                if (isSelected) {
+                                    Icon(Icons.Rounded.Check, contentDescription = null, tint = PrimaryBlue, modifier = Modifier.size(18.dp))
+                                }
+                            }
+                            Text(
+                                surface.label,
+                                color = if (isSelected) TextPrimary else TextMuted,
+                                style = MaterialTheme.typography.labelSmall,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
             }
         }
     }
@@ -1552,18 +2873,31 @@ private fun ThemeSelector(
 @Composable
 private fun SectionHeader(title: String, action: String) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text(title, color = TextPrimary, style = MaterialTheme.typography.headlineMedium)
-        Spacer(Modifier.weight(1f))
-        Text(action, color = PrimarySoft, style = MaterialTheme.typography.titleMedium)
+        Text(
+            title,
+            color = TextPrimary,
+            style = MaterialTheme.typography.headlineMedium,
+            modifier = Modifier.weight(1f),
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
+        )
+        Spacer(Modifier.width(12.dp))
+        Text(
+            action,
+            color = PrimaryBlue,
+            style = MaterialTheme.typography.titleMedium,
+            textAlign = TextAlign.End,
+            maxLines = 2
+        )
     }
 }
 
 @Composable
 private fun ElevatedPanel(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
     Card(
-        modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(if (isAmoledTheme()) 16.dp else 10.dp),
-        colors = CardDefaults.cardColors(containerColor = Navy850),
+        modifier = modifier.fillMaxWidth().animateContentSize(tween(260, easing = FastOutSlowInEasing)),
+        shape = MaterialTheme.shapes.large,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
         border = BorderStroke(1.dp, appBorderColor())
     ) {
         content()
@@ -1571,16 +2905,26 @@ private fun ElevatedPanel(modifier: Modifier = Modifier, content: @Composable ()
 }
 
 private fun appBorderColor(): Color {
-    return if (isAmoledTheme()) Color(0xFF33363D) else Color(0xFFC9CEDD)
+    return if (isAmoledTheme()) Color(0xFF343D4E) else Color(0xFFC9D3E6)
 }
 
 private fun appDividerColor(): Color {
-    return if (isAmoledTheme()) Color(0xFF283044) else Color(0xFFD2D7E4)
+    return if (isAmoledTheme()) Color(0xFF343D4E) else Color(0xFFD7DEED)
 }
 
 private fun appTrackColor(): Color {
-    return if (isAmoledTheme()) Navy800 else Color(0xFFE7EBF5)
+    return if (isAmoledTheme()) Navy800 else Color(0xFFDCE4F3)
 }
+
+@Composable
+private fun appSwitchColors() = SwitchDefaults.colors(
+    checkedThumbColor = Color.White,
+    checkedTrackColor = PrimaryBlue,
+    checkedBorderColor = PrimaryBlue,
+    uncheckedThumbColor = TextMuted,
+    uncheckedTrackColor = if (isAmoledTheme()) Navy800 else Color(0xFFE8EDF7),
+    uncheckedBorderColor = appBorderColor()
+)
 
 @Composable
 fun primaryButtonColors(): ButtonColors = ButtonDefaults.buttonColors(
@@ -1589,7 +2933,7 @@ fun primaryButtonColors(): ButtonColors = ButtonDefaults.buttonColors(
 )
 
 fun isAmoledTheme(): Boolean {
-    return Navy950 == Color(0xFF000000)
+    return TextPrimary == Color(0xFFF8FAFF)
 }
 
 @Composable
@@ -1601,7 +2945,13 @@ private fun EmptyPanel(text: String) {
 
 @Composable
 private fun IconTile(icon: ImageVector, tint: Color) {
-    Box(Modifier.size(52.dp).clip(RoundedCornerShape(if (isAmoledTheme()) 14.dp else 28.dp)).background(tint.copy(alpha = if (isAmoledTheme()) 0.14f else 0.11f)), contentAlignment = Alignment.Center) {
+    Box(
+        Modifier
+            .size(54.dp)
+            .clip(MaterialTheme.shapes.large)
+            .background(tint.copy(alpha = if (isAmoledTheme()) 0.18f else 0.12f)),
+        contentAlignment = Alignment.Center
+    ) {
         Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(27.dp))
     }
 }
@@ -1623,14 +2973,44 @@ private fun ChipRow(content: @Composable RowScope.() -> Unit) {
 @Composable
 private fun MoneyChip(label: String, selected: Boolean, onClick: () -> Unit) {
     val dark = isAmoledTheme()
+    val scale by animateFloatAsState(
+        targetValue = if (selected) 1.03f else 1f,
+        animationSpec = tween(220, easing = FastOutSlowInEasing),
+        label = "chipScale"
+    )
     FilterChip(
         selected = selected,
         onClick = onClick,
+        modifier = Modifier.scale(scale),
+        shape = RoundedCornerShape(50),
         label = { Text(label) },
         colors = FilterChipDefaults.filterChipColors(
-            selectedContainerColor = if (dark) PrimaryBlue else Color(0xFFEAF2FF),
-            selectedLabelColor = if (dark) Color(0xFF001A42) else PrimaryBlue,
-            containerColor = Navy800,
+            selectedContainerColor = if (dark) Color(0xFF29477F) else Color(0xFFDDE8FF),
+            selectedLabelColor = if (dark) Color(0xFFEAF1FF) else PrimaryBlue,
+            containerColor = if (dark) Navy800 else Color.White,
+            labelColor = TextMuted
+        )
+    )
+}
+
+@Composable
+private fun TransactionTypeChip(type: TransactionType, selected: Boolean, onClick: () -> Unit) {
+    val accent = if (type == TransactionType.Income) MoneyGreen else LossRed
+    val scale by animateFloatAsState(
+        targetValue = if (selected) 1.03f else 1f,
+        animationSpec = tween(220, easing = FastOutSlowInEasing),
+        label = "typeChipScale"
+    )
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        modifier = Modifier.scale(scale),
+        shape = RoundedCornerShape(50),
+        label = { Text(type.name, fontWeight = FontWeight.Bold) },
+        colors = FilterChipDefaults.filterChipColors(
+            selectedContainerColor = accent.copy(alpha = if (isAmoledTheme()) 0.22f else 0.14f),
+            selectedLabelColor = accent,
+            containerColor = if (isAmoledTheme()) Navy800 else Color.White,
             labelColor = TextMuted
         )
     )
@@ -1639,17 +3019,34 @@ private fun MoneyChip(label: String, selected: Boolean, onClick: () -> Unit) {
 @Composable
 private fun BottomNavigation(selectedTab: ScreenTab, onTabSelected: (ScreenTab) -> Unit) {
     val dark = isAmoledTheme()
-    NavigationBar(containerColor = if (dark) Navy850 else Color(0xFFF7F9FE), tonalElevation = 0.dp) {
+    NavigationBar(
+        containerColor = Navy900,
+        tonalElevation = 0.dp
+    ) {
         ScreenTab.entries.forEach { tab ->
+            val selected = selectedTab == tab
+            val scale by animateFloatAsState(
+                targetValue = if (selected) 1.08f else 1f,
+                animationSpec = tween(240, easing = FastOutSlowInEasing),
+                label = "navScale"
+            )
             NavigationBarItem(
-                selected = selectedTab == tab,
+                selected = selected,
                 onClick = { onTabSelected(tab) },
-                icon = { Icon(tab.icon, contentDescription = tab.label) },
-                label = { Text(tab.label, maxLines = 1) },
+                icon = { Icon(tab.icon, contentDescription = tab.label, modifier = Modifier.scale(scale)) },
+                label = {
+                    Text(
+                        tab.label,
+                        maxLines = 1,
+                        overflow = TextOverflow.Clip,
+                        fontSize = 11.sp,
+                        lineHeight = 12.sp
+                    )
+                },
                 colors = NavigationBarItemDefaults.colors(
                     selectedIconColor = PrimarySoft,
                     selectedTextColor = PrimarySoft,
-                    indicatorColor = if (dark) Color(0xFF112654) else Color(0xFFEAF2FF),
+                    indicatorColor = PrimaryBlue.copy(alpha = if (dark) 0.32f else 0.16f),
                     unselectedIconColor = if (dark) TextDim.copy(alpha = 0.62f) else TextPrimary,
                     unselectedTextColor = if (dark) TextDim.copy(alpha = 0.62f) else TextPrimary
                 )
@@ -1678,21 +3075,26 @@ private fun availableMonths(state: FinanceUiState): List<YearMonth> {
 
 private fun categoryTotals(state: FinanceUiState): List<MonthlyCategoryTotal> {
     return state.categories.map { category ->
-        val transactions = state.monthTransactions.filter { it.categoryId == category.id }
+        val expense = state.monthTransactions
+            .filter { it.categoryId == category.id && it.type == TransactionType.Expense }
+            .sumOf { it.amount }
         MonthlyCategoryTotal(
             category = category,
-            income = transactions.filter { it.type == TransactionType.Income }.sumOf { it.amount },
-            expense = transactions.filter { it.type == TransactionType.Expense }.sumOf { it.amount }
+            income = 0.0,
+            expense = expense
         )
     }
 }
 
 private fun LedgerTransaction.signedAmount(currency: CurrencyOption): String {
-    val prefix = if (type == TransactionType.Income) "+" else "-"
-    return "$prefix${money(amount, currency)}"
+    return signedAmount(amount, type, currency)
 }
 
 private fun DetectedTransactionDraft.signedAmount(currency: CurrencyOption): String {
+    return signedAmount(amount, type, currency)
+}
+
+private fun signedAmount(amount: Double, type: TransactionType, currency: CurrencyOption): String {
     val prefix = if (type == TransactionType.Income) "+" else "-"
     return "$prefix${money(amount, currency)}"
 }
@@ -1705,14 +3107,30 @@ private fun TransactionType.bankVerb(): String {
     return if (this == TransactionType.Income) "credited" else "debited"
 }
 
+private fun categoryColor(category: CategoryItem?, type: TransactionType): Color {
+    if (category == null) return TextMuted
+    if (category.name == "Uncategorized") return if (isAmoledTheme()) Color(0xFFA7B3CC) else Color(0xFF7D889D)
+    if (type == TransactionType.Income) return MoneyGreen
+    return colorFromHex(category.colorHex)
+}
+
 private fun categoryColor(category: String, type: TransactionType): Color {
     if (type == TransactionType.Income) return MoneyGreen
     return when (category) {
-        "Food", "Fuel" -> WarningAmber
-        "Grocery", "Shopping" -> PrimarySoft
-        "Rent" -> LossRed
+        "Uncategorized" -> if (isAmoledTheme()) Color(0xFFA7B3CC) else Color(0xFF7D889D)
+        "Grocery" -> Color(0xFF38E68B)
+        "Food" -> Color(0xFFFFC857)
+        "Shopping" -> Color(0xFFFF4FB8)
+        "Fuel" -> Color(0xFFFF8A3D)
+        "Rent" -> Color(0xFFFF6B7A)
         else -> TextMuted
     }
+}
+
+private fun colorFromHex(hex: String): Color {
+    return runCatching {
+        Color(android.graphics.Color.parseColor(hex))
+    }.getOrDefault(TextDim)
 }
 
 private fun FinanceUiState.money(value: Double): String {
@@ -1726,4 +3144,36 @@ private fun money(value: Double, currency: CurrencyOption): String {
     return formatter.format(value)
 }
 
-private val chartColors = listOf(PrimarySoft, MoneyGreen, WarningAmber, LossRed, PrimaryBlue)
+private fun compactMoney(value: Double, currency: CurrencyOption): String {
+    val abs = kotlin.math.abs(value)
+    val suffixValue = when {
+        abs >= 1_000_000.0 -> abs / 1_000_000.0 to "M"
+        abs >= 100_000.0 -> abs / 100_000.0 to "L"
+        abs >= 1_000.0 -> abs / 1_000.0 to "K"
+        else -> abs to ""
+    }
+    val number = if (suffixValue.first >= 10 || suffixValue.second.isEmpty()) {
+        suffixValue.first.toInt().toString()
+    } else {
+        String.format(Locale.US, "%.1f", suffixValue.first).trimEnd('0').trimEnd('.')
+    }
+    return "${currency.symbol}$number${suffixValue.second}"
+}
+
+private val categoryPalette = listOf(
+    "#7C9DFF",
+    "#61E6A4",
+    "#FF7A8A",
+    "#FFD166",
+    "#B589FF",
+    "#38D5E8",
+    "#FF9F43",
+    "#F472B6",
+    "#4ADE80",
+    "#60A5FA",
+    "#A78BFA",
+    "#F87171",
+    "#2DD4BF",
+    "#FBBF24",
+    "#94A3B8"
+)

@@ -8,6 +8,8 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.moneymanager.app.data.FinanceDatabase
 import com.moneymanager.app.data.FinanceRepository
+import com.moneymanager.app.data.SmsBankKeys
+import com.moneymanager.app.data.SmsTransactionNormalizer
 import com.moneymanager.app.data.TodaySmsScanner
 import com.moneymanager.app.model.BankAccount
 import com.moneymanager.app.model.BudgetPlan
@@ -17,13 +19,18 @@ import com.moneymanager.app.model.BudgetWarning
 import com.moneymanager.app.model.CategoryItem
 import com.moneymanager.app.model.CurrencyOption
 import com.moneymanager.app.model.DetectedTransactionDraft
+import com.moneymanager.app.model.ActivityDateFilter
 import com.moneymanager.app.model.FinanceUiState
 import com.moneymanager.app.model.LedgerTransaction
 import com.moneymanager.app.model.MoneyIcons
 import com.moneymanager.app.model.ScreenTab
 import com.moneymanager.app.model.ThemeMode
 import com.moneymanager.app.model.TransactionType
+import com.moneymanager.app.model.UiAccent
+import com.moneymanager.app.model.UiSurface
 import com.moneymanager.app.model.month
+import java.time.Instant
+import java.time.ZoneId
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -42,12 +49,21 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
 
     fun completeRegistration(name: String, accounts: List<Pair<String, Double>>) {
         viewModelScope.launch {
-            repository.saveSettings(name.trim(), _uiState.value.currency, _uiState.value.themeMode)
+            repository.persistUserSettings(
+                _uiState.value.copy(
+                    userName = name.trim(),
+                    bankSmsSetupCompleted = true
+                )
+            )
             accounts
                 .filter { it.first.isNotBlank() && it.second >= 0.0 }
                 .forEach { repository.addAccount(it.first.trim(), it.second) }
             reloadState()
-            scanTodayMessages()
+            scanMessages(
+                range = MessageScanRange.Custom,
+                startDate = LocalDate.now().minusMonths(3),
+                endDate = LocalDate.now()
+            )
         }
     }
 
@@ -83,17 +99,182 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(selectedMonth = month) }
     }
 
+    fun setActivityDateFilter(
+        filter: ActivityDateFilter,
+        startDate: LocalDate? = null,
+        endDate: LocalDate? = null
+    ) {
+        val today = LocalDate.now()
+        val range = when (filter) {
+            ActivityDateFilter.Today -> today to today
+            ActivityDateFilter.Week -> today.minusDays(6) to today
+            ActivityDateFilter.Month -> today.withDayOfMonth(1) to today
+            ActivityDateFilter.Custom -> {
+                val start = startDate ?: _uiState.value.activityStartDate
+                val end = endDate ?: _uiState.value.activityEndDate
+                if (start <= end) start to end else end to start
+            }
+        }
+        _uiState.update {
+            it.copy(
+                activityDateFilter = filter,
+                activityStartDate = range.first,
+                activityEndDate = range.second,
+                activityTransactionPage = 1
+            )
+        }
+    }
+
     fun selectCurrency(currency: CurrencyOption) {
         viewModelScope.launch {
-            repository.saveSettings(_uiState.value.userName, currency, _uiState.value.themeMode)
-            _uiState.update { it.copy(currency = currency) }
+            val next = _uiState.value.copy(currency = currency)
+            repository.persistUserSettings(next)
+            _uiState.value = next
         }
     }
 
     fun selectThemeMode(themeMode: ThemeMode) {
         viewModelScope.launch {
-            repository.saveSettings(_uiState.value.userName, _uiState.value.currency, themeMode)
-            _uiState.update { it.copy(themeMode = themeMode) }
+            val next = _uiState.value.copy(themeMode = themeMode)
+            repository.persistUserSettings(next)
+            _uiState.value = next
+        }
+    }
+
+    fun selectUiAccent(uiAccent: UiAccent) {
+        viewModelScope.launch {
+            val next = _uiState.value.copy(uiAccent = uiAccent)
+            repository.persistUserSettings(next)
+            _uiState.value = next
+        }
+    }
+
+    fun selectUiSurface(uiSurface: UiSurface) {
+        viewModelScope.launch {
+            val next = _uiState.value.copy(uiSurface = uiSurface)
+            repository.persistUserSettings(next)
+            _uiState.value = next
+        }
+    }
+
+    fun setSalaryShiftIncomeEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            val next = _uiState.value.copy(salaryShiftIncomeEnabled = enabled)
+            repository.persistUserSettings(next)
+            _uiState.value = next
+        }
+    }
+
+    fun setSalaryShiftWindowDays(days: Int) {
+        viewModelScope.launch {
+            val coerced = days.coerceIn(3, 14)
+            val next = _uiState.value.copy(salaryShiftWindowDays = coerced)
+            repository.persistUserSettings(next)
+            _uiState.value = next
+        }
+    }
+
+    fun setSalaryCategoryId(categoryId: Long?) {
+        viewModelScope.launch {
+            val next = _uiState.value.copy(salaryCategoryId = categoryId)
+            repository.persistUserSettings(next)
+            _uiState.value = next
+        }
+    }
+
+    fun setSalaryKeywordsForUncategorized(enabled: Boolean) {
+        viewModelScope.launch {
+            val next = _uiState.value.copy(salaryKeywordsForUncategorized = enabled)
+            repository.persistUserSettings(next)
+            _uiState.value = next
+        }
+    }
+
+    fun setSummaryAccountFilter(accountIds: Set<Long>) {
+        viewModelScope.launch {
+            val next = _uiState.value.copy(summarySelectedAccountIds = accountIds)
+            repository.persistUserSettings(next)
+            _uiState.value = next
+        }
+    }
+
+    fun toggleSummaryAccountInFilter(accountId: Long) {
+        val cur = _uiState.value.summarySelectedAccountIds
+        val nextSet = if (accountId in cur) cur - accountId else cur + accountId
+        setSummaryAccountFilter(nextSet)
+    }
+
+    fun clearSummaryAccountFilter() {
+        setSummaryAccountFilter(emptySet())
+    }
+
+    fun completeBankSmsOnboarding() {
+        viewModelScope.launch {
+            val next = _uiState.value.copy(bankSmsSetupCompleted = true)
+            repository.persistUserSettings(next)
+            repository.remapTransactionAccountsFromSmsLabels()
+            reloadState()
+        }
+    }
+
+    fun mapSmsBankToAccount(smsBankLabel: String, accountId: Long) {
+        viewModelScope.launch {
+            val account = _uiState.value.accounts.firstOrNull { it.id == accountId } ?: return@launch
+            val key = SmsBankKeys.normalize(smsBankLabel)
+            repository.updateAccount(account.copy(smsMatchKey = key))
+            repository.remapTransactionAccountsFromSmsLabels()
+            reloadState()
+        }
+    }
+
+    fun createAccountForSmsLabel(smsBankLabel: String, accountName: String) {
+        if (accountName.isBlank()) return
+        viewModelScope.launch {
+            repository.addAccount(
+                name = accountName.trim(),
+                balance = 0.0,
+                smsMatchKey = SmsBankKeys.normalize(smsBankLabel)
+            )
+            repository.remapTransactionAccountsFromSmsLabels()
+            reloadState()
+        }
+    }
+
+    fun updateAccountBalance(accountId: Long, balance: Double) {
+        if (balance < 0.0) return
+        viewModelScope.launch {
+            val account = _uiState.value.accounts.firstOrNull { it.id == accountId } ?: return@launch
+            repository.updateAccount(account.copy(balance = balance))
+            reloadState()
+        }
+    }
+
+    fun deleteAllSavedData() {
+        viewModelScope.launch {
+            repository.clearAllSavedData()
+            _uiState.value = FinanceUiState(isAppInitializing = false)
+            reloadState()
+        }
+    }
+
+    fun refreshDiscoveredSmsBanks() {
+        viewModelScope.launch {
+            val state = _uiState.value
+            val fromDb = state.transactions.mapNotNull { it.smsBankLabel }.distinct()
+            val scanned = if (hasSmsPermission()) {
+                val today = LocalDate.now()
+                TodaySmsScanner(getApplication()).scanRange(today.minusDays(120), today)
+                    .map { it.bankName }
+                    .distinct()
+            } else {
+                emptyList()
+            }
+            val merged = (fromDb + scanned)
+                .map { it.trim() }
+                .filter { it.isNotBlank() && !it.equals("Bank", ignoreCase = true) }
+                .distinct()
+                .sorted()
+            _uiState.update { it.copy(discoveredSmsBanks = merged) }
         }
     }
 
@@ -113,7 +294,7 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(budgetWarning = null) }
     }
 
-    fun addCategory(name: String, iconKey: String) {
+    fun addCategory(name: String, iconKey: String, colorHex: String = "#4F8CFF") {
         if (name.isBlank()) return
         viewModelScope.launch {
             repository.addCategory(
@@ -122,7 +303,8 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
                     name = name.trim(),
                     iconKey = iconKey,
                     icon = MoneyIcons.resolveCategoryIcon(iconKey),
-                    isDefault = false
+                    isDefault = false,
+                    colorHex = colorHex
                 )
             )
             reloadState { it.copy(showCategorySheet = false) }
@@ -149,7 +331,9 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
                 accountId = accountId,
                 timestampMillis = System.currentTimeMillis(),
                 isAutoDetected = isAutoDetected,
-                rawMessage = rawMessage
+                rawMessage = rawMessage,
+                smsBankLabel = null,
+                excludeFromSummary = false
             )
             repository.addTransaction(transaction)
             val warning = findBudgetWarning(_uiState.value, transaction)
@@ -176,23 +360,32 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
     fun deleteTransaction(id: Long) {
         viewModelScope.launch {
             repository.deleteTransaction(id)
-            reloadState()
+            reloadState { it.copy(showTransactionDetailSheet = false, selectedTransactionId = null) }
         }
     }
 
     fun requestEditTransactionCategory(transactionId: Long) {
-        _uiState.update { it.copy(showEditCategorySheet = true, editingTransactionId = transactionId) }
+        _uiState.update { it.copy(showTransactionDetailSheet = true, selectedTransactionId = transactionId) }
     }
 
     fun cancelEditTransactionCategory() {
-        _uiState.update { it.copy(showEditCategorySheet = false, editingTransactionId = null) }
+        _uiState.update { it.copy(showTransactionDetailSheet = false, selectedTransactionId = null) }
     }
 
     fun editTransactionCategory(transactionId: Long, categoryId: Long) {
         viewModelScope.launch {
             val transaction = _uiState.value.transactions.firstOrNull { it.id == transactionId } ?: return@launch
             repository.updateTransaction(transaction.copy(categoryId = categoryId))
-            reloadState { it.copy(showEditCategorySheet = false, editingTransactionId = null) }
+            reloadState { it.copy(showTransactionDetailSheet = false, selectedTransactionId = null) }
+        }
+    }
+
+    fun updateTransactionDetails(transactionId: Long, type: TransactionType, categoryId: Long) {
+        viewModelScope.launch {
+            val transaction = _uiState.value.transactions.firstOrNull { it.id == transactionId } ?: return@launch
+            repository.updateTransaction(transaction.copy(type = type, categoryId = categoryId))
+            applyCategoryToSimilarUncategorized(transaction, categoryId, type)
+            reloadState { it.copy(showTransactionDetailSheet = false, selectedTransactionId = null) }
         }
     }
 
@@ -217,16 +410,53 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun updateCategoryColor(categoryId: Long, colorHex: String) {
+        viewModelScope.launch {
+            val category = _uiState.value.categories.firstOrNull { it.id == categoryId } ?: return@launch
+            repository.addCategory(category.copy(colorHex = colorHex))
+            reloadState()
+        }
+    }
+
+    fun createCategoryForTransaction(transactionId: Long, name: String, iconKey: String, colorHex: String) {
+        if (name.isBlank()) return
+        viewModelScope.launch {
+            val transaction = _uiState.value.transactions.firstOrNull { it.id == transactionId } ?: return@launch
+            val category = CategoryItem(
+                id = System.currentTimeMillis(),
+                name = name.trim(),
+                iconKey = iconKey,
+                icon = MoneyIcons.resolveCategoryIcon(iconKey),
+                isDefault = false,
+                colorHex = colorHex
+            )
+            repository.addCategory(category)
+            repository.updateTransaction(transaction.copy(categoryId = category.id))
+            reloadState { it.copy(showTransactionDetailSheet = false, selectedTransactionId = null) }
+        }
+    }
+
     fun scanTodayMessages() {
         scanMessages(MessageScanRange.Today)
+    }
+
+    fun scanCurrentActivityPeriod() {
+        val state = _uiState.value
+        scanMessages(MessageScanRange.Custom, state.activityStartDate, state.activityEndDate)
+    }
+
+    fun populateLastThreeMonths() {
+        val today = LocalDate.now()
+        scanMessages(MessageScanRange.Custom, today.minusMonths(3), today)
     }
 
     fun scanMessages(range: MessageScanRange, startDate: LocalDate? = null, endDate: LocalDate? = null) {
         if (_uiState.value.isScanningMessages) return
 
         viewModelScope.launch {
-            _uiState.update { it.copy(isScanningMessages = true) }
-            val parsedMessages = if (hasSmsPermission()) {
+            _uiState.update { it.copy(isScanningMessages = true, scanStatusMessage = "Scanning messages...") }
+            val hasPermission = hasSmsPermission()
+            val parsedMessages = if (hasPermission) {
                 when (range) {
                     MessageScanRange.Today -> TodaySmsScanner(getApplication()).scanToday()
                     MessageScanRange.Yesterday -> TodaySmsScanner(getApplication()).scanYesterday()
@@ -246,32 +476,80 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
                 emptyList()
             }
 
-            val existingRawMessages = _uiState.value.detectedDrafts.map { it.rawMessage }.toSet()
-            parsedMessages
-                .filterNot { it.rawMessage in existingRawMessages }
-                .forEach {
-                    repository.saveDraft(
-                        DetectedTransactionDraft(
-                            id = 0,
-                            bankName = it.bankName,
-                            name = it.counterparty,
-                            amount = it.amount,
-                            type = it.type,
-                            counterparty = it.counterparty,
-                            rawMessage = it.rawMessage,
-                            suggestedCategoryId = suggestCategoryId(it.counterparty),
-                            detectedAtMillis = System.currentTimeMillis()
-                        )
+            if (!hasPermission) {
+                reloadState {
+                    it.copy(
+                        isScanningMessages = false,
+                        scanStatusMessage = "SMS permission is needed before scanning can populate transactions."
                     )
                 }
+                return@launch
+            }
 
-            reloadState { it.copy(isScanningMessages = false) }
+            val normalizedExisting = buildSet {
+                addAll(_uiState.value.transactions.mapNotNull { normalizedSmsRaw(it.rawMessage) })
+                addAll(_uiState.value.detectedDrafts.map { normalizedSmsRaw(it.rawMessage) })
+            }.toMutableSet()
+            val filteredParsed = SmsTransactionNormalizer.filterImportBatch(parsedMessages)
+            val accountsSnapshot = _uiState.value.accounts
+            repository.cleanupCreditCardRepaymentArtifacts()
+            var importedCount = 0
+            filteredParsed.forEach { msg ->
+                val normRaw = normalizedSmsRaw(msg.rawMessage)
+                if (normRaw.isBlank() || normRaw in normalizedExisting) return@forEach
+                normalizedExisting.add(normRaw)
+                val categoryId = inferCategoryId(msg) ?: _uiState.value.categories.firstOrNull { category ->
+                    category.name == "Uncategorized"
+                }?.id ?: 0L
+                val accountId = SmsBankKeys.resolveAccountId(msg.bankName, accountsSnapshot)
+                    ?: accountsSnapshot.singleOrNull()?.id
+                repository.addTransaction(
+                    LedgerTransaction(
+                        id = 0,
+                        name = msg.counterparty,
+                        amount = msg.amount,
+                        type = msg.type,
+                        categoryId = categoryId,
+                        accountId = accountId,
+                        timestampMillis = msg.transactionTimestampMillis,
+                        isAutoDetected = true,
+                        rawMessage = msg.rawMessage,
+                        smsBankLabel = msg.bankName,
+                        excludeFromSummary = false
+                    )
+                )
+                importedCount += 1
+            }
+
+            val status = when {
+                parsedMessages.isEmpty() -> "No transaction messages found for this period."
+                filteredParsed.isEmpty() -> "Found ${parsedMessages.size} transaction-like SMS, but all were filtered as duplicates, reminders, or internal transfers."
+                importedCount == 0 -> "Found ${filteredParsed.size} transaction SMS, but no new transactions were imported."
+                importedCount == 1 -> "Imported 1 transaction."
+                else -> "Imported $importedCount transactions."
+            }
+            val newestMonth = parsedMessages.maxByOrNull { it.transactionTimestampMillis }
+                ?.let {
+                    YearMonth.from(
+                        Instant.ofEpochMilli(it.transactionTimestampMillis)
+                            .atZone(ZoneId.systemDefault())
+                            .toLocalDate()
+                    )
+                }
+            reloadState {
+                it.copy(
+                    isScanningMessages = false,
+                    scanStatusMessage = status,
+                    selectedMonth = newestMonth ?: it.selectedMonth
+                )
+            }
         }
     }
 
     fun acceptDetectedTransaction(draftId: Long, categoryId: Long) {
         viewModelScope.launch {
             val draft = _uiState.value.detectedDrafts.firstOrNull { it.id == draftId } ?: return@launch
+            val accountsSnapshot = _uiState.value.accounts
             repository.addTransaction(
                 LedgerTransaction(
                     id = 0,
@@ -279,10 +557,13 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
                     amount = draft.amount,
                     type = draft.type,
                     categoryId = categoryId,
-                    accountId = _uiState.value.accounts.firstOrNull()?.id,
-                    timestampMillis = System.currentTimeMillis(),
+                    accountId = SmsBankKeys.resolveAccountId(draft.bankName, accountsSnapshot)
+                        ?: accountsSnapshot.singleOrNull()?.id,
+                    timestampMillis = draft.transactionTimestampMillis,
                     isAutoDetected = true,
-                    rawMessage = draft.rawMessage
+                    rawMessage = draft.rawMessage,
+                    smsBankLabel = draft.bankName,
+                    excludeFromSummary = false
                 )
             )
             repository.deleteDraft(draftId)
@@ -299,12 +580,19 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun reload() {
         viewModelScope.launch {
-            runCatching { reloadState() }
+            runCatching {
+                repository.cleanupCreditCardRepaymentArtifacts()
+                reloadState()
+                refreshDiscoveredSmsBanks()
+            }
                 .onFailure {
                     _uiState.update { state -> state.copy(isAppInitializing = false) }
                 }
         }
     }
+
+    private fun normalizedSmsRaw(raw: String?): String =
+        raw?.replace('\n', ' ')?.trim()?.replace(Regex("\\s+"), " ").orEmpty()
 
     private suspend fun reloadState(transform: (FinanceUiState) -> FinanceUiState = { it }) {
         val current = _uiState.value
@@ -321,8 +609,15 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
             showCategorySheet = current.showCategorySheet,
             showEditCategorySheet = current.showEditCategorySheet,
             editingTransactionId = current.editingTransactionId,
+            showTransactionDetailSheet = current.showTransactionDetailSheet,
+            selectedTransactionId = current.selectedTransactionId,
+            activityDateFilter = current.activityDateFilter,
+            activityStartDate = current.activityStartDate,
+            activityEndDate = current.activityEndDate,
             isScanningMessages = current.isScanningMessages,
-            budgetWarning = current.budgetWarning
+            scanStatusMessage = current.scanStatusMessage,
+            budgetWarning = current.budgetWarning,
+            discoveredSmsBanks = current.discoveredSmsBanks
         )
         _uiState.value = transform(loaded)
     }
@@ -369,5 +664,137 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
         } else {
             null
         }
+    }
+
+    private suspend fun applyCategoryToSimilarUncategorized(
+        source: LedgerTransaction,
+        categoryId: Long,
+        type: TransactionType
+    ) {
+        val uncategorizedId = _uiState.value.categories.firstOrNull { it.name == "Uncategorized" }?.id ?: 0L
+        if (categoryId == uncategorizedId) return
+        val sourceKey = categoryLearningKey(source.name, source.rawMessage, source.type, source.smsBankLabel)
+        if (sourceKey.isBlank()) return
+        _uiState.value.transactions
+            .filter {
+                it.id != source.id &&
+                    it.categoryId == uncategorizedId &&
+                    categoryLearningKey(it.name, it.rawMessage, it.type, it.smsBankLabel) == sourceKey
+            }
+            .forEach {
+                repository.updateTransaction(it.copy(type = type, categoryId = categoryId))
+            }
+    }
+
+    private fun inferCategoryId(msg: com.moneymanager.app.data.ParsedTransactionMessage): Long? {
+        val uncategorizedId = _uiState.value.categories.firstOrNull { it.name == "Uncategorized" }?.id ?: 0L
+        val key = categoryLearningKey(msg.counterparty, msg.rawMessage, msg.type, msg.bankName)
+        if (key.isBlank()) return null
+        return _uiState.value.transactions
+            .asSequence()
+            .filter { it.categoryId != uncategorizedId }
+            .filter { categoryLearningKey(it.name, it.rawMessage, it.type, it.smsBankLabel) == key }
+            .groupingBy { it.categoryId }
+            .eachCount()
+            .maxByOrNull { it.value }
+            ?.key
+    }
+
+    private fun categoryLearningKey(
+        name: String,
+        rawMessage: String?,
+        type: TransactionType,
+        smsBankLabel: String?
+    ): String {
+        if (SmsTransactionNormalizer.isNonLedgerTransactionArtifact(rawMessage, type)) return ""
+        val merchant = merchantFingerprint(name, rawMessage, smsBankLabel)
+        if (merchant.isBlank()) return ""
+        val source = rawMessage?.lowercase().orEmpty()
+        val channel = when {
+            "upi" in source -> "upi"
+            "neft" in source -> "neft"
+            "imps" in source -> "imps"
+            "card" in source -> "card"
+            else -> "sms"
+        }
+        return "${type.name.lowercase()}|$channel|$merchant"
+    }
+
+    private fun merchantFingerprint(name: String, rawMessage: String?, smsBankLabel: String?): String {
+        val nameCandidate = normalizeMerchantCandidate(name, smsBankLabel)
+        if (nameCandidate.isNotBlank()) return nameCandidate
+
+        val raw = rawMessage.orEmpty()
+        val candidates = listOfNotNull(
+            Regex("""(?i);\s*([A-Z0-9 .&_-]{2,40})\s+(?:debited|credited)""")
+                .find(raw)
+                ?.groupValues
+                ?.getOrNull(1),
+            Regex("""(?i)\b(?:to|at|from|for|towards)\s+([a-z0-9 .&_-]{3,40})""")
+                .find(raw)
+                ?.groupValues
+                ?.getOrNull(1)
+                ?.substringBefore(" on ")
+                ?.substringBefore(" ref")
+                ?.substringBefore(" using")
+        )
+        return candidates
+            .asSequence()
+            .map { normalizeMerchantCandidate(it, smsBankLabel) }
+            .firstOrNull { it.isNotBlank() }
+            .orEmpty()
+    }
+
+    private fun normalizeMerchantCandidate(candidate: String, smsBankLabel: String?): String {
+        val bankTokens = smsBankLabel
+            ?.lowercase()
+            .orEmpty()
+            .replace(Regex("""\b(?:rs\.?|inr|rupees?)\s*[\d,]+(?:\.\d{1,2})?\b"""), " ")
+            .replace(Regex("""[^a-z0-9 ]"""), " ")
+            .split(" ")
+            .filter { it.length >= 3 }
+            .toSet()
+        val stopWords = setOf(
+            "debited",
+            "credited",
+            "credit",
+            "debit",
+            "account",
+            "bank",
+            "card",
+            "ending",
+            "payment",
+            "received",
+            "amount",
+            "available",
+            "balance",
+            "transaction",
+            "reference",
+            "your",
+            "a/c",
+            "paid",
+            "sent",
+            "from",
+            "with"
+        )
+        val tokens = candidate
+            .lowercase()
+            .substringBefore("http")
+            .replace(Regex("""\b(?:on|by)\s+\d{1,2}\b"""), " ")
+            .replace(Regex("""\b(?:rs\.?|inr|rupees?)\s*[\d,]+(?:\.\d{1,2})?\b"""), " ")
+            .replace(Regex("""\b\d{1,2}[-/][a-z]{3}[-/]\d{2,4}\b""", RegexOption.IGNORE_CASE), " ")
+            .replace(Regex("""\b\d{1,2}[-/]\d{1,2}[-/]\d{2,4}\b"""), " ")
+            .replace(Regex("""\b(?:ref|rrn|utr|txn|transaction|upi)[\s:.-]*[a-z0-9-]+\b""", RegexOption.IGNORE_CASE), " ")
+            .replace(Regex("""\b[x*]*\d{3,}\b"""), " ")
+            .replace(Regex("""\b\d+\b"""), " ")
+            .replace(Regex("""[^a-z0-9 ]"""), " ")
+            .split(" ")
+            .map { it.trim() }
+            .filter { it.length >= 3 }
+            .filterNot { it in stopWords || it in bankTokens }
+            .take(4)
+        if (tokens.isEmpty()) return ""
+        if (tokens.size == 1 && tokens.first() in setOf("hdfc", "icici", "axis", "kotak", "indian", "sbi")) return ""
+        return tokens.joinToString(" ")
     }
 }

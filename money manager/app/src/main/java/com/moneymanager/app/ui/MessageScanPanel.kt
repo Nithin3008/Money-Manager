@@ -59,10 +59,10 @@ fun MessageScanPanel(onScan: (MessageScanRange, LocalDate, LocalDate) -> Unit) {
     val formatter = DateTimeFormatter.ofPattern("MMM d, yyyy")
     val isCustomValid = selectedRange != MessageScanRange.Custom || !startDate.isAfter(endDate)
     val buttonLabel = when (selectedRange) {
-        MessageScanRange.Today -> "Scan Today"
-        MessageScanRange.Yesterday -> "Scan Yesterday"
-        MessageScanRange.Week -> "Scan Last 7 Days"
-        MessageScanRange.Custom -> "Scan Range"
+        MessageScanRange.Today -> "Update Today"
+        MessageScanRange.Yesterday -> "Update Yesterday"
+        MessageScanRange.Week -> "Update Last 7 Days"
+        MessageScanRange.Custom -> "Update Range"
     }
 
     val dark = Navy950 == Color(0xFF000000)
@@ -75,7 +75,7 @@ fun MessageScanPanel(onScan: (MessageScanRange, LocalDate, LocalDate) -> Unit) {
         border = BorderStroke(1.dp, if (dark) Color(0xFF33363D) else Color(0xFFC9CEDD))
     ) {
         Column(Modifier.padding(16.dp)) {
-            Text("Message Scanner", fontWeight = FontWeight.Bold, color = TextPrimary, fontSize = 16.sp)
+            Text("Manual Update", fontWeight = FontWeight.Bold, color = TextPrimary, fontSize = 16.sp)
             Spacer(modifier = Modifier.height(12.dp))
             Row(
                 modifier = Modifier

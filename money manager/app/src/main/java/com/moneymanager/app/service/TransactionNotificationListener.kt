@@ -28,7 +28,8 @@ class TransactionNotificationListener : NotificationListenerService() {
                     counterparty = parsed.counterparty,
                     rawMessage = parsed.rawMessage,
                     suggestedCategoryId = null,
-                    detectedAtMillis = System.currentTimeMillis()
+                    detectedAtMillis = System.currentTimeMillis(),
+                    transactionTimestampMillis = parsed.transactionTimestampMillis
                 )
             )
         }

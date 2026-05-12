@@ -32,6 +32,7 @@ import androidx.compose.material.icons.rounded.SportsEsports
 import androidx.compose.material.icons.rounded.Subscriptions
 import androidx.compose.material.icons.rounded.Work
 import androidx.compose.ui.graphics.vector.ImageVector
+import java.time.LocalDate
 import java.time.YearMonth
 
 private const val TRANSACTIONS_PER_PAGE = 10
@@ -48,8 +49,15 @@ enum class MessageScanRange(val label: String) {
     Custom("Custom Range")
 }
 
+enum class ActivityDateFilter(val label: String) {
+    Today("Today"),
+    Week("Last 7 Days"),
+    Month("This Month"),
+    Custom("Custom")
+}
+
 enum class ScreenTab(val label: String, val icon: ImageVector) {
-    Dashboard("Dashboard", Icons.Rounded.GridView),
+    Dashboard("Today", Icons.Rounded.GridView),
     Activity("Activity", Icons.AutoMirrored.Rounded.ReceiptLong),
     Budget("Budget", Icons.Rounded.PieChart),
     Summary("Summary", Icons.Rounded.BarChart),
@@ -72,10 +80,51 @@ enum class ThemeMode(val label: String) {
     Light("Light")
 }
 
+enum class UiAccent(
+    val label: String,
+    val darkHex: String,
+    val lightHex: String,
+    val softDarkHex: String,
+    val softLightHex: String
+) {
+    Sky("Sky", "#7C9DFF", "#345CA8", "#AFC6FF", "#1F65C8"),
+    Mint("Mint", "#61E6A4", "#007A52", "#B8FFD7", "#006C49"),
+    Rose("Rose", "#FF7A8A", "#B32648", "#FFD9DE", "#A3193D"),
+    Amber("Amber", "#FFD166", "#8A5600", "#FFE2A3", "#7A4B00"),
+    Violet("Violet", "#B589FF", "#6750A4", "#D8C2FF", "#5B45A0"),
+    Cyan("Cyan", "#38D5E8", "#006878", "#B3EBF4", "#005E6C"),
+    Coral("Coral", "#FF9F7A", "#A33D22", "#FFD7C7", "#91341B"),
+    Pink("Pink", "#F472B6", "#9D2868", "#FFD7EC", "#8A1F5B"),
+    Emerald("Emerald", "#4ADE80", "#167A3A", "#C4FBD3", "#0D6F31"),
+    Indigo("Indigo", "#818CF8", "#3F51B5", "#DCE1FF", "#3342A2"),
+    Teal("Teal", "#2DD4BF", "#00796B", "#B6F1E8", "#006D60"),
+    Slate("Slate", "#A7B3CC", "#526178", "#D9E2F2", "#445268")
+}
+
+enum class UiSurface(
+    val label: String,
+    val darkBackgroundHex: String,
+    val darkCardHex: String,
+    val darkPanelHex: String,
+    val darkChipHex: String,
+    val lightBackgroundHex: String,
+    val lightCardHex: String,
+    val lightPanelHex: String,
+    val lightChipHex: String
+) {
+    Midnight("Midnight", "#0C0F17", "#111620", "#171D2A", "#202737", "#F8F9FF", "#FFFFFF", "#F0F4FF", "#E3EAF8"),
+    Graphite("Graphite", "#101113", "#17191D", "#20232A", "#2A2E37", "#F7F7F5", "#FFFFFF", "#EEEEEA", "#E2E3DE"),
+    Ocean("Ocean", "#07131D", "#0D1C2A", "#14293B", "#1B354A", "#F5FAFF", "#FFFFFF", "#EAF3FB", "#DDECF7"),
+    Plum("Plum", "#160F1D", "#21172A", "#2B1F37", "#362844", "#FCF7FF", "#FFFFFF", "#F4ECFA", "#EADDF3"),
+    Forest("Forest", "#0B1510", "#111F18", "#17291F", "#203529", "#F7FBF6", "#FFFFFF", "#ECF5EA", "#DDEBDA"),
+    Warm("Warm", "#17130E", "#211A13", "#2B2218", "#382B1F", "#FFFAF5", "#FFFFFF", "#F7EFE6", "#EDE1D4")
+}
+
 data class BankAccount(
     val id: Long,
     val name: String,
-    val balance: Double
+    val balance: Double,
+    val smsMatchKey: String? = null
 )
 
 data class CategoryItem(
@@ -83,7 +132,8 @@ data class CategoryItem(
     val name: String,
     val iconKey: String,
     val icon: ImageVector,
-    val isDefault: Boolean
+    val isDefault: Boolean,
+    val colorHex: String
 )
 
 data class LedgerTransaction(
@@ -95,7 +145,9 @@ data class LedgerTransaction(
     val accountId: Long?,
     val timestampMillis: Long,
     val isAutoDetected: Boolean = false,
-    val rawMessage: String? = null
+    val rawMessage: String? = null,
+    val smsBankLabel: String? = null,
+    val excludeFromSummary: Boolean = false
 )
 
 data class BudgetPlan(
@@ -115,7 +167,8 @@ data class DetectedTransactionDraft(
     val counterparty: String,
     val rawMessage: String,
     val suggestedCategoryId: Long?,
-    val detectedAtMillis: Long
+    val detectedAtMillis: Long,
+    val transactionTimestampMillis: Long
 )
 
 data class BudgetWarning(
@@ -135,6 +188,8 @@ data class FinanceUiState(
     val userName: String = "",
     val currency: CurrencyOption = CurrencyOption.INR,
     val themeMode: ThemeMode = ThemeMode.Dark,
+    val uiAccent: UiAccent = UiAccent.Sky,
+    val uiSurface: UiSurface = UiSurface.Midnight,
     val selectedTab: ScreenTab = ScreenTab.Dashboard,
     val selectedMonth: YearMonth = YearMonth.now(),
     val accounts: List<BankAccount> = emptyList(),
@@ -142,6 +197,10 @@ data class FinanceUiState(
     val transactions: List<LedgerTransaction> = emptyList(),
     val budgets: List<BudgetPlan> = emptyList(),
     val detectedDrafts: List<DetectedTransactionDraft> = emptyList(),
+    val activityDateFilter: ActivityDateFilter = ActivityDateFilter.Today,
+    val activityStartDate: java.time.LocalDate = java.time.LocalDate.now(),
+    val activityEndDate: java.time.LocalDate = java.time.LocalDate.now(),
+    val scanStatusMessage: String = "",
     val dashboardDraftPage: Int = 1,
     val dashboardTransactionPage: Int = 1,
     val activityTransactionPage: Int = 1,
@@ -151,16 +210,96 @@ data class FinanceUiState(
     val showCategorySheet: Boolean = false,
     val showEditCategorySheet: Boolean = false,
     val editingTransactionId: Long? = null,
-    val budgetWarning: BudgetWarning? = null
+    val showTransactionDetailSheet: Boolean = false,
+    val selectedTransactionId: Long? = null,
+    val budgetWarning: BudgetWarning? = null,
+    val salaryShiftIncomeEnabled: Boolean = false,
+    val salaryShiftWindowDays: Int = 5,
+    val salaryCategoryId: Long? = null,
+    val salaryKeywordsForUncategorized: Boolean = true,
+    val bankSmsSetupCompleted: Boolean = false,
+    /** Empty = all accounts on Summary; otherwise filter to these account ids. */
+    val summarySelectedAccountIds: Set<Long> = emptySet(),
+    /** Distinct SMS bank labels seen in scans/transactions; not persisted. */
+    val discoveredSmsBanks: List<String> = emptyList()
 ) {
     val hasCompletedRegistration: Boolean = userName.isNotBlank()
 
-    val monthTransactions: List<LedgerTransaction>
-        get() = transactions.filter { it.month() == selectedMonth }
+    private fun passesSummaryAccountFilter(tx: LedgerTransaction): Boolean {
+        if (summarySelectedAccountIds.isEmpty()) return true
+        val aid = tx.accountId ?: return false
+        return aid in summarySelectedAccountIds
+    }
 
-    val monthIncome: Double
+    private val selectedSummaryAccounts: List<BankAccount>
+        get() = if (summarySelectedAccountIds.isEmpty()) {
+            accounts
+        } else {
+            accounts.filter { it.id in summarySelectedAccountIds }
+        }
+
+    private val summaryBalanceAnchor: Double
+        get() = selectedSummaryAccounts.sumOf { it.balance }
+
+    private val summaryBalanceTransactions: List<LedgerTransaction>
+        get() = transactions.filter { tx ->
+            !tx.excludeFromSummary && passesSummaryAccountFilter(tx)
+        }
+
+    private fun signedMovement(tx: LedgerTransaction): Double {
+        return if (tx.type == TransactionType.Income) tx.amount else -tx.amount
+    }
+
+    private fun balanceBeforeDate(cutoff: LocalDate): Double {
+        val movementFromCutoffToNow = summaryBalanceTransactions
+            .filter { !it.transactionDate().isBefore(cutoff) }
+            .sumOf(::signedMovement)
+        return summaryBalanceAnchor - movementFromCutoffToNow
+    }
+
+    /**
+     * Transactions included in Summary metrics for [selectedMonth].
+     * Expenses use the calendar month; income uses [LedgerTransaction.summaryIncomeMonth] when payroll shift is on.
+     */
+    val monthTransactions: List<LedgerTransaction>
+        get() {
+            val monthStart = selectedMonth.atDay(1)
+            val monthEnd = selectedMonth.atEndOfMonth()
+            return transactions.filter { tx ->
+                if (tx.excludeFromSummary) return@filter false
+                if (!passesSummaryAccountFilter(tx)) return@filter false
+                when (tx.type) {
+                    TransactionType.Expense -> {
+                        val d = tx.transactionDate()
+                        !d.isBefore(monthStart) && !d.isAfter(monthEnd)
+                    }
+                    TransactionType.Income ->
+                        tx.summaryIncomeMonth(salaryShiftIncomeEnabled, salaryShiftWindowDays) == selectedMonth
+                }
+            }
+        }
+
+    private val uncategorizedId: Long?
+        get() = categories.firstOrNull { it.name == "Uncategorized" }?.id
+
+    private fun incomeCountsAsSalary(tx: LedgerTransaction): Boolean {
+        if (tx.type != TransactionType.Income) return false
+        val salaryId = salaryCategoryId
+        if (salaryId != null && tx.categoryId == salaryId) return true
+        if (!salaryKeywordsForUncategorized) return false
+        val uncId = uncategorizedId ?: return false
+        if (tx.categoryId != uncId) return false
+        return SalaryIncomeRules.matchesSalaryKeywords(tx.name, tx.rawMessage)
+    }
+
+    val monthSalaryIncome: Double
         get() = monthTransactions
-            .filter { it.type == TransactionType.Income }
+            .filter { it.type == TransactionType.Income && incomeCountsAsSalary(it) }
+            .sumOf { it.amount }
+
+    val monthOtherIncome: Double
+        get() = monthTransactions
+            .filter { it.type == TransactionType.Income && !incomeCountsAsSalary(it) }
             .sumOf { it.amount }
 
     val monthExpense: Double
@@ -171,52 +310,100 @@ data class FinanceUiState(
     val monthNet: Double
         get() = monthIncome - monthExpense
 
-    val trackedBalance: Double
-        get() = accounts.sumOf { it.balance } + transactions.sumOf {
-            if (it.type == TransactionType.Income) it.amount else -it.amount
+    val monthIncome: Double
+        get() = monthSalaryIncome + monthOtherIncome
+
+    /** Actual credits dated inside [selectedMonth] (calendar), for comparison when payroll shift moves income. */
+    val calendarMonthIncomeTotal: Double
+        get() {
+            val monthStart = selectedMonth.atDay(1)
+            val monthEnd = selectedMonth.atEndOfMonth()
+            return summaryBalanceTransactions
+                .filter { tx ->
+                    if (tx.type != TransactionType.Income) return@filter false
+                    val d = tx.transactionDate()
+                    !d.isBefore(monthStart) && !d.isAfter(monthEnd)
+                }
+                .sumOf { it.amount }
         }
+
+    /** Current user-entered account balance, used as the anchor for reverse reconstruction. */
+    val currentBalanceAnchor: Double
+        get() = summaryBalanceAnchor
+
+    /** Cash balance before any transaction dated in [selectedMonth] (calendar), reconstructed from current balance. */
+    val balanceAtStartOfSelectedMonth: Double
+        get() = balanceBeforeDate(selectedMonth.atDay(1))
+
+    /** Cash balance after all transactions through the last day of [selectedMonth], reconstructed from current balance. */
+    val balanceAtEndOfSelectedMonth: Double
+        get() = balanceBeforeDate(selectedMonth.plusMonths(1).atDay(1))
+
+    /** Actual calendar cashflow for the selected month. This should explain opening to closing balance. */
+    val calendarMonthNet: Double
+        get() = calendarMonthIncomeTotal - monthExpense
+
+    /** Difference between reconstructed closing balance and calendar cashflow math; non-zero means missing/excluded data. */
+    val selectedMonthReconciliationGap: Double
+        get() = balanceAtEndOfSelectedMonth - (balanceAtStartOfSelectedMonth + calendarMonthNet)
+
+    val trackedBalance: Double
+        get() = accounts.sumOf { it.balance }
 
     val activeBudgets: List<BudgetPlan>
         get() = budgets.filter { it.month == selectedMonth }
 
+    val todayTransactions: List<LedgerTransaction>
+        get() = transactions.filter { it.transactionDate() == java.time.LocalDate.now() }
+
+    val todayDetectedDrafts: List<DetectedTransactionDraft>
+        get() = detectedDrafts.filter { it.transactionDate() == java.time.LocalDate.now() }
+
+    val activityTransactions: List<LedgerTransaction>
+        get() = transactions.filter {
+            val date = it.transactionDate()
+            !date.isBefore(activityStartDate) && !date.isAfter(activityEndDate)
+        }
+
     val dashboardTransactionPageCount: Int
-        get() = ((transactions.size + TRANSACTIONS_PER_PAGE - 1) / TRANSACTIONS_PER_PAGE)
+        get() = ((todayTransactions.size + TRANSACTIONS_PER_PAGE - 1) / TRANSACTIONS_PER_PAGE)
             .coerceAtLeast(1)
 
     val dashboardCurrentPage: Int
         get() = dashboardTransactionPage.coerceIn(1, dashboardTransactionPageCount)
 
     val dashboardPagedTransactions: List<LedgerTransaction>
-        get() = transactions
+        get() = todayTransactions
             .drop((dashboardCurrentPage - 1) * TRANSACTIONS_PER_PAGE)
             .take(TRANSACTIONS_PER_PAGE)
 
     val dashboardDraftPageCount: Int
-        get() = ((detectedDrafts.size + TRANSACTIONS_PER_PAGE - 1) / TRANSACTIONS_PER_PAGE)
+        get() = ((todayDetectedDrafts.size + TRANSACTIONS_PER_PAGE - 1) / TRANSACTIONS_PER_PAGE)
             .coerceAtLeast(1)
 
     val dashboardCurrentDraftPage: Int
         get() = dashboardDraftPage.coerceIn(1, dashboardDraftPageCount)
 
     val dashboardPagedDrafts: List<DetectedTransactionDraft>
-        get() = detectedDrafts
+        get() = todayDetectedDrafts
             .drop((dashboardCurrentDraftPage - 1) * TRANSACTIONS_PER_PAGE)
             .take(TRANSACTIONS_PER_PAGE)
 
     val pagedTransactions: List<LedgerTransaction>
-        get() = transactions.take((activityTransactionPage.coerceAtLeast(1)) * TRANSACTIONS_PER_PAGE)
+        get() = activityTransactions.take((activityTransactionPage.coerceAtLeast(1)) * TRANSACTIONS_PER_PAGE)
 
     val hasMoreTransactions: Boolean
-        get() = pagedTransactions.size < transactions.size
+        get() = pagedTransactions.size < activityTransactions.size
 }
 
 object DefaultCategories {
     val items = listOf(
-        CategoryItem(1, "Grocery", "grocery", Icons.Rounded.LocalGroceryStore, true),
-        CategoryItem(2, "Food", "food", Icons.Rounded.Dining, true),
-        CategoryItem(3, "Shopping", "shopping", Icons.Rounded.ShoppingBag, true),
-        CategoryItem(4, "Fuel", "fuel", Icons.Rounded.LocalGasStation, true),
-        CategoryItem(5, "Rent", "rent", Icons.Rounded.Home, true)
+        CategoryItem(0, "Uncategorized", "category", Icons.Rounded.Category, true, "#8F95A3"),
+        CategoryItem(1, "Grocery", "grocery", Icons.Rounded.LocalGroceryStore, true, "#38E68B"),
+        CategoryItem(2, "Food", "food", Icons.Rounded.Dining, true, "#FFC857"),
+        CategoryItem(3, "Shopping", "shopping", Icons.Rounded.ShoppingBag, true, "#FF4FB8"),
+        CategoryItem(4, "Fuel", "fuel", Icons.Rounded.LocalGasStation, true, "#FF8A3D"),
+        CategoryItem(5, "Rent", "rent", Icons.Rounded.Home, true, "#FF6B7A")
     )
 }
 

@@ -30,7 +30,7 @@ class TodaySmsScanner(private val context: Context) {
             .toEpochMilli()
 
         val messages = mutableListOf<ParsedTransactionMessage>()
-        val projection = arrayOf(Telephony.Sms.DATE, Telephony.Sms.BODY)
+        val projection = arrayOf(Telephony.Sms.DATE, Telephony.Sms.BODY, Telephony.Sms.ADDRESS)
         val selection = "${Telephony.Sms.DATE} >= ? AND ${Telephony.Sms.DATE} <= ?"
         val args = arrayOf(startMillis.toString(), endMillis.toString())
 
@@ -41,10 +41,14 @@ class TodaySmsScanner(private val context: Context) {
             args,
             "${Telephony.Sms.DATE} DESC"
         )?.use { cursor ->
+            val dateIndex = cursor.getColumnIndexOrThrow(Telephony.Sms.DATE)
             val bodyIndex = cursor.getColumnIndexOrThrow(Telephony.Sms.BODY)
+            val addressIndex = cursor.getColumnIndexOrThrow(Telephony.Sms.ADDRESS)
             while (cursor.moveToNext()) {
+                val timestampMillis = cursor.getLong(dateIndex)
                 val body = cursor.getString(bodyIndex)
-                TransactionMessageParser.parse(body)?.let(messages::add)
+                val sender = cursor.getString(addressIndex)
+                TransactionMessageParser.parse(body, timestampMillis, sender)?.let(messages::add)
             }
         }
 
