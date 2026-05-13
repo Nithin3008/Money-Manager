@@ -73,7 +73,8 @@ data class TransactionEntity(
     val isAutoDetected: Boolean,
     val rawMessage: String?,
     val smsBankLabel: String? = null,
-    val excludeFromSummary: Boolean = false
+    val excludeFromSummary: Boolean = false,
+    val isCreditCardTransaction: Boolean = false
 )
 
 @Entity(tableName = "budgets")
@@ -183,7 +184,7 @@ interface FinanceDao {
         BudgetEntity::class,
         DetectedDraftEntity::class
     ],
-    version = 10
+    version = 11
 )
 abstract class FinanceDatabase : RoomDatabase() {
     abstract fun dao(): FinanceDao
@@ -207,7 +208,8 @@ abstract class FinanceDatabase : RoomDatabase() {
                         Migration6To7,
                         Migration7To8,
                         Migration8To9,
-                        Migration9To10
+                        Migration9To10,
+                        Migration10To11
                     )
                     .build()
                     .also { instance = it }
@@ -290,6 +292,24 @@ abstract class FinanceDatabase : RoomDatabase() {
         private val Migration9To10 = object : Migration(9, 10) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE user_settings ADD COLUMN defaultAccountId INTEGER")
+            }
+        }
+
+        private val Migration10To11 = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE transactions ADD COLUMN isCreditCardTransaction INTEGER NOT NULL DEFAULT 0"
+                )
+                db.execSQL(
+                    """
+                    UPDATE transactions
+                    SET isCreditCardTransaction = 1,
+                        excludeFromSummary = 1
+                    WHERE lower(COALESCE(rawMessage, '')) LIKE '%spent%card%'
+                       OR lower(COALESCE(rawMessage, '')) LIKE '%bank card%'
+                       OR lower(COALESCE(rawMessage, '')) LIKE '%credit card%debited%for upi%'
+                    """.trimIndent()
+                )
             }
         }
     }
@@ -423,6 +443,12 @@ class FinanceRepository(private val dao: FinanceDao) {
                 dao.deleteTransaction(tx.id)
             }
         }
+        dao.getDrafts().forEach { entity ->
+            val draft = entity.toModel()
+            if (SmsTransactionNormalizer.isNonLedgerTransactionArtifact(draft.rawMessage, draft.type)) {
+                dao.deleteDraft(draft.id)
+            }
+        }
     }
 
     suspend fun exportData(): String {
@@ -509,7 +535,8 @@ private fun TransactionEntity.toModel() = LedgerTransaction(
     isAutoDetected = isAutoDetected,
     rawMessage = rawMessage,
     smsBankLabel = smsBankLabel,
-    excludeFromSummary = excludeFromSummary
+    excludeFromSummary = excludeFromSummary,
+    isCreditCardTransaction = isCreditCardTransaction
 )
 
 private fun LedgerTransaction.toEntity(id: Long = this.id) = TransactionEntity(
@@ -523,7 +550,8 @@ private fun LedgerTransaction.toEntity(id: Long = this.id) = TransactionEntity(
     isAutoDetected = isAutoDetected,
     rawMessage = rawMessage,
     smsBankLabel = smsBankLabel,
-    excludeFromSummary = excludeFromSummary
+    excludeFromSummary = excludeFromSummary,
+    isCreditCardTransaction = isCreditCardTransaction
 )
 
 private fun BudgetEntity.toModel() = BudgetPlan(

@@ -45,12 +45,20 @@ object SmsTransactionNormalizer {
     }
 
     fun isNonLedgerTransactionArtifact(rawMessage: String?, type: TransactionType): Boolean {
-        return isCreditCardRepaymentArtifact(rawMessage, type) || isCreditCardDueReminder(rawMessage)
+        return isCreditCardRepaymentArtifact(rawMessage, type) ||
+            isCreditCardSettlementArtifact(rawMessage) ||
+            isCreditCardStatementArtifact(rawMessage) ||
+            isCreditCardDueReminder(rawMessage)
     }
 
     fun isCreditCardRepaymentArtifact(rawMessage: String?, type: TransactionType): Boolean {
         if (type != TransactionType.Income) return false
+        return isCreditCardSettlementArtifact(rawMessage)
+    }
+
+    fun isCreditCardSettlementArtifact(rawMessage: String?): Boolean {
         val raw = rawMessage?.lowercase().orEmpty()
+        if (isCreditCardSpend(raw)) return false
         val hasCard = listOf(
             "credit card",
             "cardmember",
@@ -63,9 +71,11 @@ object SmsTransactionNormalizer {
             "statement"
         ).any { it in raw }
         val hasPayment = listOf(
+            "payment made",
             "payment received",
             "payment of",
             "bill payment",
+            "bill paid",
             "thank you for payment",
             "received towards",
             "credited towards",
@@ -78,6 +88,44 @@ object SmsTransactionNormalizer {
             "outstanding"
         ).any { it in raw }
         return hasCard && hasPayment
+    }
+
+    fun isCreditCardStatementArtifact(rawMessage: String?): Boolean {
+        val raw = rawMessage?.lowercase().orEmpty()
+        if (raw.isBlank()) return false
+        if (isCreditCardSpend(raw)) return false
+        val hasCard = listOf(
+            "credit card",
+            "cardmember",
+            "card ending",
+            "card no",
+            "cc "
+        ).any { it in raw }
+        val hasStatement = listOf(
+            "statement generated",
+            "statement is generated",
+            "statement has been generated",
+            "statement is sent",
+            "statement sent",
+            "statement ready",
+            "statement for",
+            "monthly statement",
+            "card statement",
+            "bill generated",
+            "bill is generated",
+            "bill has been generated",
+            "bill statement",
+            "total amount due",
+            "minimum amount due",
+            "amount due",
+            "amt due",
+            "minimum of",
+            "outstanding",
+            "due date",
+            "pay by",
+            "pay before"
+        ).any { it in raw }
+        return hasCard && hasStatement
     }
 
     fun isCreditCardDueReminder(rawMessage: String?): Boolean {
@@ -122,6 +170,32 @@ object SmsTransactionNormalizer {
                 it.contains("card ending")
         }
         return hasCc && (a.type != b.type)
+    }
+
+    fun isCreditCardSpend(rawMessage: String?): Boolean {
+        val raw = rawMessage?.lowercase().orEmpty()
+        val hasCard = listOf(
+            "credit card",
+            "bank card",
+            "hdfc bank card",
+            "icici bank card",
+            "card xx",
+            "card "
+        ).any { it in raw }
+        if (!hasCard) return false
+        val hasSpendVerb = listOf(
+            "spent",
+            "purchase",
+            "used at",
+            "transaction at",
+            "txn at",
+            "transaction done",
+            "has been made",
+            "made at"
+        ).any { it in raw }
+        val hasCardDebitPurchase = Regex("""(?i)\bcredit card\b.*\bdebited\b.*\bfor\s+(?:upi|[a-z0-9*_-]+)""")
+            .containsMatchIn(raw)
+        return hasSpendVerb || hasCardDebitPurchase
     }
 
     private fun looksLikeInternalTransfer(a: ParsedTransactionMessage, b: ParsedTransactionMessage): Boolean {

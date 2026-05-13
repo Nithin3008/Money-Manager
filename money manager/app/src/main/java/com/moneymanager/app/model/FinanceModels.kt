@@ -147,7 +147,8 @@ data class LedgerTransaction(
     val isAutoDetected: Boolean = false,
     val rawMessage: String? = null,
     val smsBankLabel: String? = null,
-    val excludeFromSummary: Boolean = false
+    val excludeFromSummary: Boolean = false,
+    val isCreditCardTransaction: Boolean = false
 )
 
 data class BudgetPlan(
@@ -338,6 +339,12 @@ data class FinanceUiState(
                 }
                 .sumOf { it.amount }
         }
+
+    val selectedMonthOpeningBalance: Double
+        get() = balanceAtStartOfSelectedMonth
+
+    val selectedMonthSalaryIncome: Double
+        get() = monthSalaryIncome
 
     /** Current user-entered account balance, used as the anchor for reverse reconstruction. */
     val currentBalanceAnchor: Double

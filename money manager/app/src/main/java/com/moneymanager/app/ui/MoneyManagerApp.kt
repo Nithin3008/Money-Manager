@@ -313,7 +313,8 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
                         onCategoryColorSelected = viewModel::updateCategoryColor,
                         onDeleteAllData = viewModel::deleteAllSavedData,
                         onExportData = { exportLauncher.launch("MoneyManager_Backup_${LocalDate.now()}.json") },
-                        onImportData = { importLauncher.launch(arrayOf("application/json")) }
+                        onImportData = { importLauncher.launch(arrayOf("application/json")) },
+                        onExportSmsDebug = viewModel::exportPreviousMonthSmsDebug
                     )
                 }
             }
@@ -397,7 +398,7 @@ private fun InitialLoadingScreen() {
 private fun androidx.compose.foundation.lazy.LazyListScope.dashboardContent(
     state: FinanceUiState,
     onOpenSummary: (ScreenTab) -> Unit,
-    onAcceptDraft: (Long, Long) -> Unit,
+    onAcceptDraft: (Long, Long, TransactionType) -> Unit,
     onIgnoreDraft: (Long) -> Unit,
     onDeleteTransaction: (Long) -> Unit,
     onEditTransaction: (Long) -> Unit,
@@ -599,7 +600,8 @@ private fun androidx.compose.foundation.lazy.LazyListScope.settingsContent(
     onCategoryColorSelected: (Long, String) -> Unit,
     onDeleteAllData: () -> Unit,
     onExportData: () -> Unit,
-    onImportData: () -> Unit
+    onImportData: () -> Unit,
+    onExportSmsDebug: () -> Unit
 ) {
     item {
         ProfileHeader(state)
@@ -674,7 +676,12 @@ private fun androidx.compose.foundation.lazy.LazyListScope.settingsContent(
         }
     }
     item {
-        BackupRestorePanel(onExport = onExportData, onImport = onImportData)
+        BackupRestorePanel(
+            statusMessage = state.scanStatusMessage,
+            onExport = onExportData,
+            onImport = onImportData,
+            onExportSmsDebug = onExportSmsDebug
+        )
     }
     item {
         DeleteDataPanel(onDeleteAllData = onDeleteAllData)
@@ -682,7 +689,12 @@ private fun androidx.compose.foundation.lazy.LazyListScope.settingsContent(
 }
 
 @Composable
-private fun BackupRestorePanel(onExport: () -> Unit, onImport: () -> Unit) {
+private fun BackupRestorePanel(
+    statusMessage: String,
+    onExport: () -> Unit,
+    onImport: () -> Unit,
+    onExportSmsDebug: () -> Unit
+) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         LabelText("BACKUP & RESTORE")
         ElevatedPanel {
@@ -716,6 +728,30 @@ private fun BackupRestorePanel(onExport: () -> Unit, onImport: () -> Unit) {
                     ) {
                         Text("Import", fontWeight = FontWeight.Bold)
                     }
+                }
+                HorizontalDivider(color = appDividerColor())
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconTile(Icons.Rounded.Sms, WarningAmber)
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Parser SMS Debug", color = TextPrimary, style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            "Export likely finance SMS from the previous month for parser tuning.",
+                            color = TextDim,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                }
+                OutlinedButton(
+                    onClick = onExportSmsDebug,
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, WarningAmber)
+                ) {
+                    Text("Export Previous Month SMS", color = WarningAmber, fontWeight = FontWeight.Bold)
+                }
+                if (statusMessage.contains("export", ignoreCase = true)) {
+                    Text(statusMessage, color = TextDim, style = MaterialTheme.typography.bodySmall)
                 }
             }
         }
@@ -1198,7 +1234,19 @@ private fun TransactionDetailSheet(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(transaction.name, color = TextPrimary, style = MaterialTheme.typography.titleLarge)
-                    Text("$dateLabel | ${state.money(transaction.amount)}", color = TextMuted, style = MaterialTheme.typography.bodyMedium)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("$dateLabel | ${state.money(transaction.amount)}", color = TextMuted, style = MaterialTheme.typography.bodyMedium)
+                        if (transaction.isCreditCardTransaction) {
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                "CC",
+                                color = OtherIncomeGold,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1
+                            )
+                        }
+                    }
                 }
                 Text(signedAmount(transaction.amount, type, state.currency), color = type.amountColor(), style = MaterialTheme.typography.titleMedium)
             }
@@ -1519,10 +1567,11 @@ private fun SheetContent(title: String, content: @Composable ColumnScope.() -> U
 private fun DetectedDraftRow(
     state: FinanceUiState,
     draft: DetectedTransactionDraft,
-    onAccept: (Long, Long) -> Unit,
+    onAccept: (Long, Long, TransactionType) -> Unit,
     onIgnore: (Long) -> Unit
 ) {
     var categoryId by remember { mutableStateOf(draft.suggestedCategoryId ?: state.categories.first().id) }
+    var type by remember { mutableStateOf(draft.type) }
     val dateLabel = draft.transactionDate().format(DateTimeFormatter.ofPattern("MMM d, yyyy"))
 
     ElevatedPanel {
@@ -1532,17 +1581,23 @@ private fun DetectedDraftRow(
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     Text(draft.bankName, color = TextPrimary, style = MaterialTheme.typography.titleMedium)
-                    Text("${draft.type.bankVerb()} | $dateLabel", color = TextDim, style = MaterialTheme.typography.bodyMedium)
+                    Text("${type.bankVerb()} | $dateLabel", color = TextDim, style = MaterialTheme.typography.bodyMedium)
                 }
-                Text(draft.signedAmount(state.currency), color = draft.type.amountColor(), style = MaterialTheme.typography.titleLarge)
+                Text(signedAmount(draft.amount, type, state.currency), color = type.amountColor(), style = MaterialTheme.typography.titleLarge)
             }
             Text(draft.counterparty, color = TextPrimary, style = MaterialTheme.typography.headlineMedium)
+            LabelText("TYPE")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TransactionType.entries.forEach {
+                    TransactionTypeChip(it, selected = type == it, onClick = { type = it })
+                }
+            }
             LabelText("CATEGORY")
             ChipRow {
                 state.categories.forEach { category ->
                     CategoryChoiceChip(
                         category = category,
-                        type = draft.type,
+                        type = type,
                         selected = categoryId == category.id,
                         onClick = { categoryId = category.id }
                     )
@@ -1550,7 +1605,7 @@ private fun DetectedDraftRow(
             }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Button(
-                    onClick = { onAccept(draft.id, categoryId) },
+                    onClick = { onAccept(draft.id, categoryId, type) },
                     modifier = Modifier.weight(1f),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = if (isAmoledTheme()) PrimarySoft else Color(0xFFEAF2FF),
@@ -1628,11 +1683,15 @@ private fun HeroMetricCard(label: String, value: String, helper: String) {
 
 @Composable
 private fun TodayDonutCard(state: FinanceUiState) {
-    val income = state.todayTransactions
+    val reportTransactions = state.todayTransactions.filterNot { it.excludeFromSummary }
+    val income = reportTransactions
         .filter { it.type == TransactionType.Income }
         .sumOf { it.amount }
-    val expense = state.todayTransactions
+    val expense = reportTransactions
         .filter { it.type == TransactionType.Expense }
+        .sumOf { it.amount }
+    val creditCardActivity = state.todayTransactions
+        .filter { it.isCreditCardTransaction }
         .sumOf { it.amount }
     val total = expense.coerceAtLeast(1.0)
     val expenseSweep by animateFloatAsState(
@@ -1678,11 +1737,18 @@ private fun TodayDonutCard(state: FinanceUiState) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Today Spend", color = TextPrimary, style = MaterialTheme.typography.titleLarge)
                 Text(
-                    "${state.todayTransactions.size} transaction${if (state.todayTransactions.size == 1) "" else "s"} detected today",
+                    "${reportTransactions.size} transaction${if (reportTransactions.size == 1) "" else "s"} counted today",
                     color = TextMuted,
                     style = MaterialTheme.typography.bodyMedium
                 )
                 LegendDot(LossRed, "Expense")
+                if (creditCardActivity > 0.0) {
+                    Text(
+                        "Credit card activity tracked: ${state.money(creditCardActivity)}",
+                        color = TextDim,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
                 Text(
                     "Net movement: ${state.money(income - expense)}",
                     color = if (income >= expense) PrimarySoft else LossRed,
@@ -1696,7 +1762,7 @@ private fun TodayDonutCard(state: FinanceUiState) {
 @Composable
 private fun TodayCategoryBreakdown(state: FinanceUiState) {
     val totals = state.categories.map { category ->
-        val transactions = state.todayTransactions.filter { it.categoryId == category.id }
+        val transactions = state.todayTransactions.filter { it.categoryId == category.id && !it.excludeFromSummary }
         MonthlyCategoryTotal(
             category = category,
             income = transactions.filter { it.type == TransactionType.Income }.sumOf { it.amount },
@@ -1874,9 +1940,14 @@ private fun MetricGrid(state: FinanceUiState) {
     val salary = state.monthSalaryIncome
     val other = state.monthOtherIncome
     val expense = state.monthExpense
-    val net = state.monthReportNet
-    val totalIncome = state.monthIncome
     val reportIncome = state.monthReportIncome
+    val creditCardActivity = state.transactions
+        .filter {
+            it.isCreditCardTransaction &&
+                YearMonth.from(it.transactionDate()) == state.selectedMonth &&
+                (state.activeSummaryAccountIds.isEmpty() || it.accountId in state.activeSummaryAccountIds)
+        }
+        .sumOf { it.amount }
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             ElevatedPanel(modifier = Modifier.weight(1f).height(124.dp)) {
@@ -1912,12 +1983,46 @@ private fun MetricGrid(state: FinanceUiState) {
             }
             SmallMetric("Expenses", money(expense, currency), LossRed, Modifier.weight(1f), boxHeight = 124.dp)
         }
-        SmallMetric("Net cashflow", money(net, currency), if (net >= 0) PrimarySoft else LossRed, Modifier.fillMaxWidth())
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            SmallMetric("Current balance", money(state.currentBalanceAnchor, currency), PrimarySoft, Modifier.weight(1f))
+            CreditCardActivityMetric(
+                amount = money(creditCardActivity, currency),
+                modifier = Modifier.weight(1f)
+            )
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            SmallMetric(
+                "Opening balance",
+                money(state.selectedMonthOpeningBalance, currency),
+                TextPrimary,
+                Modifier.weight(1f)
+            )
+            SmallMetric(
+                "Salary",
+                money(state.selectedMonthSalaryIncome, currency),
+                MoneyGreen,
+                Modifier.weight(1f)
+            )
+        }
         Text(
             "Income matches calendar-month deposits for the selected bank.",
             color = TextDim,
             style = MaterialTheme.typography.bodySmall
         )
+    }
+}
+
+@Composable
+private fun CreditCardActivityMetric(amount: String, modifier: Modifier) {
+    ElevatedPanel(
+        modifier = modifier
+            .height(104.dp)
+            .clickable { }
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.Center) {
+            Text("CC activity", color = TextDim, style = MaterialTheme.typography.bodyMedium)
+            Text(amount, color = OtherIncomeGold, style = MaterialTheme.typography.headlineMedium, maxLines = 1)
+        }
     }
 }
 
@@ -2467,10 +2572,21 @@ private fun TransactionRow(
                         categoryLabel,
                         color = color,
                         style = MaterialTheme.typography.labelMedium,
+                        modifier = Modifier.weight(1f, fill = false),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    Text("  ·  ", color = TextDim, style = MaterialTheme.typography.labelMedium)
+                    if (transaction.isCreditCardTransaction) {
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            "CC",
+                            color = OtherIncomeGold,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1
+                        )
+                    }
+                    Text("  |  ", color = TextDim, style = MaterialTheme.typography.labelMedium)
                     Text(
                         dateLabel,
                         color = TextMuted,
@@ -2489,7 +2605,12 @@ private fun TransactionRow(
 @Composable
 private fun BudgetRow(budget: BudgetPlan, state: FinanceUiState, onDelete: (Long) -> Unit) {
     val spent = state.transactions
-        .filter { it.type == TransactionType.Expense && it.month() == budget.month && it.categoryId in budget.categoryIds }
+        .filter {
+            it.type == TransactionType.Expense &&
+                !it.excludeFromSummary &&
+                it.month() == budget.month &&
+                it.categoryId in budget.categoryIds
+        }
         .sumOf { it.amount }
     val progress = (spent / budget.limitAmount).toFloat().coerceIn(0f, 1f)
     val over = spent > budget.limitAmount
@@ -2585,14 +2706,16 @@ private fun DailyExpenseBarGraph(state: FinanceUiState) {
     val selectedMonth = state.selectedMonth
     val today = LocalDate.now()
     val lastDay = if (selectedMonth == YearMonth.now()) today.dayOfMonth else selectedMonth.lengthOfMonth()
+    val firstVisibleDay = (lastDay - 6).coerceAtLeast(1)
     val scopedExpenses = state.monthExpenseTransactions
-    val daySegments = remember(scopedExpenses, state.categories, selectedMonth, lastDay) {
+    val daySegments = remember(scopedExpenses, state.categories, selectedMonth, firstVisibleDay, lastDay) {
         val categoriesById = state.categories.associateBy { it.id }
         val grouped = scopedExpenses
             .asSequence()
+            .filter { it.transactionDate().dayOfMonth in firstVisibleDay..lastDay }
             .groupBy { it.transactionDate().dayOfMonth to it.categoryId }
             .mapValues { entry -> entry.value.sumOf { it.amount } }
-        (1..lastDay).map { day ->
+        (firstVisibleDay..lastDay).map { day ->
             val segments = grouped
                 .filterKeys { it.first == day }
                 .mapNotNull { (key, amount) ->
@@ -2605,7 +2728,7 @@ private fun DailyExpenseBarGraph(state: FinanceUiState) {
 
     ElevatedPanel {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            SectionHeader("Daily Expenses", selectedMonth.shortLabel())
+            SectionHeader("Daily Expenses", "Last 7 days")
             if (daySegments.all { it.second.isEmpty() }) {
                 EmptyPanel("No daily expenses for this month.")
             } else {

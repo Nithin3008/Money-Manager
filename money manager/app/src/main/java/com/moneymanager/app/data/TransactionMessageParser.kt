@@ -10,7 +10,9 @@ data class ParsedTransactionMessage(
     val counterparty: String,
     val rawMessage: String,
     val transactionTimestampMillis: Long = System.currentTimeMillis(),
-    val accountHint: String? = null
+    val accountHint: String? = null,
+    val requiresUserReview: Boolean = false,
+    val isCreditCardTransaction: Boolean = false
 )
 
 object TransactionMessageParser {
@@ -42,6 +44,15 @@ object TransactionMessageParser {
     private val merchantToRegex = Regex(
         """(?i)(?:to|at|for|towards)\s+([a-z0-9 .&_-]{3,40})"""
     )
+    private val cardSpentOnMerchantRegex = Regex(
+        """(?i)\bspent\s+using\s+.+?\bon\s+\d{1,2}-[a-z]{3}-\d{2,4}\s+on\s+([a-z0-9 .&*_-]{3,40})"""
+    )
+    private val cardSpentAtMerchantRegex = Regex(
+        """(?i)\bspent\s+(?:rs\.?|r\.|inr|rupees?|â‚¹)\s*[\d,]+(?:\.\d{1,2})?\s+on\s+.+?\s+at\s+([a-z0-9 .&*_-]{3,40})"""
+    )
+    private val cardUpiMerchantRegex = Regex(
+        """(?i)\bcredit card\b.+?\bfor\s+upi-[0-9]+-([a-z0-9 .&*_-]{2,40})"""
+    )
 
     fun parse(
         message: String,
@@ -50,6 +61,8 @@ object TransactionMessageParser {
     ): ParsedTransactionMessage? {
         val normalized = message.replace('\n', ' ').trim()
         if (SmsTransactionNormalizer.isCreditCardDueReminder(normalized)) return null
+        if (SmsTransactionNormalizer.isCreditCardSettlementArtifact(normalized)) return null
+        if (SmsTransactionNormalizer.isCreditCardStatementArtifact(normalized)) return null
         if (!looksLikeBankTransaction(normalized)) return null
 
         val amount = amountRegex.find(normalized)
@@ -58,18 +71,10 @@ object TransactionMessageParser {
             ?.toDoubleOrNull()
             ?: return null
 
-        val lower = normalized.lowercase()
-
-        // Prefer direct debit/credit phrases, then fall back to the first keyword occurrence.
-        val type = when {
-            lower.contains("debited for rs") -> TransactionType.Expense
-            lower.contains("credited for rs") -> TransactionType.Income
-            else -> {
-                val debitIndex = debitWords.map { lower.indexOf(it) }.filter { it >= 0 }.minOrNull() ?: Int.MAX_VALUE
-                val creditIndex = creditWords.map { lower.indexOf(it) }.filter { it >= 0 }.minOrNull() ?: Int.MAX_VALUE
-                if (creditIndex < debitIndex) TransactionType.Income else TransactionType.Expense
-            }
-        }
+        val detectedType = detectTransactionType(normalized)
+        val requiresUserReview = detectedType == null
+        val type = detectedType ?: TransactionType.Expense
+        val isCreditCardTransaction = SmsTransactionNormalizer.isCreditCardSpend(normalized)
 
         val senderLabel = sender?.let(::bankNameFromSender)
         val baseBankName = bankRegex.find(normalized)
@@ -85,7 +90,15 @@ object TransactionMessageParser {
 
         // Try the semicolon pattern first, then fall back to to/at/for.
         var counterparty = (
-                merchantSemicolonRegex.find(normalized)?.groupValues?.getOrNull(1)
+                if (isIciciCreditCardBillDebit(normalized)) {
+                    "Credit Card Bill"
+                } else {
+                    null
+                }
+                    ?: cardSpentOnMerchantRegex.find(normalized)?.groupValues?.getOrNull(1)
+                    ?: cardSpentAtMerchantRegex.find(normalized)?.groupValues?.getOrNull(1)
+                    ?: cardUpiMerchantRegex.find(normalized)?.groupValues?.getOrNull(1)
+                    ?: merchantSemicolonRegex.find(normalized)?.groupValues?.getOrNull(1)
                     ?: merchantToRegex.find(normalized)?.groupValues?.getOrNull(1)
                         ?.substringBefore(" on ")
                         ?.substringBefore(" ref")
@@ -108,17 +121,58 @@ object TransactionMessageParser {
             counterparty = counterparty.replaceFirstChar { it.uppercase() },
             rawMessage = message,
             transactionTimestampMillis = transactionTimestampMillis,
-            accountHint = accountHint
+            accountHint = accountHint,
+            requiresUserReview = requiresUserReview,
+            isCreditCardTransaction = isCreditCardTransaction
         )
     }
 
-    private val debitWords = listOf("debited", "debit", "spent", "paid", "withdrawn", "sent")
-    private val creditWords = listOf("credited", "credit", "received", "deposited", "neft", "rtgs")
+    private val debitActionRegexes = listOf(
+        Regex("""(?i)\bdebited\b(?:\s+(?:by|for|from|with))?\s*(?:rs\.?|r\.|inr|rupees?|â‚¹)?"""),
+        Regex("""(?i)\bdebit\b\s+(?:of\s+)?(?:rs\.?|r\.|inr|rupees?|â‚¹)\s*[\d,]+(?:\.\d{1,2})?"""),
+        Regex("""(?i)\b(?:spent|paid|withdrawn|sent)\b(?:\s+(?:by|for|from|to|with))?\s*(?:rs\.?|r\.|inr|rupees?|â‚¹)?"""),
+        Regex("""(?i)(?:rs\.?|r\.|inr|rupees?|â‚¹)\s*[\d,]+(?:\.\d{1,2})?\s+(?:has\s+been\s+)?(?:debited|spent|paid|withdrawn|sent)\b""")
+    )
+    private val creditActionRegexes = listOf(
+        Regex("""(?i)\bcredited\b(?:\s+(?:by|for|to|into|in|with))?\s*(?:rs\.?|r\.|inr|rupees?|â‚¹)?"""),
+        Regex("""(?i)\bcredit\b\s+(?:of\s+)?(?:rs\.?|r\.|inr|rupees?|â‚¹)\s*[\d,]+(?:\.\d{1,2})?"""),
+        Regex("""(?i)\b(?:received|deposited)\b(?:\s+(?:by|for|from|to|into|in|with))?\s*(?:rs\.?|r\.|inr|rupees?|â‚¹)?"""),
+        Regex("""(?i)(?:rs\.?|r\.|inr|rupees?|â‚¹)\s*[\d,]+(?:\.\d{1,2})?\s+(?:has\s+been\s+)?(?:credited|received|deposited)\b""")
+    )
+
+    private fun detectTransactionType(message: String): TransactionType? {
+        val debitIndex = debitActionRegexes
+            .mapNotNull { it.find(message)?.range?.first }
+            .minOrNull()
+        val creditIndex = creditActionRegexes
+            .mapNotNull { it.find(message)?.range?.first }
+            .minOrNull()
+
+        return when {
+            debitIndex == null && creditIndex == null -> inferTypeFromFallbackKeywords(message)
+            debitIndex == null -> TransactionType.Income
+            creditIndex == null -> TransactionType.Expense
+            debitIndex < creditIndex -> TransactionType.Expense
+            else -> TransactionType.Income
+        }
+    }
+
+    private fun inferTypeFromFallbackKeywords(message: String): TransactionType? {
+        val lower = message.lowercase()
+        return when {
+            listOf("neft", "rtgs", "imps").any { it in lower } &&
+                listOf("received", "deposit", "inward").any { it in lower } -> TransactionType.Income
+            listOf("neft", "rtgs", "imps").any { it in lower } &&
+                listOf("sent", "outward", "transfer to").any { it in lower } -> TransactionType.Expense
+            "refund" in lower || "cashback" in lower -> TransactionType.Income
+            else -> null
+        }
+    }
 
     private fun looksLikeBankTransaction(message: String): Boolean {
         val lower = message.lowercase()
         val hasMoney = amountRegex.containsMatchIn(message)
-        val hasBankWord = listOf("neft", "rtgs", "debited", "credited", "debit", "credit", "upi", "a/c", "account")
+        val hasBankWord = listOf("neft", "rtgs", "debited", "credited", "debit", "credit", "spent", "upi", "a/c", "account", "bank", "card")
             .any { it in lower }
         return hasMoney && hasBankWord
     }
@@ -132,6 +186,11 @@ object TransactionMessageParser {
     private fun looksLikeCreditCard(message: String): Boolean {
         val lower = message.lowercase()
         return listOf("credit card", "card bill", "cc payment", "card ending", "card no").any { it in lower }
+    }
+
+    private fun isIciciCreditCardBillDebit(message: String): Boolean {
+        val lower = message.lowercase()
+        return "infobil*inft" in lower || "info bil*inft" in lower
     }
 
     private fun bankNameFromSender(sender: String): String? {
