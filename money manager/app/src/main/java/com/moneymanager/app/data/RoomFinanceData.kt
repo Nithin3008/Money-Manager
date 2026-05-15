@@ -417,6 +417,7 @@ class FinanceRepository(private val dao: FinanceDao) {
     }
 
     suspend fun saveDraft(draft: DetectedTransactionDraft): Long {
+        if (draft.amount <= 0.0) return 0L
         return dao.saveDraft(draft.toEntity(id = 0))
     }
 
@@ -439,13 +440,13 @@ class FinanceRepository(private val dao: FinanceDao) {
     suspend fun cleanupCreditCardRepaymentArtifacts() {
         dao.getTransactions().forEach { entity ->
             val tx = entity.toModel()
-            if (SmsTransactionNormalizer.isNonLedgerTransactionArtifact(tx.rawMessage, tx.type)) {
+            if (tx.amount <= 0.0 || SmsTransactionNormalizer.isNonLedgerTransactionArtifact(tx.rawMessage, tx.type)) {
                 dao.deleteTransaction(tx.id)
             }
         }
         dao.getDrafts().forEach { entity ->
             val draft = entity.toModel()
-            if (SmsTransactionNormalizer.isNonLedgerTransactionArtifact(draft.rawMessage, draft.type)) {
+            if (draft.amount <= 0.0 || SmsTransactionNormalizer.isNonLedgerTransactionArtifact(draft.rawMessage, draft.type)) {
                 dao.deleteDraft(draft.id)
             }
         }
