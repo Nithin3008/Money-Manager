@@ -41,7 +41,7 @@ fun MoneyManagerTheme(
     content: @Composable () -> Unit
 ) {
     val dark = true
-    applyThemeTokens(dark, UiAccent.Sky, UiSurface.Midnight)
+    applyThemeTokens(dark, uiAccent, UiSurface.Midnight)
     val colorScheme = expressiveColorScheme(dark)
 
     MaterialTheme(

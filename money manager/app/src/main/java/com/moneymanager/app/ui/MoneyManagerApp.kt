@@ -447,7 +447,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.settingsContent(
     onExportSmsDebug: () -> Unit
 ) {
     item {
-        LargeTitle("Profile", "Manage your money setup and Fintrack data.")
+        LargeTitle("Profile", "Manage your Money Manager setup and data.")
     }
     item {
         ProfileHeader(state)
@@ -465,6 +465,13 @@ private fun androidx.compose.foundation.lazy.LazyListScope.settingsContent(
         CurrencySelector(
             selected = state.currency,
             onSelected = onCurrencySelected
+        )
+    }
+    item {
+        UiAccentSelector(
+            selected = state.uiAccent,
+            darkMode = true,
+            onSelected = onUiAccentSelected
         )
     }
     item {
@@ -832,7 +839,7 @@ private fun FintrackAuthHero() {
         Row(verticalAlignment = Alignment.CenterVertically) {
             FintrackLogoMark(size = 34.dp)
             Spacer(Modifier.width(8.dp))
-            Text("fintrack", color = PrimaryBlue, style = MaterialTheme.typography.headlineMedium)
+            Text("Money Manager", color = PrimaryBlue, style = MaterialTheme.typography.headlineMedium)
         }
         Spacer(Modifier.height(180.dp))
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -842,7 +849,7 @@ private fun FintrackAuthHero() {
                 style = MaterialTheme.typography.headlineMedium
             )
             Text(
-                "Welcome to Fintrack! Your personal financial companion. Take control of your money effortlessly.",
+                "Welcome to Money Manager! Your personal financial companion. Take control of your money effortlessly.",
                 color = TextPrimary,
                 style = MaterialTheme.typography.bodyLarge
             )
@@ -1902,7 +1909,7 @@ private fun BrandHeader(userName: String) {
     Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         FintrackLogoMark(size = 30.dp)
         Spacer(Modifier.width(8.dp))
-        Text("fintrack", style = MaterialTheme.typography.headlineMedium, color = PrimarySoft)
+        Text("Money Manager", style = MaterialTheme.typography.headlineMedium, color = PrimarySoft)
         Spacer(Modifier.weight(1f))
         Box(Modifier.size(42.dp).clip(RoundedCornerShape(12.dp)).background(Navy800), contentAlignment = Alignment.Center) {
             Text(userName.take(1).uppercase(), color = PrimarySoft, fontWeight = FontWeight.Bold)
@@ -2727,13 +2734,19 @@ private fun UiAccentSelector(
     darkMode: Boolean,
     onSelected: (UiAccent) -> Unit
 ) {
+    val accentOptions = remember { UiAccent.entries.take(10) }
+
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        LabelText("UI ACCENT")
+        LabelText("APP COLOR")
         ElevatedPanel {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("Buttons, toggles, tabs and highlights", color = TextMuted, style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    "Choose the highlight color for buttons, cards, and navigation.",
+                    color = TextMuted,
+                    style = MaterialTheme.typography.bodyMedium
+                )
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    items(UiAccent.entries, key = { it.name }) { accent ->
+                    items(accentOptions, key = { it.name }) { accent ->
                         val color = colorFromHex(if (darkMode) accent.darkHex else accent.lightHex)
                         val isSelected = selected == accent
                         val scale by animateFloatAsState(
