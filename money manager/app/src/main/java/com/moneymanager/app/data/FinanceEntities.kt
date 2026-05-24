@@ -50,7 +50,8 @@ data class TransactionEntity(
     val rawMessage: String?,
     val smsBankLabel: String? = null,
     val excludeFromSummary: Boolean = false,
-    val isCreditCardTransaction: Boolean = false
+    val isCreditCardTransaction: Boolean = false,
+    val description: String? = null
 )
 
 @Entity(tableName = "budgets")

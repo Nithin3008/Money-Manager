@@ -12,25 +12,25 @@ import com.moneymanager.app.model.ThemeMode
 import com.moneymanager.app.model.UiAccent
 import com.moneymanager.app.model.UiSurface
 
-var Navy950 = Color(0xFF000000)
-var Navy900 = Color(0xFF111111)
-var Navy850 = Color(0xFF1A1A1A)
-var Navy800 = Color(0xFF242424)
-var TextPrimary = Color(0xFFF5F5F5)
-var TextMuted = Color(0xFFC9CDD6)
-var TextDim = Color(0xFF8F95A3)
-var PrimaryBlue = Color(0xFF7C8CFF)
-var PrimarySoft = Color(0xFFAFD2FF)
-var MoneyGreen = Color(0xFF38E68B)
+var Navy950 = Color(0xFF141414)
+var Navy900 = Color(0xFF1A1A1A)
+var Navy850 = Color(0xFF202020)
+var Navy800 = Color(0xFF2A2A2A)
+var TextPrimary = Color(0xFFF1F1F1)
+var TextMuted = Color(0xFFC9C9C9)
+var TextDim = Color(0xFF8C8C8C)
+var PrimaryBlue = Color(0xFFB4F077)
+var PrimarySoft = Color(0xFFB4F077)
+var MoneyGreen = Color(0xFFB4F077)
 var WarningAmber = Color(0xFFFFC857)
-var LossRed = Color(0xFFFF6B7A)
+var LossRed = Color(0xFFFF6B4A)
 
 private val ExpressiveShapes = Shapes(
-    extraSmall = RoundedCornerShape(12.dp),
-    small = RoundedCornerShape(16.dp),
-    medium = RoundedCornerShape(22.dp),
-    large = RoundedCornerShape(28.dp),
-    extraLarge = RoundedCornerShape(36.dp)
+    extraSmall = RoundedCornerShape(8.dp),
+    small = RoundedCornerShape(12.dp),
+    medium = RoundedCornerShape(16.dp),
+    large = RoundedCornerShape(20.dp),
+    extraLarge = RoundedCornerShape(24.dp)
 )
 
 @Composable
@@ -40,8 +40,8 @@ fun MoneyManagerTheme(
     uiSurface: UiSurface = UiSurface.Midnight,
     content: @Composable () -> Unit
 ) {
-    val dark = themeMode == ThemeMode.Dark
-    applyThemeTokens(dark, uiAccent, uiSurface)
+    val dark = true
+    applyThemeTokens(dark, UiAccent.Sky, UiSurface.Midnight)
     val colorScheme = expressiveColorScheme(dark)
 
     MaterialTheme(
@@ -61,12 +61,12 @@ private fun expressiveColorScheme(dark: Boolean) = if (dark) {
         surfaceContainer = Navy850,
         surfaceContainerHigh = Navy800,
         surfaceContainerHighest = Navy800,
-        primary = PrimarySoft,
-        onPrimary = Color(0xFF10295C),
+        primary = PrimaryBlue,
+        onPrimary = Color(0xFF141414),
         primaryContainer = PrimaryBlue,
-        onPrimaryContainer = Color(0xFFEAF1FF),
+        onPrimaryContainer = Color(0xFF141414),
         secondary = MoneyGreen,
-        onSecondary = Color(0xFF003823),
+        onSecondary = Color(0xFF141414),
         tertiary = WarningAmber,
         error = LossRed,
         onBackground = TextPrimary,
@@ -86,8 +86,8 @@ private fun expressiveColorScheme(dark: Boolean) = if (dark) {
         surfaceContainerHighest = Navy800,
         primary = PrimaryBlue,
         onPrimary = Color.White,
-        primaryContainer = Color(0xFFDDE8FF),
-        onPrimaryContainer = Color(0xFF001B3F),
+        primaryContainer = Color(0xFFE6FFC8),
+        onPrimaryContainer = Color(0xFF141414),
         secondary = MoneyGreen,
         onSecondary = Color.White,
         tertiary = WarningAmber,
@@ -102,31 +102,31 @@ private fun expressiveColorScheme(dark: Boolean) = if (dark) {
 
 private fun applyThemeTokens(dark: Boolean, uiAccent: UiAccent, uiSurface: UiSurface) {
     if (dark) {
-        Navy950 = uiSurface.darkBackgroundHex.toColorOr(Color(0xFF0C0F17))
-        Navy900 = uiSurface.darkCardHex.toColorOr(Color(0xFF111620))
-        Navy850 = uiSurface.darkPanelHex.toColorOr(Color(0xFF171D2A))
-        Navy800 = uiSurface.darkChipHex.toColorOr(Color(0xFF202737))
-        TextPrimary = Color(0xFFF8FAFF)
-        TextMuted = Color(0xFFC7CEDC)
-        TextDim = Color(0xFF94A0B4)
-        PrimaryBlue = uiAccent.darkHex.toColorOr(Color(0xFF7C9DFF))
-        PrimarySoft = uiAccent.softDarkHex.toColorOr(Color(0xFFAFC6FF))
-        MoneyGreen = Color(0xFF61E6A4)
+        Navy950 = uiSurface.darkBackgroundHex.toColorOr(Color(0xFF141414))
+        Navy900 = uiSurface.darkCardHex.toColorOr(Color(0xFF1A1A1A))
+        Navy850 = uiSurface.darkPanelHex.toColorOr(Color(0xFF202020))
+        Navy800 = uiSurface.darkChipHex.toColorOr(Color(0xFF2A2A2A))
+        TextPrimary = Color(0xFFF1F1F1)
+        TextMuted = Color(0xFFC9C9C9)
+        TextDim = Color(0xFF8C8C8C)
+        PrimaryBlue = uiAccent.darkHex.toColorOr(Color(0xFFB4F077))
+        PrimarySoft = uiAccent.softDarkHex.toColorOr(Color(0xFFB4F077))
+        MoneyGreen = Color(0xFFB4F077)
         WarningAmber = Color(0xFFFFD166)
-        LossRed = Color(0xFFFF7A8A)
+        LossRed = Color(0xFFFF6B4A)
     } else {
-        Navy950 = uiSurface.lightBackgroundHex.toColorOr(Color(0xFFF8F9FF))
+        Navy950 = uiSurface.lightBackgroundHex.toColorOr(Color(0xFFF7FAF2))
         Navy900 = uiSurface.lightCardHex.toColorOr(Color.White)
-        Navy850 = uiSurface.lightPanelHex.toColorOr(Color(0xFFF0F4FF))
-        Navy800 = uiSurface.lightChipHex.toColorOr(Color(0xFFE3EAF8))
-        TextPrimary = Color(0xFF151923)
-        TextMuted = Color(0xFF4A5568)
-        TextDim = Color(0xFF6D7688)
-        PrimaryBlue = uiAccent.lightHex.toColorOr(Color(0xFF345CA8))
-        PrimarySoft = uiAccent.softLightHex.toColorOr(Color(0xFF1F65C8))
-        MoneyGreen = Color(0xFF00875A)
+        Navy850 = uiSurface.lightPanelHex.toColorOr(Color(0xFFEFF6E8))
+        Navy800 = uiSurface.lightChipHex.toColorOr(Color(0xFFE1ECD8))
+        TextPrimary = Color(0xFF141414)
+        TextMuted = Color(0xFF515151)
+        TextDim = Color(0xFF737373)
+        PrimaryBlue = uiAccent.lightHex.toColorOr(Color(0xFF4E7D1C))
+        PrimarySoft = uiAccent.softLightHex.toColorOr(Color(0xFF4E7D1C))
+        MoneyGreen = Color(0xFF4E7D1C)
         WarningAmber = Color(0xFFC87400)
-        LossRed = Color(0xFFC43A4E)
+        LossRed = Color(0xFFD94A2B)
     }
 }
 

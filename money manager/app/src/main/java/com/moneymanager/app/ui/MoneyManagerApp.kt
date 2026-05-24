@@ -243,7 +243,7 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
                     },
                     colors = ButtonDefaults.buttonColors(
                         containerColor = PrimaryBlue,
-                        contentColor = if (fabDark) Color(0xFF001A42) else Color.White
+                    contentColor = if (fabDark) Color(0xFF141414) else Color.White
                     ),
                     shape = CircleShape,
                     contentPadding = PaddingValues(18.dp)
@@ -263,8 +263,8 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
                     .fillMaxSize()
                     .statusBarsPadding()
                     .padding(padding),
-                contentPadding = PaddingValues(start = 20.dp, top = 18.dp, end = 20.dp, bottom = 104.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                contentPadding = PaddingValues(start = 20.dp, top = 18.dp, end = 20.dp, bottom = 112.dp),
+                verticalArrangement = Arrangement.spacedBy(18.dp)
             ) {
                 item { BrandHeader(state.userName) }
                 when (tab) {
@@ -401,16 +401,15 @@ private fun androidx.compose.foundation.lazy.LazyListScope.budgetContent(
     onDeleteBudget: (Long) -> Unit
 ) {
     item {
-        HeroMetricCard(
-            label = "This Month Budgeted",
-            value = state.money(state.activeBudgets.sumOf { it.limitAmount }),
-            helper = "${state.activeBudgets.size} active budget${if (state.activeBudgets.size == 1) "" else "s"}"
-        )
+        LargeTitle("Budget", "Plan spending, protect savings, and track limits.")
+    }
+    item {
+        FintrackBudgetHero(state)
     }
     item {
         ActionPanel(
-            title = "Create Budget",
-            subtitle = "Attach one or multiple categories to one monthly limit.",
+            title = "Create budget",
+            subtitle = "Attach one or multiple categories to a monthly limit.",
             icon = Icons.Rounded.PieChart,
             action = "Create",
             onClick = { onCreateBudget(true) }
@@ -448,6 +447,9 @@ private fun androidx.compose.foundation.lazy.LazyListScope.settingsContent(
     onExportSmsDebug: () -> Unit
 ) {
     item {
+        LargeTitle("Profile", "Manage your money setup and Fintrack data.")
+    }
+    item {
         ProfileHeader(state)
     }
     item {
@@ -463,26 +465,6 @@ private fun androidx.compose.foundation.lazy.LazyListScope.settingsContent(
         CurrencySelector(
             selected = state.currency,
             onSelected = onCurrencySelected
-        )
-    }
-    item {
-        ThemeSelector(
-            selected = state.themeMode,
-            onSelected = onThemeSelected
-        )
-    }
-    item {
-        UiAccentSelector(
-            selected = state.uiAccent,
-            darkMode = state.themeMode == ThemeMode.Dark,
-            onSelected = onUiAccentSelected
-        )
-    }
-    item {
-        UiSurfaceSelector(
-            selected = state.uiSurface,
-            darkMode = state.themeMode == ThemeMode.Dark,
-            onSelected = onUiSurfaceSelected
         )
     }
     item {
@@ -603,6 +585,74 @@ private fun BackupRestorePanel(
 }
 
 @Composable
+private fun FintrackBudgetHero(state: FinanceUiState) {
+    val limit = state.activeBudgets.sumOf { it.limitAmount }
+    val spent = state.activeBudgets.sumOf { budget ->
+        state.transactions
+            .filter {
+                it.type == TransactionType.Expense &&
+                    !it.excludeFromSummary &&
+                    it.month() == budget.month &&
+                    it.categoryId in budget.categoryIds
+            }
+            .sumOf { it.amount }
+    }
+    val progress = (spent / limit.coerceAtLeast(1.0)).toFloat().coerceIn(0f, 1f)
+    ElevatedPanel {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("This month budgeted", color = TextDim, style = MaterialTheme.typography.bodyMedium)
+                    Text(state.money(limit), color = PrimaryBlue, style = MaterialTheme.typography.headlineLarge, maxLines = 1)
+                }
+                Box(
+                    modifier = Modifier
+                        .size(92.dp)
+                        .clip(CircleShape)
+                        .background(Navy800),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Canvas(Modifier.size(78.dp)) {
+                        drawArc(
+                            color = Color(0xFF303030),
+                            startAngle = -90f,
+                            sweepAngle = 360f,
+                            useCenter = false,
+                            style = Stroke(width = 11f, cap = StrokeCap.Round)
+                        )
+                        drawArc(
+                            color = PrimaryBlue,
+                            startAngle = -90f,
+                            sweepAngle = progress * 360f,
+                            useCenter = false,
+                            style = Stroke(width = 11f, cap = StrokeCap.Round)
+                        )
+                    }
+                    Text("${(progress * 100).toInt()}%", color = TextPrimary, style = MaterialTheme.typography.labelMedium)
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                FintrackMiniStat("Spent", state.money(spent), LossRed, Modifier.weight(1f))
+                FintrackMiniStat("Left", state.money((limit - spent).coerceAtLeast(0.0)), PrimaryBlue, Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+@Composable
+private fun FintrackMiniStat(label: String, value: String, color: Color, modifier: Modifier) {
+    Column(
+        modifier = modifier
+            .background(Navy800, RoundedCornerShape(12.dp))
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Text(label, color = TextDim, style = MaterialTheme.typography.labelSmall)
+        Text(value, color = color, style = MaterialTheme.typography.titleMedium, maxLines = 1)
+    }
+}
+
+@Composable
 private fun DeleteDataPanel(onDeleteAllData: () -> Unit) {
     var showConfirm by remember { mutableStateOf(false) }
 
@@ -686,22 +736,18 @@ private fun RegistrationScreen(onComplete: (String, List<Pair<String, Double>>, 
             .background(Navy950)
             .statusBarsPadding()
             .imePadding(),
-        contentPadding = PaddingValues(start = 20.dp, top = 18.dp, end = 20.dp, bottom = 180.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+        contentPadding = PaddingValues(start = 24.dp, top = 54.dp, end = 24.dp, bottom = 180.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        item { BrandHeader(name.ifBlank { "You" }) }
         item {
-            LargeTitle(
-                title = "Create Account",
-                subtitle = "Start with your name and current balance. Add each account you want tracked."
-            )
+            FintrackAuthHero()
         }
         item {
             OutlinedTextField(
                 value = name,
                 onValueChange = { name = it },
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("Full Name") },
+                label = { Text("Full name") },
                 leadingIcon = { Icon(Icons.Rounded.Person, contentDescription = null) },
                 singleLine = true,
                 colors = inputColors(),
@@ -770,8 +816,36 @@ private fun RegistrationScreen(onComplete: (String, List<Pair<String, Double>>, 
                 shape = RoundedCornerShape(12.dp),
                 colors = primaryButtonColors()
             ) {
-                Text("Start Tracking", fontWeight = FontWeight.Bold)
+                Text("Get Started", fontWeight = FontWeight.Bold)
             }
+        }
+    }
+}
+
+@Composable
+private fun FintrackAuthHero() {
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(bottom = 18.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(34.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            FintrackLogoMark(size = 34.dp)
+            Spacer(Modifier.width(8.dp))
+            Text("fintrack", color = PrimaryBlue, style = MaterialTheme.typography.headlineMedium)
+        }
+        Spacer(Modifier.height(180.dp))
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(
+                "Take Control of Your Finances",
+                color = PrimaryBlue,
+                style = MaterialTheme.typography.headlineMedium
+            )
+            Text(
+                "Welcome to Fintrack! Your personal financial companion. Take control of your money effortlessly.",
+                color = TextPrimary,
+                style = MaterialTheme.typography.bodyLarge
+            )
         }
     }
 }
@@ -932,39 +1006,51 @@ private fun AddTransactionSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = Navy900,
-        contentColor = TextPrimary
+        containerColor = Navy950,
+        contentColor = TextPrimary,
+        dragHandle = {
+            Box(
+                Modifier
+                    .padding(top = 10.dp)
+                    .size(width = 46.dp, height = 5.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(Navy800)
+            )
+        }
     ) {
-        SheetContent(title = "Add Transaction") {
-            OutlinedTextField(
-                value = name,
-                onValueChange = { name = it },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("Transaction Name") },
-                singleLine = true,
-                colors = inputColors(),
-                shape = RoundedCornerShape(12.dp)
-            )
-            OutlinedTextField(
-                value = amount,
-                onValueChange = { amount = it },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("Amount") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                singleLine = true,
-                colors = inputColors(),
-                shape = RoundedCornerShape(12.dp)
-            )
-            ChipRow {
-                AddMoneyMode.entries.forEach {
-                    AddModeChip(
-                        mode = it,
-                        selected = mode == it,
-                        enabled = it != AddMoneyMode.Transfer || state.accounts.size >= 2,
-                        onClick = { mode = it }
-                    )
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .animateContentSize(tween(260, easing = FastOutSlowInEasing))
+                .imePadding()
+                .padding(start = 20.dp, top = 8.dp, end = 20.dp, bottom = 28.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Add Transaction", color = PrimaryBlue, style = MaterialTheme.typography.headlineMedium)
+                    Text("Record a payment, income, or transfer.", color = TextMuted, style = MaterialTheme.typography.bodyMedium)
+                }
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.Rounded.Close, contentDescription = "Close", tint = TextMuted)
                 }
             }
+
+            FintrackAmountCard(
+                state = state,
+                mode = mode,
+                amount = amount,
+                parsedAmount = parsedAmount,
+                onAmountChanged = { amount = it }
+            )
+
+            FintrackModePicker(
+                selected = mode,
+                accountsAvailable = state.accounts.size,
+                onSelected = { mode = it }
+            )
+
             if (mode == AddMoneyMode.Transfer && state.accounts.size < 2) {
                 Text(
                     "Add at least two bank accounts in Settings before creating transfers.",
@@ -972,61 +1058,231 @@ private fun AddTransactionSheet(
                     style = MaterialTheme.typography.bodySmall
                 )
             }
+
+            ElevatedPanel {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Text("Details", color = TextPrimary, style = MaterialTheme.typography.titleMedium)
+                    OutlinedTextField(
+                        value = name,
+                        onValueChange = { name = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text(if (mode == AddMoneyMode.Transfer) "Transfer note" else "Transaction name") },
+                        singleLine = true,
+                        colors = inputColors(),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                }
+            }
+
             if (mode == AddMoneyMode.Transfer) {
-                LabelText("FROM ACCOUNT")
-                ChipRow {
-                    state.accounts.forEach {
-                        MoneyChip(it.name, selected = fromAccountId == it.id, onClick = {
-                            fromAccountId = it.id
-                            if (toAccountId == it.id) toAccountId = state.accounts.firstOrNull { account -> account.id != it.id }?.id
-                        })
+                ElevatedPanel {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                        LabelText("FROM ACCOUNT")
+                        ChipRow {
+                            state.accounts.forEach {
+                                MoneyChip(it.name, selected = fromAccountId == it.id, onClick = {
+                                    fromAccountId = it.id
+                                    if (toAccountId == it.id) toAccountId = state.accounts.firstOrNull { account -> account.id != it.id }?.id
+                                })
+                            }
+                        }
+                        LabelText("TO ACCOUNT")
+                        ChipRow {
+                            state.accounts.forEach {
+                                MoneyChip(it.name, selected = toAccountId == it.id, onClick = {
+                                    toAccountId = it.id
+                                    if (fromAccountId == it.id) fromAccountId = state.accounts.firstOrNull { account -> account.id != it.id }?.id
+                                })
+                            }
+                        }
+                        Text(
+                            transferBalanceText(state, fromAccountId, toAccountId, parsedAmount),
+                            color = TextDim,
+                            style = MaterialTheme.typography.bodySmall
+                        )
                     }
                 }
-                LabelText("TO ACCOUNT")
-                ChipRow {
-                    state.accounts.forEach {
-                        MoneyChip(it.name, selected = toAccountId == it.id, onClick = {
-                            toAccountId = it.id
-                            if (fromAccountId == it.id) fromAccountId = state.accounts.firstOrNull { account -> account.id != it.id }?.id
-                        })
-                    }
-                }
-                Text(
-                    transferBalanceText(state, fromAccountId, toAccountId, parsedAmount),
-                    color = TextDim,
-                    style = MaterialTheme.typography.bodySmall
-                )
             } else {
-                LabelText("CATEGORY")
-                ChipRow {
-                    state.categories.forEach {
-                        CategoryChoiceChip(it, transactionType, selected = categoryId == it.id, onClick = { categoryId = it.id })
-                    }
-                }
-                if (state.accounts.isNotEmpty()) {
-                    LabelText("BANK ACCOUNT OPTIONAL")
-                    ChipRow {
-                        MoneyChip("None", selected = accountId == null, onClick = { accountId = null })
-                        state.accounts.forEach {
-                            MoneyChip(it.name, selected = accountId == it.id, onClick = { accountId = it.id })
+                ElevatedPanel {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                        LabelText("CATEGORY")
+                        ChipRow {
+                            state.categories.forEach {
+                                CategoryChoiceChip(it, transactionType, selected = categoryId == it.id, onClick = { categoryId = it.id })
+                            }
+                        }
+                        if (state.accounts.isNotEmpty()) {
+                            LabelText("BANK ACCOUNT")
+                            ChipRow {
+                                MoneyChip("None", selected = accountId == null, onClick = { accountId = null })
+                                state.accounts.forEach {
+                                    MoneyChip(it.name, selected = accountId == it.id, onClick = { accountId = it.id })
+                                }
+                            }
                         }
                     }
                 }
             }
-            Button(
-                onClick = {
-                    if (mode == AddMoneyMode.Transfer) {
-                        onTransfer(name, parsedAmount, fromAccountId, toAccountId)
-                    } else {
-                        onAdd(name, parsedAmount, transactionType, categoryId, accountId, null, false)
-                    }
-                },
-                enabled = if (mode == AddMoneyMode.Transfer) transferReady else parsedAmount > 0.0 && name.isNotBlank(),
-                modifier = Modifier.fillMaxWidth().height(56.dp),
-                shape = RoundedCornerShape(12.dp),
-                colors = primaryButtonColors()
+
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.weight(1f).height(56.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, appBorderColor()),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = TextMuted)
+                ) {
+                    Text("Cancel")
+                }
+                Button(
+                    onClick = {
+                        if (mode == AddMoneyMode.Transfer) {
+                            onTransfer(name, parsedAmount, fromAccountId, toAccountId)
+                        } else {
+                            onAdd(name, parsedAmount, transactionType, categoryId, accountId, null, false)
+                        }
+                    },
+                    enabled = if (mode == AddMoneyMode.Transfer) transferReady else parsedAmount > 0.0 && name.isNotBlank(),
+                    modifier = Modifier.weight(1.45f).height(56.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = primaryButtonColors()
+                ) {
+                    Icon(Icons.Rounded.Check, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text(if (mode == AddMoneyMode.Transfer) "Save Transfer" else "Save", fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FintrackAmountCard(
+    state: FinanceUiState,
+    mode: AddMoneyMode,
+    amount: String,
+    parsedAmount: Double,
+    onAmountChanged: (String) -> Unit
+) {
+    val accent = when (mode) {
+        AddMoneyMode.Income -> MoneyGreen
+        AddMoneyMode.Expense -> LossRed
+        AddMoneyMode.Transfer -> PrimaryBlue
+    }
+    val signedPreview = when {
+        parsedAmount <= 0.0 -> state.money(0.0)
+        mode == AddMoneyMode.Income -> "+${state.money(parsedAmount)}"
+        mode == AddMoneyMode.Expense -> "-${state.money(parsedAmount)}"
+        else -> state.money(parsedAmount)
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(22.dp),
+        colors = CardDefaults.cardColors(containerColor = PrimaryBlue),
+        border = BorderStroke(1.dp, PrimaryBlue)
+    ) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(mode.label, color = Color(0xFF141414).copy(alpha = 0.68f), style = MaterialTheme.typography.labelMedium)
+                    Text(
+                        signedPreview,
+                        color = Color(0xFF141414),
+                        style = MaterialTheme.typography.headlineLarge,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .size(46.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color(0xFF141414)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        when (mode) {
+                            AddMoneyMode.Income -> Icons.Rounded.TrendingUp
+                            AddMoneyMode.Expense -> Icons.Rounded.Wallet
+                            AddMoneyMode.Transfer -> Icons.Rounded.AccountBalance
+                        },
+                        contentDescription = null,
+                        tint = accent
+                    )
+                }
+            }
+            OutlinedTextField(
+                value = amount,
+                onValueChange = onAmountChanged,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Amount") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                singleLine = true,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = Color(0xFF141414),
+                    unfocusedTextColor = Color(0xFF141414),
+                    focusedBorderColor = Color(0xFF141414),
+                    unfocusedBorderColor = Color(0xFF141414).copy(alpha = 0.28f),
+                    focusedContainerColor = PrimaryBlue,
+                    unfocusedContainerColor = PrimaryBlue,
+                    focusedLabelColor = Color(0xFF141414),
+                    unfocusedLabelColor = Color(0xFF141414).copy(alpha = 0.64f),
+                    cursorColor = Color(0xFF141414)
+                ),
+                shape = RoundedCornerShape(12.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun FintrackModePicker(
+    selected: AddMoneyMode,
+    accountsAvailable: Int,
+    onSelected: (AddMoneyMode) -> Unit
+) {
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        AddMoneyMode.entries.forEach { mode ->
+            val enabled = mode != AddMoneyMode.Transfer || accountsAvailable >= 2
+            val active = selected == mode
+            val accent = when (mode) {
+                AddMoneyMode.Income -> MoneyGreen
+                AddMoneyMode.Expense -> LossRed
+                AddMoneyMode.Transfer -> PrimaryBlue
+            }
+            Card(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(84.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .clickable(enabled = enabled) { onSelected(mode) },
+                shape = RoundedCornerShape(14.dp),
+                colors = CardDefaults.cardColors(containerColor = if (active) accent else Navy850),
+                border = BorderStroke(1.dp, if (active) accent else appBorderColor())
             ) {
-                Text(if (mode == AddMoneyMode.Transfer) "Add Transfer" else "Add Transaction", fontWeight = FontWeight.Bold)
+                Column(
+                    Modifier.fillMaxSize().padding(10.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Icon(
+                        when (mode) {
+                            AddMoneyMode.Income -> Icons.Rounded.TrendingUp
+                            AddMoneyMode.Expense -> Icons.Rounded.Wallet
+                            AddMoneyMode.Transfer -> Icons.Rounded.AccountBalance
+                        },
+                        contentDescription = null,
+                        tint = if (active && isAmoledTheme()) Color(0xFF141414) else if (enabled) accent else TextDim
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        mode.label,
+                        color = if (active && isAmoledTheme()) Color(0xFF141414) else if (enabled) TextPrimary else TextDim,
+                        style = MaterialTheme.typography.labelMedium,
+                        maxLines = 1
+                    )
+                }
             }
         }
     }
@@ -1038,7 +1294,7 @@ private fun TransactionDetailSheet(
     state: FinanceUiState,
     transaction: LedgerTransaction?,
     onDismiss: () -> Unit,
-    onSave: (Long, TransactionType, Long) -> Unit,
+    onSave: (Long, TransactionType, Long, String?) -> Unit,
     onDelete: (Long) -> Unit,
     onAddCustomCategory: (Long, String, String, String) -> Unit
 ) {
@@ -1050,6 +1306,7 @@ private fun TransactionDetailSheet(
     var showCustomCategoryForm by remember { mutableStateOf(false) }
     var customCategoryName by remember { mutableStateOf("") }
     var customColor by remember { mutableStateOf(categoryPalette.first()) }
+    var description by remember(transaction.id) { mutableStateOf(transaction.description.orEmpty()) }
     val categoryRanking = remember(state.transactions, state.categories) {
         state.transactions
             .groupingBy { it.categoryId }
@@ -1071,100 +1328,242 @@ private fun TransactionDetailSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = Navy900,
-        contentColor = TextPrimary
+        containerColor = Navy950,
+        contentColor = TextPrimary,
+        dragHandle = {
+            Box(
+                Modifier
+                    .padding(top = 10.dp)
+                    .size(width = 46.dp, height = 5.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(Navy800)
+            )
+        }
     ) {
-        SheetContent(title = "Edit Category") {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(transaction.name, color = TextPrimary, style = MaterialTheme.typography.titleLarge)
+        Box(Modifier.fillMaxWidth().imePadding()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .animateContentSize(tween(260, easing = FastOutSlowInEasing))
+                    .padding(start = 20.dp, top = 8.dp, end = 20.dp, bottom = 108.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Transaction", color = PrimaryBlue, style = MaterialTheme.typography.headlineMedium)
+                        Text("Tap any card, update type or category, then save.", color = TextMuted, style = MaterialTheme.typography.bodyMedium)
+                    }
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Rounded.Close, contentDescription = "Close", tint = TextMuted)
+                    }
+                }
+
+                Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(22.dp),
+                colors = CardDefaults.cardColors(containerColor = if (type == TransactionType.Income) PrimaryBlue else Navy850),
+                border = BorderStroke(1.dp, if (type == TransactionType.Income) PrimaryBlue else LossRed.copy(alpha = 0.7f))
+            ) {
+                Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("$dateLabel | ${state.money(transaction.amount)}", color = TextMuted, style = MaterialTheme.typography.bodyMedium)
-                        if (transaction.isCreditCardTransaction) {
-                            Spacer(Modifier.width(8.dp))
+                        Column(Modifier.weight(1f)) {
                             Text(
-                                "CC",
-                                color = OtherIncomeGold,
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1
+                                if (type == TransactionType.Income) "Income" else "Expense",
+                                color = if (type == TransactionType.Income) Color(0xFF141414).copy(alpha = 0.68f) else TextDim,
+                                style = MaterialTheme.typography.labelMedium
+                            )
+                            Text(
+                                signedAmount(transaction.amount, type, state.currency),
+                                color = if (type == TransactionType.Income) Color(0xFF141414) else LossRed,
+                                style = MaterialTheme.typography.headlineLarge,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        Box(
+                            modifier = Modifier
+                                .size(46.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(if (type == TransactionType.Income) Color(0xFF141414) else LossRed.copy(alpha = 0.16f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                if (type == TransactionType.Income) Icons.Rounded.TrendingUp else Icons.Rounded.Wallet,
+                                contentDescription = null,
+                                tint = if (type == TransactionType.Income) PrimaryBlue else LossRed
+                            )
+                        }
+                    }
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(if (type == TransactionType.Income) Color(0xFF141414).copy(alpha = 0.12f) else Navy800, RoundedCornerShape(12.dp))
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        Text(
+                            transaction.name,
+                            color = if (type == TransactionType.Income) Color(0xFF141414) else TextPrimary,
+                            style = MaterialTheme.typography.titleMedium,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                dateLabel,
+                                color = if (type == TransactionType.Income) Color(0xFF141414).copy(alpha = 0.64f) else TextMuted,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            if (transaction.isCreditCardTransaction) {
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    "CC",
+                                    color = if (type == TransactionType.Income) Color(0xFF141414) else OtherIncomeGold,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+                ElevatedPanel {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Text("Transaction type", color = TextPrimary, style = MaterialTheme.typography.titleMedium)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TransactionType.entries.forEach { option ->
+                            EditTransactionTypeTile(
+                                type = option,
+                                selected = type == option,
+                                onClick = { type = option },
+                                modifier = Modifier.weight(1f)
                             )
                         }
                     }
                 }
-                Text(signedAmount(transaction.amount, type, state.currency), color = type.amountColor(), style = MaterialTheme.typography.titleMedium)
             }
-            ChipRow {
-                TransactionType.entries.forEach {
-                    TransactionTypeChip(it, selected = type == it, onClick = { type = it })
-                }
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                LabelText("CATEGORY")
-                Spacer(Modifier.weight(1f))
-                TextButton(onClick = { showAllCategories = !showAllCategories }) {
-                    Text(if (showAllCategories) "Frequent" else "Show all", color = PrimarySoft)
-                }
-            }
-            ChipRow {
-                visibleCategories.forEach { category ->
-                    CategoryChoiceChip(
-                        category = category,
+
+                ElevatedPanel {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Category", color = TextPrimary, style = MaterialTheme.typography.titleMedium)
+                            Text("Choose where this transaction belongs.", color = TextDim, style = MaterialTheme.typography.bodyMedium)
+                        }
+                        TextButton(onClick = { showAllCategories = !showAllCategories }) {
+                            Text(if (showAllCategories) "Frequent" else "Show all", color = PrimarySoft)
+                        }
+                    }
+                    EditCategoryGrid(
+                        categories = visibleCategories,
+                        selectedCategoryId = categoryId,
                         type = type,
-                        selected = categoryId == category.id,
-                        onClick = { categoryId = category.id }
+                        showCustomCategoryForm = showCustomCategoryForm,
+                        onCategorySelected = { categoryId = it },
+                        onCustomSelected = { showCustomCategoryForm = !showCustomCategoryForm }
                     )
+                    if (showCustomCategoryForm) {
+                        OutlinedTextField(
+                            value = customCategoryName,
+                            onValueChange = { customCategoryName = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("Custom category") },
+                            singleLine = true,
+                            colors = inputColors(),
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                        ColorSwatches(selected = customColor, onSelected = { customColor = it })
+                        Button(
+                            onClick = {
+                                onAddCustomCategory(transaction.id, customCategoryName, "category", customColor)
+                                customCategoryName = ""
+                                showCustomCategoryForm = false
+                            },
+                            enabled = customCategoryName.isNotBlank(),
+                            modifier = Modifier.fillMaxWidth().height(50.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = primaryButtonColors()
+                        ) {
+                            Text("Create Category", fontWeight = FontWeight.Bold)
+                        }
+                    }
                 }
-                MoneyChip("Custom +", selected = showCustomCategoryForm, onClick = { showCustomCategoryForm = !showCustomCategoryForm })
             }
-            if (showCustomCategoryForm) {
-                OutlinedTextField(
-                    value = customCategoryName,
-                    onValueChange = { customCategoryName = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Custom category") },
-                    singleLine = true,
-                    colors = inputColors(),
-                    shape = RoundedCornerShape(12.dp)
-                )
-                ColorSwatches(selected = customColor, onSelected = { customColor = it })
+
+                ElevatedPanel {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text("Description", color = TextPrimary, style = MaterialTheme.typography.titleMedium)
+                        Text("Optional note for this transaction.", color = TextDim, style = MaterialTheme.typography.bodyMedium)
+                        OutlinedTextField(
+                            value = description,
+                            onValueChange = { description = it.take(180) },
+                            modifier = Modifier.fillMaxWidth().height(104.dp),
+                            label = { Text("Add a note") },
+                            minLines = 3,
+                            maxLines = 4,
+                            colors = inputColors(),
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                    }
+                }
+
+                if (transaction.rawMessage != null) {
+                ElevatedPanel {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            IconTile(Icons.Rounded.Sms, PrimaryBlue)
+                            Spacer(Modifier.width(12.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text("Detected message", color = TextPrimary, style = MaterialTheme.typography.titleMedium)
+                                Text("Review the original SMS when needed.", color = TextDim, style = MaterialTheme.typography.bodyMedium)
+                            }
+                        }
+                        OutlinedButton(
+                            onClick = { showOriginalMessage = true },
+                            modifier = Modifier.fillMaxWidth().height(48.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, appBorderColor()),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = PrimaryBlue)
+                        ) {
+                            Icon(Icons.Rounded.Sms, contentDescription = null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Show Original Message")
+                        }
+                    }
+                }
+            }
+
+            }
+
+            Row(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .background(Navy950.copy(alpha = 0.96f))
+                    .padding(start = 20.dp, top = 12.dp, end = 20.dp, bottom = 18.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                OutlinedButton(
+                    onClick = { onDelete(transaction.id) },
+                    modifier = Modifier.weight(1f).height(56.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, LossRed.copy(alpha = 0.7f)),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = LossRed)
+                ) {
+                    Text("Delete", fontWeight = FontWeight.Bold)
+                }
                 Button(
-                    onClick = {
-                        onAddCustomCategory(transaction.id, customCategoryName, "category", customColor)
-                        customCategoryName = ""
-                        showCustomCategoryForm = false
-                    },
-                    enabled = customCategoryName.isNotBlank(),
-                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    onClick = { onSave(transaction.id, type, categoryId, description) },
+                    modifier = Modifier.weight(1.45f).height(56.dp),
                     shape = RoundedCornerShape(12.dp),
                     colors = primaryButtonColors()
                 ) {
-                    Text("Create Custom Category", fontWeight = FontWeight.Bold)
-                }
-            }
-            if (transaction.rawMessage != null) {
-                OutlinedButton(
-                    onClick = { showOriginalMessage = true },
-                    modifier = Modifier.fillMaxWidth().height(48.dp),
-                    shape = RoundedCornerShape(16.dp),
-                    border = BorderStroke(1.dp, appBorderColor()),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = PrimaryBlue)
-                ) {
-                    Icon(Icons.Rounded.Sms, contentDescription = null)
+                    Icon(Icons.Rounded.Check, contentDescription = null)
                     Spacer(Modifier.width(8.dp))
-                    Text("Show Original Message")
+                    Text("Save", fontWeight = FontWeight.Bold)
                 }
-            }
-            Button(
-                onClick = { onSave(transaction.id, type, categoryId) },
-                modifier = Modifier.fillMaxWidth().height(56.dp),
-                shape = RoundedCornerShape(12.dp),
-                colors = primaryButtonColors()
-            ) {
-                Text("Save Changes", fontWeight = FontWeight.Bold)
-            }
-            TextButton(onClick = { onDelete(transaction.id) }, modifier = Modifier.fillMaxWidth()) {
-                Text("Delete Transaction", color = LossRed, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -1185,6 +1584,118 @@ private fun TransactionDetailSheet(
             titleContentColor = TextPrimary,
             textContentColor = TextMuted
         )
+    }
+}
+
+@Composable
+private fun EditTransactionTypeTile(
+    type: TransactionType,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val accent = if (type == TransactionType.Income) MoneyGreen else LossRed
+    Card(
+        modifier = modifier
+            .height(58.dp)
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = if (selected) accent else Navy800),
+        border = BorderStroke(1.dp, if (selected) accent else appBorderColor())
+    ) {
+        Row(
+            modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            Icon(
+                if (type == TransactionType.Income) Icons.Rounded.TrendingUp else Icons.Rounded.Wallet,
+                contentDescription = null,
+                tint = if (selected && isAmoledTheme()) Color(0xFF141414) else accent,
+                modifier = Modifier.size(20.dp)
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                type.name,
+                color = if (selected && isAmoledTheme()) Color(0xFF141414) else TextPrimary,
+                style = MaterialTheme.typography.titleMedium,
+                maxLines = 1
+            )
+        }
+    }
+}
+
+@Composable
+private fun EditCategoryGrid(
+    categories: List<CategoryItem>,
+    selectedCategoryId: Long,
+    type: TransactionType,
+    showCustomCategoryForm: Boolean,
+    onCategorySelected: (Long) -> Unit,
+    onCustomSelected: () -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        categories.chunked(2).forEach { rowCategories ->
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                rowCategories.forEach { category ->
+                    EditCategoryTile(
+                        label = category.name,
+                        color = categoryColor(category, type),
+                        selected = category.id == selectedCategoryId,
+                        onClick = { onCategorySelected(category.id) },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                if (rowCategories.size == 1) {
+                    Spacer(Modifier.weight(1f))
+                }
+            }
+        }
+        EditCategoryTile(
+            label = "Custom category",
+            color = PrimaryBlue,
+            selected = showCustomCategoryForm,
+            onClick = onCustomSelected,
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+}
+
+@Composable
+private fun EditCategoryTile(
+    label: String,
+    color: Color,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier
+            .height(52.dp)
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = if (selected) color.copy(alpha = 0.22f) else Navy800),
+        border = BorderStroke(1.dp, if (selected) color else appBorderColor())
+    ) {
+        Row(
+            modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(Modifier.size(10.dp).clip(CircleShape).background(color))
+            Spacer(Modifier.width(8.dp))
+            Text(
+                label,
+                color = if (selected) TextPrimary else TextMuted,
+                style = MaterialTheme.typography.labelMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
+            )
+            if (selected) {
+                Spacer(Modifier.width(6.dp))
+                Icon(Icons.Rounded.Check, contentDescription = null, tint = color, modifier = Modifier.size(18.dp))
+            }
+        }
     }
 }
 
@@ -1319,9 +1830,9 @@ private fun CategoryIconChip(
             Icon(option.icon, contentDescription = null, modifier = Modifier.size(18.dp))
         },
         colors = FilterChipDefaults.filterChipColors(
-            selectedContainerColor = if (isAmoledTheme()) PrimaryBlue else Color(0xFFEAF2FF),
-            selectedLabelColor = if (isAmoledTheme()) Color(0xFF001A42) else PrimaryBlue,
-            selectedLeadingIconColor = if (isAmoledTheme()) Color(0xFF001A42) else PrimaryBlue,
+            selectedContainerColor = PrimaryBlue,
+            selectedLabelColor = if (isAmoledTheme()) Color(0xFF141414) else Color.White,
+            selectedLeadingIconColor = if (isAmoledTheme()) Color(0xFF141414) else Color.White,
             containerColor = Navy800,
             labelColor = TextMuted
         )
@@ -1389,13 +1900,35 @@ private fun SheetContent(title: String, content: @Composable ColumnScope.() -> U
 @Composable
 private fun BrandHeader(userName: String) {
     Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Icon(Icons.Rounded.Wallet, contentDescription = null, tint = PrimarySoft, modifier = Modifier.size(30.dp))
+        FintrackLogoMark(size = 30.dp)
         Spacer(Modifier.width(8.dp))
-        Text("Money Manager", style = MaterialTheme.typography.headlineMedium, color = PrimarySoft)
+        Text("fintrack", style = MaterialTheme.typography.headlineMedium, color = PrimarySoft)
         Spacer(Modifier.weight(1f))
-        Box(Modifier.size(42.dp).clip(CircleShape).background(Navy800), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(42.dp).clip(RoundedCornerShape(12.dp)).background(Navy800), contentAlignment = Alignment.Center) {
             Text(userName.take(1).uppercase(), color = PrimarySoft, fontWeight = FontWeight.Bold)
         }
+    }
+}
+
+@Composable
+private fun FintrackLogoMark(size: Dp) {
+    Canvas(modifier = Modifier.size(size)) {
+        val strokeWidth = size.toPx() * 0.055f
+        val c = PrimaryBlue
+        val points = listOf(
+            Offset(size.toPx() * 0.5f, size.toPx() * 0.08f),
+            Offset(size.toPx() * 0.86f, size.toPx() * 0.28f),
+            Offset(size.toPx() * 0.86f, size.toPx() * 0.72f),
+            Offset(size.toPx() * 0.5f, size.toPx() * 0.92f),
+            Offset(size.toPx() * 0.14f, size.toPx() * 0.72f),
+            Offset(size.toPx() * 0.14f, size.toPx() * 0.28f)
+        )
+        points.indices.forEach { index ->
+            drawLine(c, points[index], points[(index + 1) % points.size], strokeWidth = strokeWidth, cap = StrokeCap.Round)
+        }
+        drawLine(c, points[0], points[3], strokeWidth = strokeWidth, cap = StrokeCap.Round)
+        drawLine(c, points[1], points[4], strokeWidth = strokeWidth, cap = StrokeCap.Round)
+        drawLine(c, points[2], points[5], strokeWidth = strokeWidth, cap = StrokeCap.Round)
     }
 }
 
@@ -1403,8 +1936,8 @@ private fun BrandHeader(userName: String) {
 private fun HeroMetricCard(label: String, value: String, helper: String) {
     val dark = isAmoledTheme()
     val container = if (dark) PrimaryBlue else MaterialTheme.colorScheme.primaryContainer
-    val labelColor = if (dark) Color(0xFF15295A) else MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.72f)
-    val valueColor = if (dark) Color(0xFF0D1D45) else MaterialTheme.colorScheme.onPrimaryContainer
+    val labelColor = if (dark) Color(0xFF141414).copy(alpha = 0.72f) else MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.72f)
+    val valueColor = if (dark) Color(0xFF141414) else MaterialTheme.colorScheme.onPrimaryContainer
     Card(
         modifier = Modifier.fillMaxWidth().height(158.dp),
         shape = MaterialTheme.shapes.extraLarge,
@@ -1423,7 +1956,7 @@ private fun HeroMetricCard(label: String, value: String, helper: String) {
                 overflow = TextOverflow.Ellipsis
             )
             Spacer(Modifier.height(8.dp))
-            Text(helper, color = if (dark) Color(0xFF132B61) else PrimarySoft, style = MaterialTheme.typography.bodyMedium)
+            Text(helper, color = if (dark) Color(0xFF141414).copy(alpha = 0.72f) else PrimarySoft, style = MaterialTheme.typography.bodyMedium)
         }
     }
 }
@@ -1796,13 +2329,18 @@ internal fun SegmentAmountRow(label: String, value: String, color: Color, progre
 
 @Composable
 private fun ProfileHeader(state: FinanceUiState) {
-    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(Modifier.size(92.dp).clip(CircleShape).background(Navy800), contentAlignment = Alignment.Center) {
-            Text(state.userName.take(1).uppercase(), color = PrimarySoft, fontSize = 34.sp, fontWeight = FontWeight.Bold)
+    ElevatedPanel {
+        Column(
+            Modifier.fillMaxWidth().padding(18.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Box(Modifier.size(92.dp).clip(RoundedCornerShape(24.dp)).background(PrimaryBlue), contentAlignment = Alignment.Center) {
+                Text(state.userName.take(1).uppercase(), color = Color(0xFF141414), fontSize = 34.sp, fontWeight = FontWeight.Bold)
+            }
+            Text(state.userName, color = TextPrimary, style = MaterialTheme.typography.headlineMedium)
+            Text("Local finance tracking", color = TextDim, style = MaterialTheme.typography.bodyMedium)
         }
-        Spacer(Modifier.height(12.dp))
-        Text(state.userName, color = TextPrimary, style = MaterialTheme.typography.headlineMedium)
-        Text("Local finance tracking", color = TextDim, style = MaterialTheme.typography.bodyMedium)
     }
 }
 
@@ -2055,7 +2593,7 @@ private fun DefaultAccountOption(
                 Icon(
                     imageVector = Icons.Rounded.Check,
                     contentDescription = null,
-                    tint = if (isAmoledTheme()) Color(0xFF001A42) else Color.White,
+                    tint = if (isAmoledTheme()) Color(0xFF141414) else Color.White,
                     modifier = Modifier.size(14.dp)
                 )
             }
@@ -2339,7 +2877,7 @@ private fun UiSurfaceSelector(
 
 @Composable
 private fun appSwitchColors() = SwitchDefaults.colors(
-    checkedThumbColor = Color.White,
+    checkedThumbColor = Color(0xFF141414),
     checkedTrackColor = PrimaryBlue,
     checkedBorderColor = PrimaryBlue,
     uncheckedThumbColor = TextMuted,
@@ -2350,7 +2888,7 @@ private fun appSwitchColors() = SwitchDefaults.colors(
 @Composable
 fun primaryButtonColors(): ButtonColors = ButtonDefaults.buttonColors(
     containerColor = PrimaryBlue,
-    contentColor = if (isAmoledTheme()) Color(0xFF001A42) else Color.White
+    contentColor = if (isAmoledTheme()) Color(0xFF141414) else Color.White
 )
 
 @Composable
@@ -2373,8 +2911,8 @@ private fun AddModeChip(mode: AddMoneyMode, selected: Boolean, enabled: Boolean,
         shape = RoundedCornerShape(50),
         label = { Text(mode.label, fontWeight = FontWeight.Bold) },
         colors = FilterChipDefaults.filterChipColors(
-            selectedContainerColor = accent.copy(alpha = if (isAmoledTheme()) 0.24f else 0.14f),
-            selectedLabelColor = accent,
+            selectedContainerColor = if (selected) accent else accent.copy(alpha = 0.14f),
+            selectedLabelColor = if (selected && isAmoledTheme()) Color(0xFF141414) else accent,
             containerColor = if (isAmoledTheme()) Navy800 else Color.White,
             labelColor = TextMuted,
             disabledContainerColor = if (isAmoledTheme()) Navy800.copy(alpha = 0.42f) else Color.White.copy(alpha = 0.42f),
@@ -2385,39 +2923,60 @@ private fun AddModeChip(mode: AddMoneyMode, selected: Boolean, enabled: Boolean,
 
 @Composable
 private fun BottomNavigation(selectedTab: ScreenTab, onTabSelected: (ScreenTab) -> Unit) {
-    val dark = isAmoledTheme()
-    NavigationBar(
-        containerColor = if (dark) Navy900 else Navy850,
-        tonalElevation = 0.dp
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 18.dp, vertical = 12.dp),
+        shape = RoundedCornerShape(22.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF1A1A1A)),
+        border = BorderStroke(1.dp, appBorderColor())
     ) {
-        ScreenTab.entries.forEach { tab ->
-            val selected = selectedTab == tab
-            val scale by animateFloatAsState(
-                targetValue = if (selected) 1.08f else 1f,
-                animationSpec = tween(240, easing = FastOutSlowInEasing),
-                label = "navScale"
-            )
-            NavigationBarItem(
-                selected = selected,
-                onClick = { onTabSelected(tab) },
-                icon = { Icon(tab.icon, contentDescription = tab.label, modifier = Modifier.scale(scale)) },
-                label = {
+        Row(
+            modifier = Modifier.fillMaxWidth().height(70.dp).padding(horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            ScreenTab.entries.forEach { tab ->
+                val selected = selectedTab == tab
+                val scale by animateFloatAsState(
+                    targetValue = if (selected) 1.08f else 1f,
+                    animationSpec = tween(240, easing = FastOutSlowInEasing),
+                    label = "navScale"
+                )
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(16.dp))
+                        .clickable { onTabSelected(tab) }
+                        .padding(vertical = 8.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(32.dp)
+                            .scale(scale)
+                            .clip(CircleShape)
+                            .background(if (selected) PrimaryBlue else Color.Transparent),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            tab.icon,
+                            contentDescription = tab.label,
+                            tint = if (selected) Color(0xFF141414) else TextDim,
+                            modifier = Modifier.size(19.dp)
+                        )
+                    }
                     Text(
                         tab.label,
+                        color = if (selected) PrimaryBlue else TextDim,
                         maxLines = 1,
-                        overflow = TextOverflow.Clip,
-                        fontSize = 11.sp,
+                        overflow = TextOverflow.Ellipsis,
+                        fontSize = 10.sp,
                         lineHeight = 12.sp
                     )
-                },
-                colors = NavigationBarItemDefaults.colors(
-                    selectedIconColor = PrimarySoft,
-                    selectedTextColor = PrimarySoft,
-                    indicatorColor = PrimaryBlue.copy(alpha = if (dark) 0.32f else 0.16f),
-                    unselectedIconColor = if (dark) TextDim.copy(alpha = 0.62f) else TextPrimary,
-                    unselectedTextColor = if (dark) TextDim.copy(alpha = 0.62f) else TextPrimary
-                )
-            )
+                }
+            }
         }
     }
 }
@@ -2428,16 +2987,16 @@ private fun inputColors() = OutlinedTextFieldDefaults.colors(
     unfocusedTextColor = TextPrimary,
     focusedBorderColor = PrimaryBlue,
     unfocusedBorderColor = appBorderColor(),
-    focusedContainerColor = Navy900,
-    unfocusedContainerColor = Navy900,
+    focusedContainerColor = Navy850,
+    unfocusedContainerColor = Navy850,
     focusedLabelColor = PrimarySoft,
     unfocusedLabelColor = TextMuted,
     cursorColor = PrimaryBlue
 )
 
 private val categoryPalette = listOf(
-    "#7C9DFF",
-    "#61E6A4",
+    "#B4F077",
+    "#8BE35D",
     "#FF7A8A",
     "#FFD166",
     "#B589FF",

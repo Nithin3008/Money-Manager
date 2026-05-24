@@ -66,7 +66,7 @@ internal fun CategoryChoiceChip(
         label = { Text(category.name) },
         colors = FilterChipDefaults.filterChipColors(
             selectedContainerColor = color,
-            selectedLabelColor = if (isAmoledTheme()) Color(0xFF10131F) else Color.White,
+            selectedLabelColor = if (isAmoledTheme()) Color(0xFF141414) else Color.White,
             containerColor = Navy800,
             labelColor = TextMuted
         )
@@ -88,8 +88,8 @@ internal fun TransactionTypeChip(type: TransactionType, selected: Boolean, onCli
         shape = RoundedCornerShape(50),
         label = { Text(type.name, fontWeight = FontWeight.Bold) },
         colors = FilterChipDefaults.filterChipColors(
-            selectedContainerColor = accent.copy(alpha = if (isAmoledTheme()) 0.22f else 0.14f),
-            selectedLabelColor = accent,
+            selectedContainerColor = if (selected) accent else accent.copy(alpha = 0.14f),
+            selectedLabelColor = if (selected && isAmoledTheme()) Color(0xFF141414) else accent,
             containerColor = if (isAmoledTheme()) Navy800 else Color.White,
             labelColor = TextMuted
         )
@@ -106,7 +106,7 @@ internal fun ActionPanel(
 ) {
     ElevatedPanel {
         Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconTile(icon, MoneyGreen)
+            IconTile(icon, PrimaryBlue)
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(title, color = TextPrimary, style = MaterialTheme.typography.titleMedium)
@@ -169,8 +169,8 @@ internal fun TransactionRow(
 ) {
     val category = state.categories.firstOrNull { it.id == transaction.categoryId }
     val color = categoryColor(category, transaction.type)
-    val cardColor = if (isAmoledTheme()) Color(0xFF171B22) else Color.White
-    val neutralBorder = if (isAmoledTheme()) Color(0xFF303846) else Color(0xFFD3DBEA)
+    val cardColor = if (isAmoledTheme()) Color(0xFF1A1A1A) else Color.White
+    val neutralBorder = if (isAmoledTheme()) Color(0xFF323232) else Color(0xFFD8E5CC)
     val borderColor = if (category?.name == "Uncategorized") {
         neutralBorder
     } else {
@@ -183,7 +183,7 @@ internal fun TransactionRow(
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onSelect(transaction.id) },
-        shape = MaterialTheme.shapes.large,
+        shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = cardColor),
         border = BorderStroke(1.dp, borderColor)
     ) {
@@ -191,7 +191,7 @@ internal fun TransactionRow(
             Box(
                 modifier = Modifier
                     .size(44.dp)
-                    .clip(RoundedCornerShape(14.dp))
+                    .clip(RoundedCornerShape(12.dp))
                     .background(color.copy(alpha = if (isAmoledTheme()) 0.18f else 0.12f)),
                 contentAlignment = Alignment.Center
             ) {
@@ -244,7 +244,6 @@ internal fun TransactionRow(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f)
                     )
-                    Text("Edit", color = PrimaryBlue, style = MaterialTheme.typography.labelMedium)
                 }
             }
         }

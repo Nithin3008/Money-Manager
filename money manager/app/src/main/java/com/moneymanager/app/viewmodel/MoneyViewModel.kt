@@ -474,10 +474,16 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun updateTransactionDetails(transactionId: Long, type: TransactionType, categoryId: Long) {
+    fun updateTransactionDetails(transactionId: Long, type: TransactionType, categoryId: Long, description: String?) {
         viewModelScope.launch {
             val transaction = _uiState.value.transactions.firstOrNull { it.id == transactionId } ?: return@launch
-            repository.updateTransaction(transaction.copy(type = type, categoryId = categoryId))
+            repository.updateTransaction(
+                transaction.copy(
+                    type = type,
+                    categoryId = categoryId,
+                    description = description?.trim()?.takeIf { it.isNotBlank() }
+                )
+            )
             applyCategoryToSimilarUncategorized(transaction, categoryId, type)
             reloadState { it.copy(showTransactionDetailSheet = false, selectedTransactionId = null) }
         }

@@ -48,7 +48,7 @@ import com.moneymanager.app.ui.theme.TextPrimary
 @Composable
 internal fun LargeTitle(title: String, subtitle: String) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(title, color = TextPrimary, style = MaterialTheme.typography.headlineLarge)
+        Text(title, color = PrimarySoft, style = MaterialTheme.typography.headlineLarge)
         Text(subtitle, color = TextMuted, style = MaterialTheme.typography.bodyLarge)
     }
 }
@@ -58,8 +58,8 @@ internal fun SectionHeader(title: String, action: String) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text(
             title,
-            color = TextPrimary,
-            style = MaterialTheme.typography.headlineMedium,
+            color = PrimarySoft,
+            style = MaterialTheme.typography.titleLarge,
             modifier = Modifier.weight(1f),
             maxLines = 2,
             overflow = TextOverflow.Ellipsis
@@ -88,7 +88,7 @@ internal fun ElevatedPanel(
     }
     Card(
         modifier = panelModifier,
-        shape = RoundedCornerShape(22.dp),
+        shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
         border = BorderStroke(1.dp, appBorderColor())
     ) {
@@ -107,18 +107,18 @@ internal fun EmptyPanel(text: String) {
 internal fun IconTile(icon: ImageVector, tint: Color) {
     Box(
         Modifier
-            .size(54.dp)
-            .clip(MaterialTheme.shapes.large)
-            .background(tint.copy(alpha = if (isAmoledTheme()) 0.18f else 0.12f)),
+            .size(48.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(tint.copy(alpha = if (isAmoledTheme()) 0.16f else 0.14f)),
         contentAlignment = Alignment.Center
     ) {
-        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(27.dp))
+        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(24.dp))
     }
 }
 
 @Composable
 internal fun LabelText(text: String) {
-    Text(text, color = PrimarySoft, style = MaterialTheme.typography.labelMedium, letterSpacing = 2.sp)
+    Text(text, color = PrimarySoft, style = MaterialTheme.typography.labelMedium, letterSpacing = 0.sp)
 }
 
 @Composable
@@ -145,8 +145,8 @@ internal fun MoneyChip(label: String, selected: Boolean, onClick: () -> Unit) {
         shape = RoundedCornerShape(50),
         label = { Text(label) },
         colors = FilterChipDefaults.filterChipColors(
-            selectedContainerColor = if (dark) Color(0xFF29477F) else Color(0xFFDDE8FF),
-            selectedLabelColor = if (dark) Color(0xFFEAF1FF) else PrimaryBlue,
+            selectedContainerColor = PrimaryBlue,
+            selectedLabelColor = if (dark) Color(0xFF141414) else Color.White,
             containerColor = if (dark) Navy800 else Color.White,
             labelColor = TextMuted
         )

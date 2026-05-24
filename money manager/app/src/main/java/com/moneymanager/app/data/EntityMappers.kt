@@ -93,7 +93,8 @@ internal fun TransactionEntity.toModel() = LedgerTransaction(
     rawMessage = rawMessage,
     smsBankLabel = smsBankLabel,
     excludeFromSummary = excludeFromSummary,
-    isCreditCardTransaction = isCreditCardTransaction
+    isCreditCardTransaction = isCreditCardTransaction,
+    description = description
 )
 
 internal fun LedgerTransaction.toEntity(id: Long = this.id) = TransactionEntity(
@@ -108,7 +109,8 @@ internal fun LedgerTransaction.toEntity(id: Long = this.id) = TransactionEntity(
     rawMessage = rawMessage,
     smsBankLabel = smsBankLabel,
     excludeFromSummary = excludeFromSummary,
-    isCreditCardTransaction = isCreditCardTransaction
+    isCreditCardTransaction = isCreditCardTransaction,
+    description = description
 )
 
 internal fun BudgetEntity.toModel() = BudgetPlan(

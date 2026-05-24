@@ -57,11 +57,11 @@ enum class ActivityDateFilter(val label: String) {
 }
 
 enum class ScreenTab(val label: String, val icon: ImageVector) {
-    Dashboard("Today", Icons.Rounded.GridView),
-    Activity("Activity", Icons.AutoMirrored.Rounded.ReceiptLong),
+    Dashboard("Home", Icons.Rounded.GridView),
+    Activity("Transactions", Icons.AutoMirrored.Rounded.ReceiptLong),
     Budget("Budget", Icons.Rounded.PieChart),
-    Summary("Summary", Icons.Rounded.BarChart),
-    Settings("Settings", Icons.Rounded.Settings)
+    Summary("Reports", Icons.Rounded.BarChart),
+    Settings("Profile", Icons.Rounded.Settings)
 }
 
 enum class CurrencyOption(
@@ -87,7 +87,7 @@ enum class UiAccent(
     val softDarkHex: String,
     val softLightHex: String
 ) {
-    Sky("Sky", "#7C9DFF", "#345CA8", "#AFC6FF", "#1F65C8"),
+    Sky("Fintrack", "#B4F077", "#4E7D1C", "#B4F077", "#4E7D1C"),
     Mint("Mint", "#61E6A4", "#007A52", "#B8FFD7", "#006C49"),
     Rose("Rose", "#FF7A8A", "#B32648", "#FFD9DE", "#A3193D"),
     Amber("Amber", "#FFD166", "#8A5600", "#FFE2A3", "#7A4B00"),
@@ -112,7 +112,7 @@ enum class UiSurface(
     val lightPanelHex: String,
     val lightChipHex: String
 ) {
-    Midnight("Midnight", "#0C0F17", "#111620", "#171D2A", "#202737", "#F8F9FF", "#FFFFFF", "#F0F4FF", "#E3EAF8"),
+    Midnight("Fintrack", "#141414", "#1A1A1A", "#202020", "#2A2A2A", "#F7FAF2", "#FFFFFF", "#EFF6E8", "#E1ECD8"),
     Graphite("Graphite", "#101113", "#17191D", "#20232A", "#2A2E37", "#F7F7F5", "#FFFFFF", "#EEEEEA", "#E2E3DE"),
     Ocean("Ocean", "#07131D", "#0D1C2A", "#14293B", "#1B354A", "#F5FAFF", "#FFFFFF", "#EAF3FB", "#DDECF7"),
     Plum("Plum", "#160F1D", "#21172A", "#2B1F37", "#362844", "#FCF7FF", "#FFFFFF", "#F4ECFA", "#EADDF3"),
@@ -148,7 +148,8 @@ data class LedgerTransaction(
     val rawMessage: String? = null,
     val smsBankLabel: String? = null,
     val excludeFromSummary: Boolean = false,
-    val isCreditCardTransaction: Boolean = false
+    val isCreditCardTransaction: Boolean = false,
+    val description: String? = null
 )
 
 data class BudgetPlan(

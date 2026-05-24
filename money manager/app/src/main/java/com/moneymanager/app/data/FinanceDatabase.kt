@@ -16,7 +16,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         BudgetEntity::class,
         DetectedDraftEntity::class
     ],
-    version = 11
+    version = 12
 )
 abstract class FinanceDatabase : RoomDatabase() {
     abstract fun dao(): FinanceDao
@@ -41,7 +41,8 @@ abstract class FinanceDatabase : RoomDatabase() {
                         Migration7To8,
                         Migration8To9,
                         Migration9To10,
-                        Migration10To11
+                        Migration10To11,
+                        Migration11To12
                     )
                     .build()
                     .also { instance = it }
@@ -142,6 +143,12 @@ abstract class FinanceDatabase : RoomDatabase() {
                        OR lower(COALESCE(rawMessage, '')) LIKE '%credit card%debited%for upi%'
                     """.trimIndent()
                 )
+            }
+        }
+
+        private val Migration11To12 = object : Migration(11, 12) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE transactions ADD COLUMN description TEXT")
             }
         }
     }

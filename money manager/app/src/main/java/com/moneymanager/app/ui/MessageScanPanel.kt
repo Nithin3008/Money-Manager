@@ -70,7 +70,7 @@ fun MessageScanPanel(onScan: (MessageScanRange, LocalDate, LocalDate) -> Unit) {
     Card(
         modifier = Modifier
             .fillMaxWidth(),
-        shape = RoundedCornerShape(if (dark) 16.dp else 10.dp),
+        shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = Navy850),
         border = BorderStroke(1.dp, if (dark) Color(0xFF33363D) else Color(0xFFC9CEDD))
     ) {
@@ -89,8 +89,8 @@ fun MessageScanPanel(onScan: (MessageScanRange, LocalDate, LocalDate) -> Unit) {
                         onClick = { selectedRange = range },
                         label = { Text(range.label) },
                         colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = if (dark) PrimaryBlue else Color(0xFFEAF2FF),
-                            selectedLabelColor = if (dark) Color(0xFF001A42) else PrimaryBlue,
+                            selectedContainerColor = PrimaryBlue,
+                            selectedLabelColor = if (dark) Color(0xFF141414) else Color.White,
                             containerColor = if (dark) Navy900 else Color.White,
                             labelColor = TextMuted
                         )
@@ -130,7 +130,7 @@ fun MessageScanPanel(onScan: (MessageScanRange, LocalDate, LocalDate) -> Unit) {
                 shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = PrimaryBlue,
-                    contentColor = if (dark) Color(0xFF001A42) else Color.White
+                    contentColor = if (dark) Color(0xFF141414) else Color.White
                 )
             ) {
                 Text(buttonLabel, fontWeight = FontWeight.Bold)
