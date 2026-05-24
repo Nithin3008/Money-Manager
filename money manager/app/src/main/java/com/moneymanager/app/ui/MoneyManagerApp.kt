@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -49,6 +50,7 @@ import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.Category
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PieChart
 import androidx.compose.material.icons.rounded.Search
@@ -266,11 +268,15 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
                 contentPadding = PaddingValues(start = 20.dp, top = 18.dp, end = 20.dp, bottom = 112.dp),
                 verticalArrangement = Arrangement.spacedBy(18.dp)
             ) {
-                item { BrandHeader(state.userName) }
+                item {
+                    BrandHeader(
+                        userName = state.userName,
+                        onOpenSettings = { viewModel.selectTab(ScreenTab.Settings) }
+                    )
+                }
                 when (tab) {
                     ScreenTab.Dashboard -> dashboardContent(
                         state = state,
-                        onOpenSummary = viewModel::selectTab,
                         onAcceptDraft = viewModel::acceptDetectedTransaction,
                         onIgnoreDraft = viewModel::ignoreDetectedTransaction,
                         onDeleteTransaction = viewModel::deleteTransaction,
@@ -287,7 +293,7 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
                         onEditTransaction = viewModel::requestEditTransactionCategory,
                         onLoadMore = viewModel::loadMoreTransactions
                     )
-                    ScreenTab.Budget -> budgetContent(state, viewModel::setBudgetSheet, viewModel::deleteBudget)
+                    ScreenTab.Budget -> budgetContent(state, viewModel::deleteBudget)
                     ScreenTab.Summary -> summaryContent(
                         state = state,
                         onMonthSelected = viewModel::selectMonth,
@@ -397,7 +403,6 @@ private fun InitialLoadingScreen() {
 
 private fun androidx.compose.foundation.lazy.LazyListScope.budgetContent(
     state: FinanceUiState,
-    onCreateBudget: (Boolean) -> Unit,
     onDeleteBudget: (Long) -> Unit
 ) {
     item {
@@ -405,15 +410,6 @@ private fun androidx.compose.foundation.lazy.LazyListScope.budgetContent(
     }
     item {
         FintrackBudgetHero(state)
-    }
-    item {
-        ActionPanel(
-            title = "Create budget",
-            subtitle = "Attach one or multiple categories to a monthly limit.",
-            icon = Icons.Rounded.PieChart,
-            action = "Create",
-            onClick = { onCreateBudget(true) }
-        )
     }
     if (state.activeBudgets.isEmpty()) {
         item { EmptyPanel("No budgets yet. Example: Grocery 5000, or Essentials for Grocery + Food + Fuel.") }
@@ -497,16 +493,13 @@ private fun androidx.compose.foundation.lazy.LazyListScope.settingsContent(
         )
     }
     item {
-        Button(
-            onClick = { onAddCategory(true) },
-            modifier = Modifier.fillMaxWidth().height(54.dp),
-            shape = RoundedCornerShape(12.dp),
-            colors = primaryButtonColors()
-        ) {
-            Icon(Icons.Rounded.Category, contentDescription = null)
-            Spacer(Modifier.width(8.dp))
-            Text("Create Category", fontWeight = FontWeight.Bold)
-        }
+        ActionPanel(
+            title = "Create category",
+            subtitle = "Add a custom spending label with its own icon and color.",
+            icon = Icons.Rounded.Category,
+            action = "Create",
+            onClick = { onAddCategory(true) }
+        )
     }
     item {
         BackupRestorePanel(
@@ -1779,8 +1772,13 @@ private fun AddBudgetSheet(
 @Composable
 private fun AddCategorySheet(onDismiss: () -> Unit, onAdd: (String, String, String) -> Unit) {
     var name by remember { mutableStateOf("") }
-    val selectedIconKey = MoneyIcons.frequentCategoryIcons.first().key
+    var selectedIconKey by remember { mutableStateOf(MoneyIcons.frequentCategoryIcons.first().key) }
     var selectedColor by remember { mutableStateOf(categoryPalette.first()) }
+    val selectedIcon = remember(selectedIconKey) {
+        MoneyIcons.allCategoryIcons.firstOrNull { it.key == selectedIconKey }
+            ?: MoneyIcons.frequentCategoryIcons.first()
+    }
+    val selectedColorValue = colorFromHex(selectedColor)
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     ModalBottomSheet(
@@ -1792,12 +1790,50 @@ private fun AddCategorySheet(onDismiss: () -> Unit, onAdd: (String, String, Stri
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 12.dp)
                 .verticalScroll(rememberScrollState())
-                .imePadding(),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+                .imePadding()
+                .padding(start = 20.dp, top = 10.dp, end = 20.dp, bottom = 26.dp),
+            verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
-            Text("Create Category", color = TextPrimary, style = MaterialTheme.typography.headlineMedium)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(58.dp)
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(selectedColorValue.copy(alpha = 0.18f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(42.dp)
+                            .clip(CircleShape)
+                            .background(selectedColorValue),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            selectedIcon.icon,
+                            contentDescription = null,
+                            tint = if (isAmoledTheme()) Color(0xFF141414) else Color.White,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                }
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Create Category", color = TextPrimary, style = MaterialTheme.typography.headlineMedium)
+                    Text(
+                        if (name.isBlank()) "Choose an icon and color for a new category." else name.trim(),
+                        color = TextMuted,
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.Rounded.Close, contentDescription = "Close", tint = TextMuted)
+                }
+            }
+
             OutlinedTextField(
                 value = name,
                 onValueChange = { name = it },
@@ -1807,18 +1843,34 @@ private fun AddCategorySheet(onDismiss: () -> Unit, onAdd: (String, String, Stri
                 colors = inputColors(),
                 shape = RoundedCornerShape(12.dp)
             )
+
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                LabelText("ICON")
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(MoneyIcons.frequentCategoryIcons, key = { it.key }) { option ->
+                        CategoryIconChip(
+                            option = option,
+                            selected = option.key == selectedIconKey,
+                            onClick = { selectedIconKey = option.key }
+                        )
+                    }
+                }
+            }
+
             LabelText("COLOR")
             ColorSwatches(selected = selectedColor, onSelected = { selectedColor = it })
+
             Button(
-                onClick = { onAdd(name, selectedIconKey, selectedColor) },
+                onClick = { onAdd(name.trim(), selectedIconKey, selectedColor) },
                 enabled = name.isNotBlank(),
                 modifier = Modifier.fillMaxWidth().height(56.dp),
                 shape = RoundedCornerShape(12.dp),
                 colors = primaryButtonColors()
             ) {
+                Icon(Icons.Rounded.Check, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
                 Text("Create Category", fontWeight = FontWeight.Bold)
             }
-            Spacer(Modifier.height(24.dp))
         }
     }
 }
@@ -1905,8 +1957,14 @@ private fun SheetContent(title: String, content: @Composable ColumnScope.() -> U
 }
 
 @Composable
-private fun BrandHeader(userName: String) {
-    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+private fun BrandHeader(userName: String, onOpenSettings: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .clickable(onClick = onOpenSettings),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
         FintrackLogoMark(size = 30.dp)
         Spacer(Modifier.width(8.dp))
         Text("Money Manager", style = MaterialTheme.typography.headlineMedium, color = PrimarySoft)
@@ -2297,6 +2355,18 @@ private fun BudgetRow(budget: BudgetPlan, state: FinanceUiState, onDelete: (Long
                     Text(state.money(spent), color = if (over) LossRed else TextPrimary, style = MaterialTheme.typography.titleMedium)
                     Text("of ${state.money(budget.limitAmount)}", color = TextDim, style = MaterialTheme.typography.bodyMedium)
                 }
+                Spacer(Modifier.width(6.dp))
+                IconButton(
+                    onClick = { onDelete(budget.id) },
+                    modifier = Modifier.size(38.dp)
+                ) {
+                    Icon(
+                        Icons.Rounded.Delete,
+                        contentDescription = "Delete budget",
+                        tint = LossRed,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
             }
             LinearProgressIndicator(
                 progress = { progress },
@@ -2304,9 +2374,6 @@ private fun BudgetRow(budget: BudgetPlan, state: FinanceUiState, onDelete: (Long
                 color = if (over) LossRed else PrimarySoft,
                 trackColor = appTrackColor()
             )
-            TextButton(onClick = { onDelete(budget.id) }, modifier = Modifier.align(Alignment.End)) {
-                Text("Delete", color = LossRed)
-            }
         }
     }
 }
@@ -2938,8 +3005,9 @@ private fun AddModeChip(mode: AddMoneyMode, selected: Boolean, enabled: Boolean,
 private fun BottomNavigation(selectedTab: ScreenTab, onTabSelected: (ScreenTab) -> Unit) {
     Card(
         modifier = Modifier
+            .navigationBarsPadding()
             .fillMaxWidth()
-            .padding(horizontal = 18.dp, vertical = 12.dp),
+            .padding(start = 18.dp, top = 12.dp, end = 18.dp, bottom = 18.dp),
         shape = RoundedCornerShape(22.dp),
         colors = CardDefaults.cardColors(containerColor = Color(0xFF1A1A1A)),
         border = BorderStroke(1.dp, appBorderColor())

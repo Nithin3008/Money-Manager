@@ -23,7 +23,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ReceiptLong
 import androidx.compose.material.icons.rounded.AccountBalance
-import androidx.compose.material.icons.rounded.BarChart
 import androidx.compose.material.icons.rounded.Category
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
@@ -57,11 +56,9 @@ import androidx.compose.ui.unit.dp
 import com.moneymanager.app.model.DetectedTransactionDraft
 import com.moneymanager.app.model.FinanceUiState
 import com.moneymanager.app.model.MonthlyCategoryTotal
-import com.moneymanager.app.model.ScreenTab
 import com.moneymanager.app.model.TransactionType
 import com.moneymanager.app.model.transactionDate
 import com.moneymanager.app.ui.theme.LossRed
-import com.moneymanager.app.ui.theme.MoneyGreen
 import com.moneymanager.app.ui.theme.Navy800
 import com.moneymanager.app.ui.theme.Navy850
 import com.moneymanager.app.ui.theme.PrimaryBlue
@@ -69,11 +66,11 @@ import com.moneymanager.app.ui.theme.TextDim
 import com.moneymanager.app.ui.theme.TextMuted
 import com.moneymanager.app.ui.theme.TextPrimary
 import java.time.LocalDate
+import java.time.YearMonth
 import java.time.format.DateTimeFormatter
 
 internal fun LazyListScope.dashboardContent(
     state: FinanceUiState,
-    onOpenSummary: (ScreenTab) -> Unit,
     onAcceptDraft: (Long, Long, TransactionType) -> Unit,
     onIgnoreDraft: (Long) -> Unit,
     onDeleteTransaction: (Long) -> Unit,
@@ -140,24 +137,20 @@ internal fun LazyListScope.dashboardContent(
             )
         }
     }
-    item {
-        ActionPanel(
-            title = "Statistics",
-            subtitle = "Open monthly cash flow, spending, and category charts.",
-            icon = Icons.Rounded.BarChart,
-            action = "Open",
-            onClick = { onOpenSummary(ScreenTab.Summary) }
-        )
-    }
 }
 
 @Composable
 private fun FintrackBalanceHero(state: FinanceUiState) {
-    val todayIncome = state.todayTransactions
-        .filter { it.type == TransactionType.Income && !it.excludeFromSummary }
-        .sumOf { it.amount }
-    val todayExpense = state.todayTransactions
-        .filter { it.type == TransactionType.Expense && !it.excludeFromSummary }
+    val currentMonth = YearMonth.now()
+    val currentAccount = state.accounts.firstOrNull { it.id == state.defaultAccountId }
+        ?: state.accounts.firstOrNull()
+    val currentBalance = currentAccount?.balance ?: 0.0
+    val balanceSource = currentAccount?.name ?: "No bank selected"
+    val monthTransactions = state.transactions.filter {
+        !it.excludeFromSummary && YearMonth.from(it.transactionDate()) == currentMonth
+    }
+    val monthExpense = monthTransactions
+        .filter { it.type == TransactionType.Expense }
         .sumOf { it.amount }
 
     Card(
@@ -169,11 +162,18 @@ private fun FintrackBalanceHero(state: FinanceUiState) {
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("Balance", color = Color(0xFF141414).copy(alpha = 0.72f), style = MaterialTheme.typography.labelMedium)
+                    Text("Current bank balance", color = Color(0xFF141414).copy(alpha = 0.72f), style = MaterialTheme.typography.labelMedium)
                     Text(
-                        state.money(state.trackedBalance),
+                        state.money(currentBalance),
                         color = Color(0xFF141414),
                         style = MaterialTheme.typography.headlineLarge,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        balanceSource,
+                        color = Color(0xFF141414).copy(alpha = 0.62f),
+                        style = MaterialTheme.typography.bodyMedium,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -189,8 +189,8 @@ private fun FintrackBalanceHero(state: FinanceUiState) {
             }
             MiniFlowChart()
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                FintrackHeroPill("Income", state.money(todayIncome), Modifier.weight(1f))
-                FintrackHeroPill("Spent", state.money(todayExpense), Modifier.weight(1f))
+                FintrackHeroPill("Bank balance", state.money(currentBalance), Modifier.weight(1f))
+                FintrackHeroPill("Monthly spend", state.money(monthExpense), Modifier.weight(1f))
             }
         }
     }

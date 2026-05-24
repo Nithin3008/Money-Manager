@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -21,7 +22,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -33,10 +34,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.moneymanager.app.model.CategoryItem
@@ -47,8 +49,6 @@ import com.moneymanager.app.model.month
 import com.moneymanager.app.model.shortLabel
 import com.moneymanager.app.model.transactionDate
 import com.moneymanager.app.ui.theme.LossRed
-import com.moneymanager.app.ui.theme.MoneyGreen
-import com.moneymanager.app.ui.theme.Navy800
 import com.moneymanager.app.ui.theme.PrimaryBlue
 import com.moneymanager.app.ui.theme.TextDim
 import com.moneymanager.app.ui.theme.TextMuted
@@ -63,7 +63,7 @@ internal fun LazyListScope.summaryContent(
     onToggleSummaryAccount: (Long) -> Unit,
     onClearSummaryAccountFilter: () -> Unit
 ) {
-    item { LargeTitle("Statistics", state.selectedMonth.shortLabel()) }
+    item { LargeTitle("Reports", state.selectedMonth.shortLabel()) }
     item {
         MonthSelector(
             months = availableMonths(state),
@@ -80,81 +80,10 @@ internal fun LazyListScope.summaryContent(
             )
         }
     }
-    item { ReportHeroCard(state) }
-    item { MetricGrid(state = state) }
-    item { CashFlowGraph(state) }
-    item { DailyExpenseBarGraph(state) }
     item { CategoryPieChart(state, categoryTotals(state)) }
-    item { MonthBalanceStrip(state) }
-}
-
-@Composable
-private fun ReportHeroCard(state: FinanceUiState) {
-    ElevatedPanel {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            SectionHeader("Cash flow", "Income vs spend")
-            StatisticLineChart(state)
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                ReportStat("Income", state.money(state.monthReportIncome), MoneyGreen, Modifier.weight(1f))
-                ReportStat("Expense", state.money(state.monthExpense), LossRed, Modifier.weight(1f))
-            }
-        }
-    }
-}
-
-@Composable
-private fun StatisticLineChart(state: FinanceUiState) {
-    val months = (5 downTo 0).map { YearMonth.now().minusMonths(it.toLong()) }
-    val income = months.map { month ->
-        state.transactions.filter { it.month() == month && it.type == TransactionType.Income }.sumOf { it.amount }
-    }
-    val expense = months.map { month ->
-        state.transactions.filter { it.month() == month && it.type == TransactionType.Expense }.sumOf { it.amount }
-    }
-    val max = (income + expense).maxOrNull()?.coerceAtLeast(1.0) ?: 1.0
-
-    Canvas(Modifier.fillMaxWidth().height(170.dp)) {
-        fun point(index: Int, value: Double): Offset {
-            val x = if (months.size == 1) 0f else size.width * index / (months.lastIndex)
-            val y = size.height - ((value / max).toFloat().coerceIn(0f, 1f) * (size.height - 28f)) - 14f
-            return Offset(x, y)
-        }
-
-        repeat(4) { row ->
-            val y = size.height * (row + 1) / 5f
-            drawLine(Color(0xFF2C2C2C), Offset(0f, y), Offset(size.width, y), strokeWidth = 1.5f)
-        }
-
-        fun drawSeries(values: List<Double>, color: Color) {
-            if (values.isEmpty()) return
-            val path = Path().apply {
-                moveTo(point(0, values[0]).x, point(0, values[0]).y)
-                values.drop(1).forEachIndexed { index, value ->
-                    lineTo(point(index + 1, value).x, point(index + 1, value).y)
-                }
-            }
-            drawPath(path, color, style = Stroke(width = 5f, cap = StrokeCap.Round))
-            values.forEachIndexed { index, value ->
-                drawCircle(color, radius = 6f, center = point(index, value))
-            }
-        }
-
-        drawSeries(expense, WarningAmber)
-        drawSeries(income, PrimaryBlue)
-    }
-}
-
-@Composable
-private fun ReportStat(label: String, value: String, color: Color, modifier: Modifier) {
-    Column(
-        modifier = modifier
-            .background(Navy800, RoundedCornerShape(12.dp))
-            .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp)
-    ) {
-        Text(label, color = TextMuted, style = MaterialTheme.typography.labelMedium)
-        Text(value, color = color, style = MaterialTheme.typography.titleLarge, maxLines = 1)
-    }
+    item { MetricGrid(state = state) }
+    item { DailyExpenseBarGraph(state) }
+    item { StatementCheckCard(state) }
 }
 
 @Composable
@@ -169,12 +98,17 @@ private fun MetricGrid(state: FinanceUiState) {
         .sumOf { it.amount }
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            SmallMetric("Net", money(state.monthReportNet, currency), if (state.monthReportNet >= 0) MoneyGreen else LossRed, Modifier.weight(1f))
-            SmallMetric("Balance", money(state.currentBalanceAnchor, currency), PrimaryBlue, Modifier.weight(1f))
+            SmallMetric("Total spent", money(state.monthExpense, currency), LossRed, Modifier.weight(1f))
+            SmallMetric(
+                "Daily avg",
+                money(state.monthExpense / state.selectedMonth.lengthOfMonth().coerceAtLeast(1), currency),
+                WarningAmber,
+                Modifier.weight(1f)
+            )
         }
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            SmallMetric("Opening", money(state.selectedMonthOpeningBalance, currency), TextPrimary, Modifier.weight(1f))
-            SmallMetric("Credit card", money(creditCardActivity, currency), WarningAmber, Modifier.weight(1f))
+            SmallMetric("Balance", money(state.currentBalanceAnchor, currency), PrimaryBlue, Modifier.weight(1f))
+            SmallMetric("Card spend", money(creditCardActivity, currency), TextPrimary, Modifier.weight(1f))
         }
     }
 }
@@ -206,21 +140,25 @@ private fun SummaryAccountFilterRow(
 }
 
 @Composable
-private fun MonthBalanceStrip(state: FinanceUiState) {
-    val expectedClosing = state.balanceAtStartOfSelectedMonth + state.calendarMonthNet
+private fun StatementCheckCard(state: FinanceUiState) {
     val gap = state.selectedMonthReconciliationGap
+    val movementColor = if (state.calendarMonthNet >= 0.0) PrimaryBlue else LossRed
     ElevatedPanel {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             SectionHeader("Statement check", state.selectedMonth.shortLabel())
-            SummaryMetricRow("Current anchor", state.money(state.currentBalanceAnchor), PrimaryBlue)
-            SummaryMetricRow("Opening balance", state.money(state.balanceAtStartOfSelectedMonth), TextPrimary)
-            SummaryMetricRow("Closing balance", state.money(state.balanceAtEndOfSelectedMonth), TextPrimary)
-            SummaryMetricRow("Calendar cashflow", state.money(state.calendarMonthNet), if (state.calendarMonthNet >= 0) MoneyGreen else LossRed)
-            SummaryMetricRow("Expected close", state.money(expectedClosing), TextPrimary)
+            StatementMetricRow("Current bank balance", state.money(state.currentBalanceAnchor), PrimaryBlue)
+            StatementMetricRow("Month closing balance", state.money(state.balanceAtEndOfSelectedMonth), TextPrimary)
+            StatementMetricRow("Month movement", state.money(state.calendarMonthNet), movementColor)
             if (kotlin.math.abs(gap) > 0.01) {
                 Text(
-                    "Untracked difference: ${state.money(gap)}",
+                    "Statement difference: ${state.money(gap)}",
                     color = WarningAmber,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            } else {
+                Text(
+                    "Statement looks balanced for the selected account.",
+                    color = TextDim,
                     style = MaterialTheme.typography.bodyMedium
                 )
             }
@@ -229,10 +167,10 @@ private fun MonthBalanceStrip(state: FinanceUiState) {
 }
 
 @Composable
-private fun SummaryMetricRow(label: String, value: String, color: Color) {
+private fun StatementMetricRow(label: String, value: String, color: Color) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
         Text(label, color = TextDim, style = MaterialTheme.typography.bodyMedium)
-        Text(value, color = color, style = MaterialTheme.typography.titleMedium)
+        Text(value, color = color, style = MaterialTheme.typography.titleMedium, maxLines = 1)
     }
 }
 
@@ -258,41 +196,6 @@ private fun MonthSelector(months: List<YearMonth>, selected: YearMonth, onSelect
         months.forEach {
             MoneyChip(it.shortLabel(), selected = it == selected, onClick = { onSelected(it) })
         }
-    }
-}
-
-@Composable
-private fun CashFlowGraph(state: FinanceUiState) {
-    ElevatedPanel {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            SectionHeader("Summary", "This month")
-            val income = state.monthReportIncome.toFloat()
-            val expense = state.monthExpense.toFloat()
-            val max = maxOf(income, expense, 1f)
-            Bar("Income", income / max, MoneyGreen, state.money(income.toDouble()))
-            Bar("Expense", expense / max, LossRed, state.money(expense.toDouble()))
-        }
-    }
-}
-
-@Composable
-private fun Bar(label: String, progress: Float, color: Color, value: String) {
-    val animatedProgress by animateFloatAsState(
-        targetValue = progress.coerceIn(0f, 1f),
-        animationSpec = tween(650, easing = FastOutSlowInEasing),
-        label = "barProgress"
-    )
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Row {
-            Text(label, color = TextMuted, modifier = Modifier.weight(1f))
-            Text(value, color = TextPrimary)
-        }
-        LinearProgressIndicator(
-            progress = { animatedProgress },
-            modifier = Modifier.fillMaxWidth().height(10.dp).clip(RoundedCornerShape(50)),
-            color = color,
-            trackColor = appTrackColor()
-        )
     }
 }
 
@@ -388,37 +291,168 @@ private fun DailyExpenseBar(day: Int, segments: List<Pair<CategoryItem, Double>>
 private fun CategoryPieChart(state: FinanceUiState, totals: List<MonthlyCategoryTotal>) {
     ElevatedPanel {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            SectionHeader("Categories", "Expenses")
+            SectionHeader("Categories", "Spending mix")
             val expenses = totals.filter { it.expense > 0.0 }
-            val total = expenses.sumOf { it.expense }.toFloat()
-            if (total <= 0f) {
+                .sortedByDescending { it.expense }
+            val total = expenses.sumOf { it.expense }
+            if (total <= 0.0) {
                 Text("No category expenses this month.", color = TextDim, style = MaterialTheme.typography.bodyMedium)
             } else {
-                Canvas(modifier = Modifier.align(Alignment.CenterHorizontally).size(178.dp)) {
-                    var startAngle = -90f
-                    expenses.forEach { item ->
-                        val sweep = (item.expense.toFloat() / total) * 360f
+                val slices = expenseSlices(expenses)
+                val topSlice = slices.first()
+                Box(
+                    modifier = Modifier.align(Alignment.CenterHorizontally).size(220.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Canvas(modifier = Modifier.fillMaxSize()) {
+                        val strokeWidth = 28f
+                        val inset = strokeWidth / 2f + 10f
+                        val arcSize = Size(size.width - inset * 2f, size.height - inset * 2f)
                         drawArc(
-                            color = categoryColor(item.category, TransactionType.Expense),
-                            startAngle = startAngle,
-                            sweepAngle = sweep,
+                            color = appTrackColor(),
+                            startAngle = -90f,
+                            sweepAngle = 360f,
                             useCenter = false,
-                            topLeft = Offset(12f, 12f),
-                            size = Size(size.width - 24f, size.height - 24f),
-                            style = Stroke(width = 34f, cap = StrokeCap.Butt)
+                            topLeft = Offset(inset, inset),
+                            size = arcSize,
+                            style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
                         )
-                        startAngle += sweep
+                        var startAngle = -90f
+                        slices.forEach { slice ->
+                            val sweep = ((slice.amount / total).toFloat() * 360f).coerceAtLeast(3f)
+                            drawArc(
+                                color = slice.color,
+                                startAngle = startAngle,
+                                sweepAngle = (sweep - 4f).coerceAtLeast(1f),
+                                useCenter = false,
+                                topLeft = Offset(inset, inset),
+                                size = arcSize,
+                                style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
+                            )
+                            startAngle += sweep
+                        }
+                    }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            compactMoney(total, state.currency),
+                            color = TextPrimary,
+                            style = MaterialTheme.typography.headlineMedium,
+                            maxLines = 1
+                        )
+                        Text("spent", color = TextDim, style = MaterialTheme.typography.bodyMedium)
                     }
                 }
-                expenses.forEach { item ->
-                    SegmentAmountRow(
-                        label = item.category.name,
-                        value = state.money(item.expense),
-                        color = categoryColor(item.category, TransactionType.Expense),
-                        progress = (item.expense / total).coerceIn(0.04, 1.0).toFloat()
-                    )
+
+                TopCategoryCard(slice = topSlice, total = total, state = state)
+
+                slices.forEach { slice ->
+                    CategorySliceRow(slice = slice, total = total, state = state)
                 }
             }
+        }
+    }
+}
+
+private data class ExpenseSlice(
+    val label: String,
+    val amount: Double,
+    val color: Color,
+    val icon: ImageVector?
+)
+
+@Composable
+private fun expenseSlices(expenses: List<MonthlyCategoryTotal>): List<ExpenseSlice> {
+    val visible = expenses.take(5).map {
+        ExpenseSlice(
+            label = it.category.name,
+            amount = it.expense,
+            color = categoryColor(it.category, TransactionType.Expense),
+            icon = it.category.icon
+        )
+    }
+    val otherAmount = expenses.drop(5).sumOf { it.expense }
+    return if (otherAmount > 0.0) {
+        visible + ExpenseSlice("Other", otherAmount, TextMuted, null)
+    } else {
+        visible
+    }
+}
+
+@Composable
+private fun TopCategoryCard(slice: ExpenseSlice, total: Double, state: FinanceUiState) {
+    val percent = ((slice.amount / total) * 100).toInt()
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(slice.color.copy(alpha = 0.14f))
+            .padding(14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(46.dp)
+                .clip(CircleShape)
+                .background(slice.color),
+            contentAlignment = Alignment.Center
+        ) {
+            slice.icon?.let {
+                Icon(it, contentDescription = null, tint = Color(0xFF141414), modifier = Modifier.size(23.dp))
+            }
+        }
+        Column(Modifier.weight(1f)) {
+            Text("Top category", color = TextDim, style = MaterialTheme.typography.labelMedium)
+            Text(
+                slice.label,
+                color = TextPrimary,
+                style = MaterialTheme.typography.titleMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        Column(horizontalAlignment = Alignment.End) {
+            Text(state.money(slice.amount), color = TextPrimary, style = MaterialTheme.typography.titleMedium, maxLines = 1)
+            Text("$percent%", color = slice.color, style = MaterialTheme.typography.labelMedium)
+        }
+    }
+}
+
+@Composable
+private fun CategorySliceRow(slice: ExpenseSlice, total: Double, state: FinanceUiState) {
+    val progress by animateFloatAsState(
+        targetValue = (slice.amount / total).toFloat().coerceIn(0.04f, 1f),
+        animationSpec = tween(650, easing = FastOutSlowInEasing),
+        label = "categorySliceProgress"
+    )
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(10.dp).clip(CircleShape).background(slice.color))
+            Spacer(Modifier.width(10.dp))
+            Text(
+                slice.label,
+                color = TextPrimary,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(state.money(slice.amount), color = TextMuted, style = MaterialTheme.typography.bodyMedium, maxLines = 1)
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(8.dp)
+                .clip(RoundedCornerShape(50))
+                .background(appTrackColor())
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .fillMaxWidth(progress)
+                    .clip(RoundedCornerShape(50))
+                    .background(slice.color)
+            )
         }
     }
 }

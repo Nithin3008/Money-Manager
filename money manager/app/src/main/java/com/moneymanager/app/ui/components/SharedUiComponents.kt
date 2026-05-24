@@ -2,7 +2,6 @@ package com.moneymanager.app.ui
 
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -27,11 +26,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextAlign
@@ -133,15 +130,9 @@ internal fun ChipRow(content: @Composable RowScope.() -> Unit) {
 @Composable
 internal fun MoneyChip(label: String, selected: Boolean, onClick: () -> Unit) {
     val dark = isAmoledTheme()
-    val scale by animateFloatAsState(
-        targetValue = if (selected) 1.03f else 1f,
-        animationSpec = tween(220, easing = FastOutSlowInEasing),
-        label = "chipScale"
-    )
     FilterChip(
         selected = selected,
         onClick = onClick,
-        modifier = Modifier.scale(scale),
         shape = RoundedCornerShape(50),
         label = { Text(label) },
         colors = FilterChipDefaults.filterChipColors(
