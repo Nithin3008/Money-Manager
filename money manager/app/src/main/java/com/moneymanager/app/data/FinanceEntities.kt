@@ -1,0 +1,77 @@
+package com.moneymanager.app.data
+
+import androidx.room.Entity
+import androidx.room.PrimaryKey
+
+@Entity(tableName = "user_settings")
+data class UserSettingsEntity(
+    @PrimaryKey val id: Long = 1,
+    val userName: String,
+    val currencyCode: String,
+    val themeMode: String,
+    val salaryShiftIncomeEnabled: Boolean = false,
+    val salaryShiftWindowDays: Int = 5,
+    val salaryCategoryId: Long? = null,
+    val salaryKeywordsForUncategorized: Boolean = true,
+    val bankSmsSetupCompleted: Boolean = false,
+    val summaryAccountFilterIdsCsv: String = "",
+    val uiAccent: String = "Sky",
+    val uiSurface: String = "Midnight",
+    val defaultAccountId: Long? = null
+)
+
+@Entity(tableName = "accounts")
+data class AccountEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val name: String,
+    val balance: Double,
+    val smsMatchKey: String? = null
+)
+
+@Entity(tableName = "categories")
+data class CategoryEntity(
+    @PrimaryKey val id: Long,
+    val name: String,
+    val iconKey: String,
+    val isDefault: Boolean,
+    val colorHex: String
+)
+
+@Entity(tableName = "transactions")
+data class TransactionEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val name: String,
+    val amount: Double,
+    val type: String,
+    val categoryId: Long,
+    val accountId: Long?,
+    val timestampMillis: Long,
+    val isAutoDetected: Boolean,
+    val rawMessage: String?,
+    val smsBankLabel: String? = null,
+    val excludeFromSummary: Boolean = false,
+    val isCreditCardTransaction: Boolean = false
+)
+
+@Entity(tableName = "budgets")
+data class BudgetEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val name: String,
+    val limitAmount: Double,
+    val categoryIdsCsv: String,
+    val month: String
+)
+
+@Entity(tableName = "detected_drafts")
+data class DetectedDraftEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val bankName: String,
+    val name: String,
+    val amount: Double,
+    val type: String,
+    val counterparty: String,
+    val rawMessage: String,
+    val suggestedCategoryId: Long?,
+    val detectedAtMillis: Long,
+    val transactionTimestampMillis: Long
+)

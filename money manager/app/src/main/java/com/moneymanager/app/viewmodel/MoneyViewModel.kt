@@ -15,7 +15,6 @@ import com.moneymanager.app.model.BankAccount
 import com.moneymanager.app.model.BudgetPlan
 import com.moneymanager.app.model.MessageScanRange
 import java.time.LocalDate
-import com.moneymanager.app.model.BudgetWarning
 import com.moneymanager.app.model.CategoryItem
 import com.moneymanager.app.model.CurrencyOption
 import com.moneymanager.app.model.DetectedTransactionDraft
@@ -28,7 +27,6 @@ import com.moneymanager.app.model.ThemeMode
 import com.moneymanager.app.model.TransactionType
 import com.moneymanager.app.model.UiAccent
 import com.moneymanager.app.model.UiSurface
-import com.moneymanager.app.model.month
 import java.time.Instant
 import java.time.ZoneId
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -364,7 +362,7 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
             )
             repository.addTransaction(transaction)
             applyTransactionBalanceMovement(transaction)
-            val warning = findBudgetWarning(_uiState.value, transaction)
+            val warning = BudgetWarningCalculator.findBudgetWarning(_uiState.value, transaction)
             reloadState { it.copy(showTransactionSheet = false, budgetWarning = warning) }
         }
     }
@@ -433,7 +431,7 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val state = _uiState.value
             val transaction = state.transactions.firstOrNull { it.id == id }
-            val transferRows = manualTransferRowsFor(transaction, state.transactions)
+            val transferRows = TransferMatching.manualTransferRowsFor(transaction, state.transactions)
             if (transferRows.isNotEmpty()) {
                 transferRows.forEach { tx ->
                     tx.accountId?.let { accountId ->
@@ -777,32 +775,6 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun normalizedSmsRaw(raw: String?): String =
-        raw?.replace('\n', ' ')?.trim()?.replace(Regex("\\s+"), " ").orEmpty()
-
-    private fun manualTransferRowsFor(
-        transaction: LedgerTransaction?,
-        transactions: List<LedgerTransaction>
-    ): List<LedgerTransaction> {
-        val raw = transaction?.rawMessage.orEmpty()
-        if (transaction == null || !transaction.excludeFromSummary || !raw.startsWith("Manual transfer from ")) {
-            return emptyList()
-        }
-        return transactions
-            .filter {
-                it.excludeFromSummary &&
-                    it.rawMessage == raw &&
-                    it.amount == transaction.amount &&
-                    kotlin.math.abs(it.timestampMillis - transaction.timestampMillis) <= 1_000L
-            }
-            .takeIf { rows ->
-                rows.size >= 2 &&
-                    rows.any { it.type == TransactionType.Expense } &&
-                    rows.any { it.type == TransactionType.Income }
-            }
-            .orEmpty()
-    }
-
     private suspend fun applyTransactionBalanceMovement(
         transaction: LedgerTransaction,
         accountsById: MutableMap<Long, BankAccount>? = null
@@ -833,12 +805,6 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
         val updated = account.copy(balance = account.balance + delta)
         repository.updateAccount(updated)
         accountsById?.put(accountId, updated)
-    }
-
-    private fun isToday(timestampMillis: Long): Boolean {
-        return Instant.ofEpochMilli(timestampMillis)
-            .atZone(ZoneId.systemDefault())
-            .toLocalDate() == LocalDate.now()
     }
 
     private suspend fun reloadState(transform: (FinanceUiState) -> FinanceUiState = { it }) {
@@ -887,32 +853,6 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun findBudgetWarning(state: FinanceUiState, transaction: LedgerTransaction): BudgetWarning? {
-        if (transaction.type != TransactionType.Expense) return null
-
-        val matchingBudget = state.budgets.firstOrNull {
-            it.month == transaction.month() && transaction.categoryId in it.categoryIds
-        } ?: return null
-
-        val spent = state.transactions
-            .filter {
-                it.type == TransactionType.Expense &&
-                    it.month() == matchingBudget.month &&
-                    it.categoryId in matchingBudget.categoryIds
-            }
-            .sumOf { it.amount } + transaction.amount
-
-        return if (spent > matchingBudget.limitAmount) {
-            BudgetWarning(
-                budgetName = matchingBudget.name,
-                limitAmount = matchingBudget.limitAmount,
-                spentAmount = spent
-            )
-        } else {
-            null
-        }
-    }
-
     private suspend fun applyCategoryToSimilarUncategorized(
         source: LedgerTransaction,
         categoryId: Long,
@@ -920,13 +860,13 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
     ) {
         val uncategorizedId = _uiState.value.categories.firstOrNull { it.name == "Uncategorized" }?.id ?: 0L
         if (categoryId == uncategorizedId) return
-        val sourceKey = categoryLearningKey(source.name, source.rawMessage, source.type, source.smsBankLabel)
+        val sourceKey = CategoryLearning.categoryLearningKey(source.name, source.rawMessage, source.type, source.smsBankLabel)
         if (sourceKey.isBlank()) return
         _uiState.value.transactions
             .filter {
                 it.id != source.id &&
                     it.categoryId == uncategorizedId &&
-                    categoryLearningKey(it.name, it.rawMessage, it.type, it.smsBankLabel) == sourceKey
+                    CategoryLearning.categoryLearningKey(it.name, it.rawMessage, it.type, it.smsBankLabel) == sourceKey
             }
             .forEach {
                 repository.updateTransaction(it.copy(type = type, categoryId = categoryId))
@@ -934,128 +874,10 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun inferCategoryId(msg: com.moneymanager.app.data.ParsedTransactionMessage): Long? {
-        val uncategorizedId = _uiState.value.categories.firstOrNull { it.name == "Uncategorized" }?.id ?: 0L
-        val rawLower = msg.rawMessage.lowercase()
-        if (
-            msg.type == TransactionType.Expense &&
-            (
-                msg.isCreditCardTransaction ||
-                    "infobil*inft" in rawLower ||
-                    "info bil*inft" in rawLower ||
-                    listOf("credit card", "bank card", "card xx", "card ").any { it in rawLower }
-                )
-        ) {
-            _uiState.value.categories.firstOrNull { it.name.equals("Credit Card", ignoreCase = true) }?.id?.let {
-                return it
-            }
-        }
-        val key = categoryLearningKey(msg.counterparty, msg.rawMessage, msg.type, msg.bankName)
-        if (key.isBlank()) return null
-        return _uiState.value.transactions
-            .asSequence()
-            .filter { it.categoryId != uncategorizedId }
-            .filter { categoryLearningKey(it.name, it.rawMessage, it.type, it.smsBankLabel) == key }
-            .groupingBy { it.categoryId }
-            .eachCount()
-            .maxByOrNull { it.value }
-            ?.key
-    }
-
-    private fun categoryLearningKey(
-        name: String,
-        rawMessage: String?,
-        type: TransactionType,
-        smsBankLabel: String?
-    ): String {
-        if (SmsTransactionNormalizer.isNonLedgerTransactionArtifact(rawMessage, type)) return ""
-        val merchant = merchantFingerprint(name, rawMessage, smsBankLabel)
-        if (merchant.isBlank()) return ""
-        val source = rawMessage?.lowercase().orEmpty()
-        val channel = when {
-            "upi" in source -> "upi"
-            "neft" in source -> "neft"
-            "imps" in source -> "imps"
-            "card" in source -> "card"
-            else -> "sms"
-        }
-        return "${type.name.lowercase()}|$channel|$merchant"
-    }
-
-    private fun merchantFingerprint(name: String, rawMessage: String?, smsBankLabel: String?): String {
-        val nameCandidate = normalizeMerchantCandidate(name, smsBankLabel)
-        if (nameCandidate.isNotBlank()) return nameCandidate
-
-        val raw = rawMessage.orEmpty()
-        val candidates = listOfNotNull(
-            Regex("""(?i);\s*([A-Z0-9 .&_-]{2,40})\s+(?:debited|credited)""")
-                .find(raw)
-                ?.groupValues
-                ?.getOrNull(1),
-            Regex("""(?i)\b(?:to|at|from|for|towards)\s+([a-z0-9 .&_-]{3,40})""")
-                .find(raw)
-                ?.groupValues
-                ?.getOrNull(1)
-                ?.substringBefore(" on ")
-                ?.substringBefore(" ref")
-                ?.substringBefore(" using")
+        return CategoryLearning.inferCategoryId(
+            msg = msg,
+            categories = _uiState.value.categories,
+            transactions = _uiState.value.transactions
         )
-        return candidates
-            .asSequence()
-            .map { normalizeMerchantCandidate(it, smsBankLabel) }
-            .firstOrNull { it.isNotBlank() }
-            .orEmpty()
-    }
-
-    private fun normalizeMerchantCandidate(candidate: String, smsBankLabel: String?): String {
-        val bankTokens = smsBankLabel
-            ?.lowercase()
-            .orEmpty()
-            .replace(Regex("""\b(?:rs\.?|inr|rupees?)\s*[\d,]+(?:\.\d{1,2})?\b"""), " ")
-            .replace(Regex("""[^a-z0-9 ]"""), " ")
-            .split(" ")
-            .filter { it.length >= 3 }
-            .toSet()
-        val stopWords = setOf(
-            "debited",
-            "credited",
-            "credit",
-            "debit",
-            "account",
-            "bank",
-            "card",
-            "ending",
-            "payment",
-            "received",
-            "amount",
-            "available",
-            "balance",
-            "transaction",
-            "reference",
-            "your",
-            "a/c",
-            "paid",
-            "sent",
-            "from",
-            "with"
-        )
-        val tokens = candidate
-            .lowercase()
-            .substringBefore("http")
-            .replace(Regex("""\b(?:on|by)\s+\d{1,2}\b"""), " ")
-            .replace(Regex("""\b(?:rs\.?|inr|rupees?)\s*[\d,]+(?:\.\d{1,2})?\b"""), " ")
-            .replace(Regex("""\b\d{1,2}[-/][a-z]{3}[-/]\d{2,4}\b""", RegexOption.IGNORE_CASE), " ")
-            .replace(Regex("""\b\d{1,2}[-/]\d{1,2}[-/]\d{2,4}\b"""), " ")
-            .replace(Regex("""\b(?:ref|rrn|utr|txn|transaction|upi)[\s:.-]*[a-z0-9-]+\b""", RegexOption.IGNORE_CASE), " ")
-            .replace(Regex("""\b[x*]*\d{3,}\b"""), " ")
-            .replace(Regex("""\b\d+\b"""), " ")
-            .replace(Regex("""[^a-z0-9 ]"""), " ")
-            .split(" ")
-            .map { it.trim() }
-            .filter { it.length >= 3 }
-            .filterNot { it in stopWords || it in bankTokens }
-            .take(4)
-        if (tokens.isEmpty()) return ""
-        if (tokens.size == 1 && tokens.first() in setOf("hdfc", "icici", "axis", "kotak", "indian", "sbi")) return ""
-        return tokens.joinToString(" ")
     }
 }
