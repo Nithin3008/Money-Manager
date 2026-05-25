@@ -751,7 +751,7 @@ private fun RegistrationScreen(onComplete: (String, List<Pair<String, Double>>, 
             .background(Navy950)
             .statusBarsPadding()
             .imePadding(),
-        contentPadding = PaddingValues(start = 24.dp, top = 54.dp, end = 24.dp, bottom = 180.dp),
+        contentPadding = PaddingValues(start = 24.dp, top = 28.dp, end = 24.dp, bottom = 72.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         item {
@@ -840,16 +840,16 @@ private fun RegistrationScreen(onComplete: (String, List<Pair<String, Double>>, 
 @Composable
 private fun FintrackAuthHero() {
     Column(
-        modifier = Modifier.fillMaxWidth().padding(bottom = 18.dp),
+        modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(34.dp)
+        verticalArrangement = Arrangement.spacedBy(22.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             FintrackLogoMark(size = 34.dp)
             Spacer(Modifier.width(8.dp))
             Text("Money Manager", color = PrimaryBlue, style = MaterialTheme.typography.headlineMedium)
         }
-        Spacer(Modifier.height(180.dp))
+        Spacer(Modifier.height(42.dp))
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(
                 "Take Control of Your Finances",
@@ -1354,7 +1354,12 @@ private fun TransactionDetailSheet(
             )
         }
     ) {
-        Box(Modifier.fillMaxWidth().imePadding()) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.86f)
+                .imePadding()
+        ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()

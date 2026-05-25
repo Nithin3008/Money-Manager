@@ -16,7 +16,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         BudgetEntity::class,
         DetectedDraftEntity::class
     ],
-    version = 12
+    version = 14
 )
 abstract class FinanceDatabase : RoomDatabase() {
     abstract fun dao(): FinanceDao
@@ -42,7 +42,9 @@ abstract class FinanceDatabase : RoomDatabase() {
                         Migration8To9,
                         Migration9To10,
                         Migration10To11,
-                        Migration11To12
+                        Migration11To12,
+                        Migration12To13,
+                        Migration13To14
                     )
                     .build()
                     .also { instance = it }
@@ -150,6 +152,61 @@ abstract class FinanceDatabase : RoomDatabase() {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE transactions ADD COLUMN description TEXT")
             }
+        }
+
+        private val Migration12To13 = object : Migration(12, 13) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Schema version 13 is reserved for UI-only changes; no table changes are needed.
+            }
+        }
+
+        private val Migration13To14 = object : Migration(13, 14) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.addColumnIfMissing("user_settings", "themeMode", "TEXT NOT NULL DEFAULT 'Dark'")
+                db.addColumnIfMissing("user_settings", "salaryShiftIncomeEnabled", "INTEGER NOT NULL DEFAULT 0")
+                db.addColumnIfMissing("user_settings", "salaryShiftWindowDays", "INTEGER NOT NULL DEFAULT 5")
+                db.addColumnIfMissing("user_settings", "salaryCategoryId", "INTEGER")
+                db.addColumnIfMissing("user_settings", "salaryKeywordsForUncategorized", "INTEGER NOT NULL DEFAULT 1")
+                db.addColumnIfMissing("user_settings", "bankSmsSetupCompleted", "INTEGER NOT NULL DEFAULT 0")
+                db.addColumnIfMissing("user_settings", "summaryAccountFilterIdsCsv", "TEXT NOT NULL DEFAULT ''")
+                db.addColumnIfMissing("user_settings", "uiAccent", "TEXT NOT NULL DEFAULT 'Sky'")
+                db.addColumnIfMissing("user_settings", "uiSurface", "TEXT NOT NULL DEFAULT 'Midnight'")
+                db.addColumnIfMissing("user_settings", "defaultAccountId", "INTEGER")
+
+                db.addColumnIfMissing("accounts", "smsMatchKey", "TEXT")
+
+                db.addColumnIfMissing("categories", "colorHex", "TEXT NOT NULL DEFAULT '#8F95A3'")
+
+                db.addColumnIfMissing("transactions", "smsBankLabel", "TEXT")
+                db.addColumnIfMissing("transactions", "excludeFromSummary", "INTEGER NOT NULL DEFAULT 0")
+                db.addColumnIfMissing("transactions", "isCreditCardTransaction", "INTEGER NOT NULL DEFAULT 0")
+                db.addColumnIfMissing("transactions", "description", "TEXT")
+
+                db.addColumnIfMissing("detected_drafts", "transactionTimestampMillis", "INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("UPDATE detected_drafts SET transactionTimestampMillis = detectedAtMillis WHERE transactionTimestampMillis = 0")
+            }
+        }
+
+        private fun SupportSQLiteDatabase.addColumnIfMissing(
+            tableName: String,
+            columnName: String,
+            columnDefinition: String
+        ) {
+            if (!hasColumn(tableName, columnName)) {
+                execSQL("ALTER TABLE `$tableName` ADD COLUMN `$columnName` $columnDefinition")
+            }
+        }
+
+        private fun SupportSQLiteDatabase.hasColumn(tableName: String, columnName: String): Boolean {
+            query("PRAGMA table_info(`$tableName`)").use { cursor ->
+                val nameIndex = cursor.getColumnIndex("name")
+                while (cursor.moveToNext()) {
+                    if (nameIndex >= 0 && cursor.getString(nameIndex) == columnName) {
+                        return true
+                    }
+                }
+            }
+            return false
         }
     }
 }
