@@ -65,8 +65,9 @@ internal fun LazyListScope.summaryContent(
 ) {
     item { LargeTitle("Reports", state.selectedMonth.shortLabel()) }
     item {
+        val months = remember(state.transactions) { availableMonths(state) }
         MonthSelector(
-            months = availableMonths(state),
+            months = months,
             selected = state.selectedMonth,
             onSelected = onMonthSelected
         )
@@ -80,7 +81,10 @@ internal fun LazyListScope.summaryContent(
             )
         }
     }
-    item { CategoryPieChart(state, categoryTotals(state)) }
+    item {
+        val totals = remember(state.monthTransactions, state.categories) { categoryTotals(state) }
+        CategoryPieChart(state, totals)
+    }
     item { MetricGrid(state = state) }
     item { DailyExpenseBarGraph(state) }
     item { StatementCheckCard(state) }
@@ -89,13 +93,19 @@ internal fun LazyListScope.summaryContent(
 @Composable
 private fun MetricGrid(state: FinanceUiState) {
     val currency = state.currency
-    val creditCardActivity = state.transactions
-        .filter {
-            it.isCreditCardTransaction &&
-                YearMonth.from(it.transactionDate()) == state.selectedMonth &&
-                (state.activeSummaryAccountIds.isEmpty() || it.accountId in state.activeSummaryAccountIds)
-        }
-        .sumOf { it.amount }
+    val creditCardActivity = remember(
+        state.transactions,
+        state.selectedMonth,
+        state.activeSummaryAccountIds
+    ) {
+        state.transactions
+            .filter {
+                it.isCreditCardTransaction &&
+                    YearMonth.from(it.transactionDate()) == state.selectedMonth &&
+                    (state.activeSummaryAccountIds.isEmpty() || it.accountId in state.activeSummaryAccountIds)
+            }
+            .sumOf { it.amount }
+    }
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             SmallMetric("Total spent", money(state.monthExpense, currency), LossRed, Modifier.weight(1f))

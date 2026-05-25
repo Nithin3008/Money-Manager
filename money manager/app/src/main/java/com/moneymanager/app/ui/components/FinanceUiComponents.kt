@@ -50,7 +50,6 @@ import com.moneymanager.app.ui.theme.PrimarySoft
 import com.moneymanager.app.ui.theme.TextDim
 import com.moneymanager.app.ui.theme.TextMuted
 import com.moneymanager.app.ui.theme.TextPrimary
-import java.time.format.DateTimeFormatter
 
 @Composable
 internal fun CategoryChoiceChip(
@@ -167,7 +166,7 @@ internal fun TransactionRow(
     state: FinanceUiState,
     onSelect: (Long) -> Unit
 ) {
-    val category = state.categories.firstOrNull { it.id == transaction.categoryId }
+    val category = state.categoriesById[transaction.categoryId]
     val color = categoryColor(category, transaction.type)
     val cardColor = if (isAmoledTheme()) Color(0xFF1A1A1A) else Color.White
     val neutralBorder = if (isAmoledTheme()) Color(0xFF323232) else Color(0xFFD8E5CC)
@@ -176,7 +175,7 @@ internal fun TransactionRow(
     } else {
         color.copy(alpha = if (isAmoledTheme()) 0.52f else 0.34f)
     }
-    val dateLabel = transaction.transactionDate().format(DateTimeFormatter.ofPattern("MMM d, yyyy"))
+    val dateLabel = transaction.transactionDate().mediumDateLabel()
     val categoryLabel = category?.name ?: "Set category"
 
     Card(

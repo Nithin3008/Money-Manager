@@ -31,6 +31,7 @@ import androidx.compose.material.icons.rounded.ShoppingBag
 import androidx.compose.material.icons.rounded.SportsEsports
 import androidx.compose.material.icons.rounded.Subscriptions
 import androidx.compose.material.icons.rounded.Work
+import androidx.compose.runtime.Immutable
 import androidx.compose.ui.graphics.vector.ImageVector
 import java.time.LocalDate
 import java.time.YearMonth
@@ -120,6 +121,7 @@ enum class UiSurface(
     Warm("Warm", "#17130E", "#211A13", "#2B2218", "#382B1F", "#FFFAF5", "#FFFFFF", "#F7EFE6", "#EDE1D4")
 }
 
+@Immutable
 data class BankAccount(
     val id: Long,
     val name: String,
@@ -127,6 +129,7 @@ data class BankAccount(
     val smsMatchKey: String? = null
 )
 
+@Immutable
 data class CategoryItem(
     val id: Long,
     val name: String,
@@ -136,6 +139,7 @@ data class CategoryItem(
     val colorHex: String
 )
 
+@Immutable
 data class LedgerTransaction(
     val id: Long,
     val name: String,
@@ -152,6 +156,7 @@ data class LedgerTransaction(
     val description: String? = null
 )
 
+@Immutable
 data class BudgetPlan(
     val id: Long,
     val name: String,
@@ -160,6 +165,7 @@ data class BudgetPlan(
     val month: YearMonth
 )
 
+@Immutable
 data class DetectedTransactionDraft(
     val id: Long,
     val bankName: String,
@@ -173,18 +179,21 @@ data class DetectedTransactionDraft(
     val transactionTimestampMillis: Long
 )
 
+@Immutable
 data class BudgetWarning(
     val budgetName: String,
     val limitAmount: Double,
     val spentAmount: Double
 )
 
+@Immutable
 data class MonthlyCategoryTotal(
     val category: CategoryItem,
     val income: Double,
     val expense: Double
 )
 
+@Immutable
 data class FinanceUiState(
     val isAppInitializing: Boolean = true,
     val userName: String = "",
@@ -228,119 +237,155 @@ data class FinanceUiState(
 ) {
     val hasCompletedRegistration: Boolean = userName.isNotBlank()
 
-    val activeSummaryAccountIds: Set<Long>
-        get() = SummaryCalculations.activeAccountIds(this)
+    val categoriesById: Map<Long, CategoryItem> by lazy(LazyThreadSafetyMode.NONE) {
+        categories.associateBy { it.id }
+    }
+
+    val activeSummaryAccountIds: Set<Long> by lazy(LazyThreadSafetyMode.NONE) {
+        SummaryCalculations.activeAccountIds(this)
+    }
 
     /** Transactions included in Summary metrics for [selectedMonth], matching calendar-month bank statements. */
-    val monthTransactions: List<LedgerTransaction>
-        get() = SummaryCalculations.monthTransactions(this)
+    val monthTransactions: List<LedgerTransaction> by lazy(LazyThreadSafetyMode.NONE) {
+        SummaryCalculations.monthTransactions(this)
+    }
 
-    val monthExpenseTransactions: List<LedgerTransaction>
-        get() = monthTransactions.filter { it.type == TransactionType.Expense }
+    val monthExpenseTransactions: List<LedgerTransaction> by lazy(LazyThreadSafetyMode.NONE) {
+        monthTransactions.filter { it.type == TransactionType.Expense }
+    }
 
-    val monthIncomeTransactions: List<LedgerTransaction>
-        get() = monthTransactions.filter { it.type == TransactionType.Income }
+    val monthIncomeTransactions: List<LedgerTransaction> by lazy(LazyThreadSafetyMode.NONE) {
+        monthTransactions.filter { it.type == TransactionType.Income }
+    }
 
-    val monthSalaryIncome: Double
-        get() = monthIncomeTransactions
+    val monthSalaryIncome: Double by lazy(LazyThreadSafetyMode.NONE) {
+        monthIncomeTransactions
             .filter { SummaryCalculations.incomeCountsAsSalary(this, it) }
             .sumOf { it.amount }
+    }
 
-    val monthOtherIncome: Double
-        get() = monthIncomeTransactions
+    val monthOtherIncome: Double by lazy(LazyThreadSafetyMode.NONE) {
+        monthIncomeTransactions
             .filter { !SummaryCalculations.incomeCountsAsSalary(this, it) }
             .sumOf { it.amount }
+    }
 
-    val monthExpense: Double
-        get() = monthExpenseTransactions
+    val monthExpense: Double by lazy(LazyThreadSafetyMode.NONE) {
+        monthExpenseTransactions
             .sumOf { it.amount }
+    }
 
-    val monthNet: Double
-        get() = monthIncome - monthExpense
+    val monthNet: Double by lazy(LazyThreadSafetyMode.NONE) {
+        monthIncome - monthExpense
+    }
 
-    val monthIncome: Double
-        get() = monthSalaryIncome + monthOtherIncome
+    val monthIncome: Double by lazy(LazyThreadSafetyMode.NONE) {
+        monthSalaryIncome + monthOtherIncome
+    }
 
-    val monthReportIncome: Double
-        get() = monthIncome
+    val monthReportIncome: Double by lazy(LazyThreadSafetyMode.NONE) {
+        monthIncome
+    }
 
-    val monthReportNet: Double
-        get() = monthReportIncome - monthExpense
+    val monthReportNet: Double by lazy(LazyThreadSafetyMode.NONE) {
+        monthReportIncome - monthExpense
+    }
 
     /** Actual credits dated inside [selectedMonth] (calendar), for comparison when payroll shift moves income. */
-    val calendarMonthIncomeTotal: Double
-        get() = SummaryCalculations.calendarMonthIncomeTotal(this)
+    val calendarMonthIncomeTotal: Double by lazy(LazyThreadSafetyMode.NONE) {
+        SummaryCalculations.calendarMonthIncomeTotal(this)
+    }
 
-    val selectedMonthOpeningBalance: Double
-        get() = balanceAtStartOfSelectedMonth
+    val selectedMonthOpeningBalance: Double by lazy(LazyThreadSafetyMode.NONE) {
+        balanceAtStartOfSelectedMonth
+    }
 
-    val selectedMonthSalaryIncome: Double
-        get() = monthSalaryIncome
+    val selectedMonthSalaryIncome: Double by lazy(LazyThreadSafetyMode.NONE) {
+        monthSalaryIncome
+    }
 
     /** Current user-entered account balance, used as the anchor for reverse reconstruction. */
-    val currentBalanceAnchor: Double
-        get() = SummaryCalculations.balanceAnchor(this)
+    val currentBalanceAnchor: Double by lazy(LazyThreadSafetyMode.NONE) {
+        SummaryCalculations.balanceAnchor(this)
+    }
 
     /** Cash balance before any transaction dated in [selectedMonth] (calendar), reconstructed from current balance. */
-    val balanceAtStartOfSelectedMonth: Double
-        get() = SummaryCalculations.balanceBeforeDate(this, selectedMonth.atDay(1))
+    val balanceAtStartOfSelectedMonth: Double by lazy(LazyThreadSafetyMode.NONE) {
+        SummaryCalculations.balanceBeforeDate(this, selectedMonth.atDay(1))
+    }
 
     /** Cash balance after all transactions through the last day of [selectedMonth], reconstructed from current balance. */
-    val balanceAtEndOfSelectedMonth: Double
-        get() = SummaryCalculations.balanceBeforeDate(this, selectedMonth.plusMonths(1).atDay(1))
+    val balanceAtEndOfSelectedMonth: Double by lazy(LazyThreadSafetyMode.NONE) {
+        SummaryCalculations.balanceBeforeDate(this, selectedMonth.plusMonths(1).atDay(1))
+    }
 
     /** Actual calendar cashflow for the selected month. This should explain opening to closing balance. */
-    val calendarMonthNet: Double
-        get() = SummaryCalculations.calendarMonthNet(this)
+    val calendarMonthNet: Double by lazy(LazyThreadSafetyMode.NONE) {
+        SummaryCalculations.calendarMonthNet(this)
+    }
 
     /** Difference between reconstructed closing balance and calendar cashflow math; non-zero means missing/excluded data. */
-    val selectedMonthReconciliationGap: Double
-        get() = balanceAtEndOfSelectedMonth - (balanceAtStartOfSelectedMonth + calendarMonthNet)
+    val selectedMonthReconciliationGap: Double by lazy(LazyThreadSafetyMode.NONE) {
+        balanceAtEndOfSelectedMonth - (balanceAtStartOfSelectedMonth + calendarMonthNet)
+    }
 
-    val trackedBalance: Double
-        get() = accounts.sumOf { it.balance }
+    val trackedBalance: Double by lazy(LazyThreadSafetyMode.NONE) {
+        accounts.sumOf { it.balance }
+    }
 
-    val activeBudgets: List<BudgetPlan>
-        get() = budgets.filter { it.month == selectedMonth }
+    val activeBudgets: List<BudgetPlan> by lazy(LazyThreadSafetyMode.NONE) {
+        budgets.filter { it.month == selectedMonth }
+    }
 
-    val todayTransactions: List<LedgerTransaction>
-        get() = TransactionListCalculations.todayTransactions(this)
+    val todayTransactions: List<LedgerTransaction> by lazy(LazyThreadSafetyMode.NONE) {
+        TransactionListCalculations.todayTransactions(this)
+    }
 
-    val todayDetectedDrafts: List<DetectedTransactionDraft>
-        get() = TransactionListCalculations.todayDetectedDrafts(this)
+    val todayDetectedDrafts: List<DetectedTransactionDraft> by lazy(LazyThreadSafetyMode.NONE) {
+        TransactionListCalculations.todayDetectedDrafts(this)
+    }
 
-    val activityTransactions: List<LedgerTransaction>
-        get() = TransactionListCalculations.activityTransactions(this)
+    val activityTransactions: List<LedgerTransaction> by lazy(LazyThreadSafetyMode.NONE) {
+        TransactionListCalculations.activityTransactions(this)
+    }
 
-    val dashboardTransactionPageCount: Int
-        get() = ((todayTransactions.size + TRANSACTIONS_PER_PAGE - 1) / TRANSACTIONS_PER_PAGE)
+    val dashboardTransactionPageCount: Int by lazy(LazyThreadSafetyMode.NONE) {
+        ((todayTransactions.size + TRANSACTIONS_PER_PAGE - 1) / TRANSACTIONS_PER_PAGE)
             .coerceAtLeast(1)
+    }
 
-    val dashboardCurrentPage: Int
-        get() = dashboardTransactionPage.coerceIn(1, dashboardTransactionPageCount)
+    val dashboardCurrentPage: Int by lazy(LazyThreadSafetyMode.NONE) {
+        dashboardTransactionPage.coerceIn(1, dashboardTransactionPageCount)
+    }
 
-    val dashboardPagedTransactions: List<LedgerTransaction>
-        get() = todayTransactions
+    val dashboardPagedTransactions: List<LedgerTransaction> by lazy(LazyThreadSafetyMode.NONE) {
+        todayTransactions
             .drop((dashboardCurrentPage - 1) * TRANSACTIONS_PER_PAGE)
             .take(TRANSACTIONS_PER_PAGE)
+    }
 
-    val dashboardDraftPageCount: Int
-        get() = ((todayDetectedDrafts.size + TRANSACTIONS_PER_PAGE - 1) / TRANSACTIONS_PER_PAGE)
+    val dashboardDraftPageCount: Int by lazy(LazyThreadSafetyMode.NONE) {
+        ((todayDetectedDrafts.size + TRANSACTIONS_PER_PAGE - 1) / TRANSACTIONS_PER_PAGE)
             .coerceAtLeast(1)
+    }
 
-    val dashboardCurrentDraftPage: Int
-        get() = dashboardDraftPage.coerceIn(1, dashboardDraftPageCount)
+    val dashboardCurrentDraftPage: Int by lazy(LazyThreadSafetyMode.NONE) {
+        dashboardDraftPage.coerceIn(1, dashboardDraftPageCount)
+    }
 
-    val dashboardPagedDrafts: List<DetectedTransactionDraft>
-        get() = todayDetectedDrafts
+    val dashboardPagedDrafts: List<DetectedTransactionDraft> by lazy(LazyThreadSafetyMode.NONE) {
+        todayDetectedDrafts
             .drop((dashboardCurrentDraftPage - 1) * TRANSACTIONS_PER_PAGE)
             .take(TRANSACTIONS_PER_PAGE)
+    }
 
-    val pagedTransactions: List<LedgerTransaction>
-        get() = activityTransactions.take((activityTransactionPage.coerceAtLeast(1)) * TRANSACTIONS_PER_PAGE)
+    val pagedTransactions: List<LedgerTransaction> by lazy(LazyThreadSafetyMode.NONE) {
+        activityTransactions.take((activityTransactionPage.coerceAtLeast(1)) * TRANSACTIONS_PER_PAGE)
+    }
 
-    val hasMoreTransactions: Boolean
-        get() = pagedTransactions.size < activityTransactions.size
+    val hasMoreTransactions: Boolean by lazy(LazyThreadSafetyMode.NONE) {
+        pagedTransactions.size < activityTransactions.size
+    }
 }
 
 object DefaultCategories {

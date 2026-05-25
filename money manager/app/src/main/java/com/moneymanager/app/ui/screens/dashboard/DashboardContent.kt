@@ -67,7 +67,6 @@ import com.moneymanager.app.ui.theme.TextMuted
 import com.moneymanager.app.ui.theme.TextPrimary
 import java.time.LocalDate
 import java.time.YearMonth
-import java.time.format.DateTimeFormatter
 
 internal fun LazyListScope.dashboardContent(
     state: FinanceUiState,
@@ -146,12 +145,16 @@ private fun FintrackBalanceHero(state: FinanceUiState) {
         ?: state.accounts.firstOrNull()
     val currentBalance = currentAccount?.balance ?: 0.0
     val balanceSource = currentAccount?.name ?: "No bank selected"
-    val monthTransactions = state.transactions.filter {
-        !it.excludeFromSummary && YearMonth.from(it.transactionDate()) == currentMonth
+    val monthExpense = remember(state.transactions, currentMonth) {
+        state.transactions
+            .asSequence()
+            .filter {
+                !it.excludeFromSummary &&
+                    it.type == TransactionType.Expense &&
+                    YearMonth.from(it.transactionDate()) == currentMonth
+            }
+            .sumOf { it.amount }
     }
-    val monthExpense = monthTransactions
-        .filter { it.type == TransactionType.Expense }
-        .sumOf { it.amount }
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -271,18 +274,20 @@ private fun ActionTile(icon: ImageVector, label: String, value: String, modifier
 
 @Composable
 private fun FintrackTodaySegments(state: FinanceUiState) {
-    val totals = state.categories.map { category ->
-        val transactions = state.todayTransactions.filter { it.categoryId == category.id && !it.excludeFromSummary }
-        MonthlyCategoryTotal(
-            category = category,
-            income = transactions.filter { it.type == TransactionType.Income }.sumOf { it.amount },
-            expense = transactions.filter { it.type == TransactionType.Expense }.sumOf { it.amount }
-        )
-    }.filter { it.income > 0.0 || it.expense > 0.0 }
+    val totals = remember(state.categories, state.todayTransactions) {
+        state.categories.map { category ->
+            val transactions = state.todayTransactions.filter { it.categoryId == category.id && !it.excludeFromSummary }
+            MonthlyCategoryTotal(
+                category = category,
+                income = transactions.filter { it.type == TransactionType.Income }.sumOf { it.amount },
+                expense = transactions.filter { it.type == TransactionType.Expense }.sumOf { it.amount }
+            )
+        }.filter { it.income > 0.0 || it.expense > 0.0 }
+    }
 
     ElevatedPanel {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            SectionHeader("Spend categories", LocalDate.now().format(DateTimeFormatter.ofPattern("MMM d")))
+            SectionHeader("Spend categories", LocalDate.now().monthDayLabel())
             if (totals.isEmpty()) {
                 Text("No categorized movement yet.", color = TextDim, style = MaterialTheme.typography.bodyMedium)
             } else {
@@ -310,7 +315,7 @@ private fun DetectedDraftRow(
 ) {
     var categoryId by remember { mutableStateOf(draft.suggestedCategoryId ?: state.categories.first().id) }
     var type by remember { mutableStateOf(draft.type) }
-    val dateLabel = draft.transactionDate().format(DateTimeFormatter.ofPattern("MMM d, yyyy"))
+    val dateLabel = draft.transactionDate().mediumDateLabel()
     ElevatedPanel {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {

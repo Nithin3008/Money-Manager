@@ -43,7 +43,6 @@ import com.moneymanager.app.ui.theme.TextMuted
 import com.moneymanager.app.ui.theme.TextPrimary
 import java.time.LocalDate
 import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 
 internal fun LazyListScope.activityContent(
     state: FinanceUiState,
@@ -75,7 +74,7 @@ internal fun LazyListScope.activityContent(
     } else {
         itemsIndexed(
             items = state.pagedTransactions,
-            key = { index, transaction -> "${transaction.id}_${transaction.timestampMillis}_$index" }
+            key = { _, transaction -> transaction.id }
         ) { _, transaction ->
             TransactionRow(transaction = transaction, state = state, onSelect = onEditTransaction)
         }
@@ -153,17 +152,19 @@ private fun ActivityDateFilterPanel(
     state: FinanceUiState,
     onDateFilterSelected: (ActivityDateFilter, LocalDate?, LocalDate?) -> Unit
 ) {
-    val formatter = DateTimeFormatter.ofPattern("MMM d, yyyy")
     val today = LocalDate.now()
     var startDate by remember(state.activityStartDate) { mutableStateOf(state.activityStartDate) }
     var endDate by remember(state.activityEndDate) { mutableStateOf(state.activityEndDate) }
     var showStartPicker by remember { mutableStateOf(false) }
     var showEndPicker by remember { mutableStateOf(false) }
+    val dateRangeLabel = remember(state.activityStartDate, state.activityEndDate) {
+        "${state.activityStartDate.mediumDateLabel()} - ${state.activityEndDate.mediumDateLabel()}"
+    }
 
     ElevatedPanel {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(
-                "${formatter.format(state.activityStartDate)} - ${formatter.format(state.activityEndDate)}",
+                dateRangeLabel,
                 color = TextMuted,
                 style = MaterialTheme.typography.bodyMedium
             )
@@ -186,7 +187,7 @@ private fun ActivityDateFilterPanel(
                     ) {
                         Icon(Icons.Rounded.CalendarMonth, contentDescription = null)
                         Spacer(Modifier.width(6.dp))
-                        Text(formatter.format(startDate), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(startDate.mediumDateLabel(), maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     OutlinedButton(
                         onClick = { showEndPicker = true },
@@ -196,7 +197,7 @@ private fun ActivityDateFilterPanel(
                     ) {
                         Icon(Icons.Rounded.CalendarMonth, contentDescription = null)
                         Spacer(Modifier.width(6.dp))
-                        Text(formatter.format(endDate), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(endDate.mediumDateLabel(), maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
             }

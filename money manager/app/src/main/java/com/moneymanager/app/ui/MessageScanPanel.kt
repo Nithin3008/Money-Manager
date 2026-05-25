@@ -46,7 +46,6 @@ import com.moneymanager.app.ui.theme.TextMuted
 import com.moneymanager.app.ui.theme.TextPrimary
 import java.time.LocalDate
 import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 
 @Composable
 fun MessageScanPanel(onScan: (MessageScanRange, LocalDate, LocalDate) -> Unit) {
@@ -56,7 +55,6 @@ fun MessageScanPanel(onScan: (MessageScanRange, LocalDate, LocalDate) -> Unit) {
     var endDate by remember { mutableStateOf(today) }
     var showStartPicker by remember { mutableStateOf(false) }
     var showEndPicker by remember { mutableStateOf(false) }
-    val formatter = DateTimeFormatter.ofPattern("MMM d, yyyy")
     val isCustomValid = selectedRange != MessageScanRange.Custom || !startDate.isAfter(endDate)
     val buttonLabel = when (selectedRange) {
         MessageScanRange.Today -> "Update Today"
@@ -106,7 +104,7 @@ fun MessageScanPanel(onScan: (MessageScanRange, LocalDate, LocalDate) -> Unit) {
                     ) {
                         Icon(Icons.Rounded.CalendarMonth, contentDescription = null)
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Start: ${formatter.format(startDate)}")
+                        Text("Start: ${startDate.mediumDateLabel()}")
                     }
                     OutlinedButton(
                         onClick = { showEndPicker = true },
@@ -114,7 +112,7 @@ fun MessageScanPanel(onScan: (MessageScanRange, LocalDate, LocalDate) -> Unit) {
                     ) {
                         Icon(Icons.Rounded.CalendarMonth, contentDescription = null)
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("End: ${formatter.format(endDate)}")
+                        Text("End: ${endDate.mediumDateLabel()}")
                     }
                 }
                 if (!isCustomValid) {

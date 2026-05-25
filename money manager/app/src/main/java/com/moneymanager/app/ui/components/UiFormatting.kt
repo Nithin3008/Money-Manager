@@ -14,10 +14,17 @@ import com.moneymanager.app.ui.theme.TextDim
 import com.moneymanager.app.ui.theme.TextMuted
 import com.moneymanager.app.ui.theme.TextPrimary
 import java.text.NumberFormat
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 import java.util.Currency
+import java.util.EnumMap
 import java.util.Locale
 
 internal val OtherIncomeGold = Color(0xFFFFC857)
+private val mediumDateFormatter = DateTimeFormatter.ofPattern("MMM d, yyyy")
+private val monthDayFormatter = DateTimeFormatter.ofPattern("MMM d")
+private val parsedColorCache = mutableMapOf<String, Color>()
+private val moneyFormatterCache = ThreadLocal<MutableMap<CurrencyOption, NumberFormat>>()
 
 internal fun appBorderColor(): Color {
     return if (isAmoledTheme()) Color(0xFF323232) else Color(0xFFD8E5CC)
@@ -56,9 +63,13 @@ internal fun categoryColor(category: String, type: TransactionType): Color {
 }
 
 internal fun colorFromHex(hex: String): Color {
-    return runCatching {
-        Color(android.graphics.Color.parseColor(hex))
-    }.getOrDefault(TextDim)
+    return synchronized(parsedColorCache) {
+        parsedColorCache.getOrPut(hex) {
+            runCatching {
+                Color(android.graphics.Color.parseColor(hex))
+            }.getOrDefault(TextDim)
+        }
+    }
 }
 
 internal fun FinanceUiState.money(value: Double): String {
@@ -66,11 +77,25 @@ internal fun FinanceUiState.money(value: Double): String {
 }
 
 internal fun money(value: Double, currency: CurrencyOption): String {
-    val formatter = NumberFormat.getCurrencyInstance(Locale.US)
-    formatter.currency = Currency.getInstance(currency.currencyCode)
-    formatter.maximumFractionDigits = 2
+    val formatter = moneyFormatters().getOrPut(currency) {
+        NumberFormat.getCurrencyInstance(Locale.US).apply {
+            this.currency = Currency.getInstance(currency.currencyCode)
+            maximumFractionDigits = 2
+        }
+    }
     return formatter.format(value)
 }
+
+private fun moneyFormatters(): MutableMap<CurrencyOption, NumberFormat> {
+    moneyFormatterCache.get()?.let { return it }
+    return EnumMap<CurrencyOption, NumberFormat>(CurrencyOption::class.java).also {
+        moneyFormatterCache.set(it)
+    }
+}
+
+internal fun LocalDate.mediumDateLabel(): String = format(mediumDateFormatter)
+
+internal fun LocalDate.monthDayLabel(): String = format(monthDayFormatter)
 
 internal fun compactMoney(value: Double, currency: CurrencyOption): String {
     val abs = kotlin.math.abs(value)

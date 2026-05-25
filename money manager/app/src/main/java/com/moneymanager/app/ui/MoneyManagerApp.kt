@@ -150,7 +150,6 @@ import java.text.NumberFormat
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 import java.util.Currency
 import java.util.Locale
 import kotlinx.coroutines.delay
@@ -586,16 +585,20 @@ private fun BackupRestorePanel(
 
 @Composable
 private fun FintrackBudgetHero(state: FinanceUiState) {
-    val limit = state.activeBudgets.sumOf { it.limitAmount }
-    val spent = state.activeBudgets.sumOf { budget ->
-        state.transactions
-            .filter {
-                it.type == TransactionType.Expense &&
-                    !it.excludeFromSummary &&
-                    it.month() == budget.month &&
-                    it.categoryId in budget.categoryIds
-            }
-            .sumOf { it.amount }
+    val limit = remember(state.activeBudgets) {
+        state.activeBudgets.sumOf { it.limitAmount }
+    }
+    val spent = remember(state.activeBudgets, state.transactions) {
+        state.activeBudgets.sumOf { budget ->
+            state.transactions
+                .filter {
+                    it.type == TransactionType.Expense &&
+                        !it.excludeFromSummary &&
+                        it.month() == budget.month &&
+                        it.categoryId in budget.categoryIds
+                }
+                .sumOf { it.amount }
+        }
     }
     val progress = (spent / limit.coerceAtLeast(1.0)).toFloat().coerceIn(0f, 1f)
     ElevatedPanel {
@@ -1322,7 +1325,7 @@ private fun TransactionDetailSheet(
         )
         .take(7)
     val visibleCategories = if (showAllCategories) state.categories else frequentCategories
-    val dateLabel = transaction.transactionDate().format(DateTimeFormatter.ofPattern("MMM d, yyyy"))
+    val dateLabel = transaction.transactionDate().mediumDateLabel()
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     ModalBottomSheet(
@@ -1710,59 +1713,280 @@ private fun AddBudgetSheet(
     var amount by remember { mutableStateOf("") }
     val selectedCategoryIds = remember { mutableStateListOf<Long>() }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val parsedAmount = amount.toDoubleOrNull() ?: 0.0
+    val selectedCategoryNames = remember(state.categories, selectedCategoryIds.toList()) {
+        state.categories
+            .filter { it.id in selectedCategoryIds }
+            .joinToString { it.name }
+    }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = Navy900,
-        contentColor = TextPrimary
+        containerColor = Navy950,
+        contentColor = TextPrimary,
+        dragHandle = {
+            Box(
+                Modifier
+                    .padding(top = 10.dp)
+                    .size(width = 46.dp, height = 5.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(Navy800)
+            )
+        }
     ) {
-        SheetContent(title = "Create Budget") {
-            Text(
-                "Suggestion: allow multiple categories for shared limits like Essentials. Keep single-category budgets for strict tracking like Grocery only.",
-                color = TextMuted,
-                style = MaterialTheme.typography.bodyMedium
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .animateContentSize(tween(260, easing = FastOutSlowInEasing))
+                .imePadding()
+                .padding(start = 20.dp, top = 8.dp, end = 20.dp, bottom = 28.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            SheetHeader(
+                title = "Create Budget",
+                subtitle = "Set a monthly limit and attach the categories it should watch.",
+                onDismiss = onDismiss
             )
-            OutlinedTextField(
-                value = name,
-                onValueChange = { name = it },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("Budget Name") },
-                singleLine = true,
-                colors = inputColors(),
-                shape = RoundedCornerShape(12.dp)
+
+            BudgetPreviewCard(
+                state = state,
+                amount = parsedAmount,
+                selectedCategoryCount = selectedCategoryIds.size,
+                selectedCategoryNames = selectedCategoryNames
             )
-            OutlinedTextField(
-                value = amount,
-                onValueChange = { amount = it },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("Monthly Limit") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                singleLine = true,
-                colors = inputColors(),
-                shape = RoundedCornerShape(12.dp)
-            )
-            LabelText("ASSOCIATE AT LEAST ONE CATEGORY")
-            ChipRow {
-                state.categories.forEach { category ->
-                    val selected = category.id in selectedCategoryIds
-                    MoneyChip(
-                        label = category.name,
-                        selected = selected,
-                        onClick = {
-                            if (selected) selectedCategoryIds.remove(category.id) else selectedCategoryIds.add(category.id)
+
+            ElevatedPanel {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Text("Budget details", color = TextPrimary, style = MaterialTheme.typography.titleMedium)
+                    OutlinedTextField(
+                        value = name,
+                        onValueChange = { name = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Budget name") },
+                        singleLine = true,
+                        colors = inputColors(),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                    OutlinedTextField(
+                        value = amount,
+                        onValueChange = { amount = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Monthly limit") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        singleLine = true,
+                        colors = inputColors(),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                }
+            }
+
+            ElevatedPanel {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Categories", color = TextPrimary, style = MaterialTheme.typography.titleMedium)
+                            Text(
+                                if (selectedCategoryIds.isEmpty()) "Pick at least one category." else "$selectedCategoryNames selected",
+                                color = TextDim,
+                                style = MaterialTheme.typography.bodyMedium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        Text("${selectedCategoryIds.size}", color = PrimaryBlue, style = MaterialTheme.typography.headlineSmall)
+                    }
+                    BudgetCategoryGrid(
+                        categories = state.categories,
+                        selectedCategoryIds = selectedCategoryIds,
+                        onToggleCategory = { categoryId ->
+                            if (categoryId in selectedCategoryIds) {
+                                selectedCategoryIds.remove(categoryId)
+                            } else {
+                                selectedCategoryIds.add(categoryId)
+                            }
                         }
                     )
                 }
             }
-            Button(
-                onClick = { onAdd(name, amount.toDoubleOrNull() ?: 0.0, selectedCategoryIds.toSet()) },
-                enabled = selectedCategoryIds.isNotEmpty(),
-                modifier = Modifier.fillMaxWidth().height(56.dp),
-                shape = RoundedCornerShape(12.dp),
-                colors = primaryButtonColors()
+
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.weight(1f).height(56.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, appBorderColor()),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = TextMuted)
+                ) {
+                    Text("Cancel")
+                }
+                Button(
+                    onClick = { onAdd(name.trim(), parsedAmount, selectedCategoryIds.toSet()) },
+                    enabled = name.isNotBlank() && parsedAmount > 0.0 && selectedCategoryIds.isNotEmpty(),
+                    modifier = Modifier.weight(1.45f).height(56.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = primaryButtonColors()
+                ) {
+                    Icon(Icons.Rounded.Check, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Save Budget", fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SheetHeader(title: String, subtitle: String, onDismiss: () -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(title, color = PrimaryBlue, style = MaterialTheme.typography.headlineMedium)
+            Text(subtitle, color = TextMuted, style = MaterialTheme.typography.bodyMedium)
+        }
+        IconButton(onClick = onDismiss) {
+            Icon(Icons.Rounded.Close, contentDescription = "Close", tint = TextMuted)
+        }
+    }
+}
+
+@Composable
+private fun BudgetPreviewCard(
+    state: FinanceUiState,
+    amount: Double,
+    selectedCategoryCount: Int,
+    selectedCategoryNames: String
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(22.dp),
+        colors = CardDefaults.cardColors(containerColor = PrimaryBlue),
+        border = BorderStroke(1.dp, PrimaryBlue)
+    ) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Monthly limit", color = Color(0xFF141414).copy(alpha = 0.68f), style = MaterialTheme.typography.labelMedium)
+                    Text(
+                        state.money(amount),
+                        color = Color(0xFF141414),
+                        style = MaterialTheme.typography.headlineLarge,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        if (selectedCategoryCount == 0) "No categories selected" else selectedCategoryNames,
+                        color = Color(0xFF141414).copy(alpha = 0.62f),
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .size(46.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color(0xFF141414)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Rounded.PieChart, contentDescription = null, tint = PrimaryBlue)
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                BudgetPreviewPill("Categories", selectedCategoryCount.toString(), Modifier.weight(1f))
+                BudgetPreviewPill("Cycle", "Monthly", Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+@Composable
+private fun BudgetPreviewPill(label: String, value: String, modifier: Modifier) {
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color(0xFF141414).copy(alpha = 0.12f))
+            .padding(12.dp)
+    ) {
+        Text(label, color = Color(0xFF141414).copy(alpha = 0.62f), style = MaterialTheme.typography.labelSmall)
+        Text(value, color = Color(0xFF141414), style = MaterialTheme.typography.titleMedium, maxLines = 1)
+    }
+}
+
+@Composable
+private fun BudgetCategoryGrid(
+    categories: List<CategoryItem>,
+    selectedCategoryIds: List<Long>,
+    onToggleCategory: (Long) -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        categories.chunked(2).forEach { rowCategories ->
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                rowCategories.forEach { category ->
+                    BudgetCategoryTile(
+                        category = category,
+                        selected = category.id in selectedCategoryIds,
+                        onClick = { onToggleCategory(category.id) },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                if (rowCategories.size == 1) {
+                    Spacer(Modifier.weight(1f))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BudgetCategoryTile(
+    category: CategoryItem,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val color = categoryColor(category, TransactionType.Expense)
+    Card(
+        modifier = modifier
+            .height(58.dp)
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = if (selected) color.copy(alpha = 0.18f) else Navy800),
+        border = BorderStroke(1.dp, if (selected) color else appBorderColor())
+    ) {
+        Row(
+            modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                Modifier
+                    .size(32.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(color.copy(alpha = if (selected) 1f else 0.16f)),
+                contentAlignment = Alignment.Center
             ) {
-                Text("Save Budget", fontWeight = FontWeight.Bold)
+                Icon(
+                    category.icon,
+                    contentDescription = null,
+                    tint = if (selected) {
+                        if (isAmoledTheme()) Color(0xFF141414) else Color.White
+                    } else {
+                        color
+                    },
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+            Spacer(Modifier.width(8.dp))
+            Text(
+                category.name,
+                color = if (selected) TextPrimary else TextMuted,
+                style = MaterialTheme.typography.labelMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
+            )
+            if (selected) {
+                Icon(Icons.Rounded.Check, contentDescription = null, tint = color, modifier = Modifier.size(18.dp))
             }
         }
     }
@@ -1774,9 +1998,13 @@ private fun AddCategorySheet(onDismiss: () -> Unit, onAdd: (String, String, Stri
     var name by remember { mutableStateOf("") }
     var selectedIconKey by remember { mutableStateOf(MoneyIcons.frequentCategoryIcons.first().key) }
     var selectedColor by remember { mutableStateOf(categoryPalette.first()) }
+    var showAllIcons by remember { mutableStateOf(false) }
     val selectedIcon = remember(selectedIconKey) {
         MoneyIcons.allCategoryIcons.firstOrNull { it.key == selectedIconKey }
             ?: MoneyIcons.frequentCategoryIcons.first()
+    }
+    val visibleIcons = remember(showAllIcons) {
+        if (showAllIcons) MoneyIcons.allCategoryIcons else MoneyIcons.frequentCategoryIcons
     }
     val selectedColorValue = colorFromHex(selectedColor)
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -1784,155 +2012,269 @@ private fun AddCategorySheet(onDismiss: () -> Unit, onAdd: (String, String, Stri
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = Navy900,
-        contentColor = TextPrimary
+        containerColor = Navy950,
+        contentColor = TextPrimary,
+        dragHandle = {
+            Box(
+                Modifier
+                    .padding(top = 10.dp)
+                    .size(width = 46.dp, height = 5.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(Navy800)
+            )
+        }
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
+                .animateContentSize(tween(260, easing = FastOutSlowInEasing))
                 .imePadding()
-                .padding(start = 20.dp, top = 10.dp, end = 20.dp, bottom = 26.dp),
-            verticalArrangement = Arrangement.spacedBy(18.dp)
+                .padding(start = 20.dp, top = 8.dp, end = 20.dp, bottom = 28.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .size(58.dp)
-                        .clip(RoundedCornerShape(18.dp))
-                        .background(selectedColorValue.copy(alpha = 0.18f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(42.dp)
-                            .clip(CircleShape)
-                            .background(selectedColorValue),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            selectedIcon.icon,
-                            contentDescription = null,
-                            tint = if (isAmoledTheme()) Color(0xFF141414) else Color.White,
-                            modifier = Modifier.size(22.dp)
-                        )
-                    }
-                }
-                Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)) {
-                    Text("Create Category", color = TextPrimary, style = MaterialTheme.typography.headlineMedium)
-                    Text(
-                        if (name.isBlank()) "Choose an icon and color for a new category." else name.trim(),
-                        color = TextMuted,
-                        style = MaterialTheme.typography.bodyMedium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-                IconButton(onClick = onDismiss) {
-                    Icon(Icons.Rounded.Close, contentDescription = "Close", tint = TextMuted)
-                }
-            }
-
-            OutlinedTextField(
-                value = name,
-                onValueChange = { name = it },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("Category Name") },
-                singleLine = true,
-                colors = inputColors(),
-                shape = RoundedCornerShape(12.dp)
+            SheetHeader(
+                title = "Create Category",
+                subtitle = "Name it, choose an icon, then give it a color.",
+                onDismiss = onDismiss
             )
 
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                LabelText("ICON")
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(MoneyIcons.frequentCategoryIcons, key = { it.key }) { option ->
-                        CategoryIconChip(
-                            option = option,
-                            selected = option.key == selectedIconKey,
-                            onClick = { selectedIconKey = option.key }
-                        )
-                    }
+            CategoryPreviewCard(
+                name = name,
+                icon = selectedIcon,
+                color = selectedColorValue
+            )
+
+            ElevatedPanel {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Text("Category details", color = TextPrimary, style = MaterialTheme.typography.titleMedium)
+                    OutlinedTextField(
+                        value = name,
+                        onValueChange = { name = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Category name") },
+                        singleLine = true,
+                        colors = inputColors(),
+                        shape = RoundedCornerShape(12.dp)
+                    )
                 }
             }
 
-            LabelText("COLOR")
-            ColorSwatches(selected = selectedColor, onSelected = { selectedColor = it })
+            ElevatedPanel {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Icon", color = TextPrimary, style = MaterialTheme.typography.titleMedium)
+                            Text(selectedIcon.label, color = TextDim, style = MaterialTheme.typography.bodyMedium)
+                        }
+                        TextButton(onClick = { showAllIcons = !showAllIcons }) {
+                            Text(if (showAllIcons) "Frequent" else "Show all", color = PrimarySoft)
+                        }
+                    }
+                    CategoryIconGrid(
+                        options = visibleIcons,
+                        selectedIconKey = selectedIconKey,
+                        onSelected = { selectedIconKey = it }
+                    )
+                }
+            }
 
-            Button(
-                onClick = { onAdd(name.trim(), selectedIconKey, selectedColor) },
-                enabled = name.isNotBlank(),
-                modifier = Modifier.fillMaxWidth().height(56.dp),
-                shape = RoundedCornerShape(12.dp),
-                colors = primaryButtonColors()
-            ) {
-                Icon(Icons.Rounded.Check, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
-                Text("Create Category", fontWeight = FontWeight.Bold)
+            ElevatedPanel {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Color", color = TextPrimary, style = MaterialTheme.typography.titleMedium)
+                            Text(selectedColor.uppercase(), color = TextDim, style = MaterialTheme.typography.bodyMedium)
+                        }
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(selectedColorValue)
+                                .border(1.dp, Color.White.copy(alpha = 0.42f), CircleShape)
+                        )
+                    }
+                    ColorSwatches(selected = selectedColor, onSelected = { selectedColor = it })
+                }
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.weight(1f).height(56.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, appBorderColor()),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = TextMuted)
+                ) {
+                    Text("Cancel")
+                }
+                Button(
+                    onClick = { onAdd(name.trim(), selectedIconKey, selectedColor) },
+                    enabled = name.isNotBlank(),
+                    modifier = Modifier.weight(1.45f).height(56.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = primaryButtonColors()
+                ) {
+                    Icon(Icons.Rounded.Check, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Create", fontWeight = FontWeight.Bold)
+                }
             }
         }
     }
 }
 
 @Composable
-private fun CategoryIconChip(
+private fun CategoryPreviewCard(
+    name: String,
+    icon: MoneyIcons.CategoryIconOption,
+    color: Color
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(22.dp),
+        colors = CardDefaults.cardColors(containerColor = color.copy(alpha = if (isAmoledTheme()) 0.22f else 0.16f)),
+        border = BorderStroke(1.dp, color.copy(alpha = 0.72f))
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(18.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(62.dp)
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(color),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    icon.icon,
+                    contentDescription = null,
+                    tint = if (isAmoledTheme()) Color(0xFF141414) else Color.White,
+                    modifier = Modifier.size(30.dp)
+                )
+            }
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                Text(
+                    if (name.isBlank()) "New category" else name.trim(),
+                    color = TextPrimary,
+                    style = MaterialTheme.typography.headlineSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(icon.label, color = TextDim, style = MaterialTheme.typography.bodyMedium)
+            }
+        }
+    }
+}
+
+@Composable
+private fun CategoryIconGrid(
+    options: List<MoneyIcons.CategoryIconOption>,
+    selectedIconKey: String,
+    onSelected: (String) -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        options.chunked(4).forEach { rowOptions ->
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                rowOptions.forEach { option ->
+                    CategoryIconTile(
+                        option = option,
+                        selected = option.key == selectedIconKey,
+                        onClick = { onSelected(option.key) },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                repeat(4 - rowOptions.size) {
+                    Spacer(Modifier.weight(1f))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CategoryIconTile(
     option: MoneyIcons.CategoryIconOption,
     selected: Boolean,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    FilterChip(
-        selected = selected,
-        onClick = onClick,
-        label = { Text(option.label) },
-        leadingIcon = {
-            Icon(option.icon, contentDescription = null, modifier = Modifier.size(18.dp))
-        },
-        colors = FilterChipDefaults.filterChipColors(
-            selectedContainerColor = PrimaryBlue,
-            selectedLabelColor = if (isAmoledTheme()) Color(0xFF141414) else Color.White,
-            selectedLeadingIconColor = if (isAmoledTheme()) Color(0xFF141414) else Color.White,
-            containerColor = Navy800,
-            labelColor = TextMuted
-        )
-    )
+    Card(
+        modifier = modifier
+            .height(76.dp)
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = if (selected) PrimaryBlue else Navy800),
+        border = BorderStroke(1.dp, if (selected) PrimaryBlue else appBorderColor())
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(horizontal = 6.dp, vertical = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Icon(
+                option.icon,
+                contentDescription = null,
+                tint = if (selected && isAmoledTheme()) Color(0xFF141414) else if (selected) Color.White else TextMuted,
+                modifier = Modifier.size(22.dp)
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                option.label,
+                color = if (selected && isAmoledTheme()) Color(0xFF141414) else if (selected) Color.White else TextMuted,
+                style = MaterialTheme.typography.labelSmall,
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
 }
 
 @Composable
 private fun ColorSwatches(selected: String, onSelected: (String) -> Unit) {
-    LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        items(categoryPalette, key = { it }) { colorHex ->
-            val color = colorFromHex(colorHex)
-            val selectedColor = selected == colorHex
-            val scale by animateFloatAsState(
-                targetValue = if (selectedColor) 1.08f else 1f,
-                animationSpec = tween(220, easing = FastOutSlowInEasing),
-                label = "swatchScale"
-            )
-            Box(
-                modifier = Modifier
-                    .size(46.dp)
-                    .scale(scale)
-                    .clip(CircleShape)
-                    .background(if (selectedColor) Color.White else color.copy(alpha = 0.16f))
-                    .border(
-                        width = if (selectedColor) 3.dp else 1.dp,
-                        color = if (selectedColor) Color.White else color.copy(alpha = 0.72f),
-                        shape = CircleShape
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        categoryPalette.chunked(5).forEach { rowColors ->
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                rowColors.forEach { colorHex ->
+                    val color = colorFromHex(colorHex)
+                    val selectedColor = selected == colorHex
+                    val scale by animateFloatAsState(
+                        targetValue = if (selectedColor) 1.08f else 1f,
+                        animationSpec = tween(220, easing = FastOutSlowInEasing),
+                        label = "swatchScale"
                     )
-                    .clickable { onSelected(colorHex) },
-                contentAlignment = Alignment.Center
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(if (selectedColor) 32.dp else 34.dp)
-                        .clip(CircleShape)
-                        .background(color),
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (selectedColor) {
-                        Icon(Icons.Rounded.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+                    Box(
+                        modifier = Modifier
+                            .size(46.dp)
+                            .scale(scale)
+                            .clip(CircleShape)
+                            .background(if (selectedColor) Color.White else color.copy(alpha = 0.16f))
+                            .border(
+                                width = if (selectedColor) 3.dp else 1.dp,
+                                color = if (selectedColor) Color.White else color.copy(alpha = 0.72f),
+                                shape = CircleShape
+                            )
+                            .clickable { onSelected(colorHex) },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(if (selectedColor) 32.dp else 34.dp)
+                                .clip(CircleShape)
+                                .background(color),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (selectedColor) {
+                                Icon(Icons.Rounded.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+                            }
+                        }
                     }
+                }
+                repeat(5 - rowColors.size) {
+                    Spacer(Modifier.size(46.dp))
                 }
             }
         }
@@ -2330,17 +2672,21 @@ private fun CashFlowMonthBar(
 
 @Composable
 private fun BudgetRow(budget: BudgetPlan, state: FinanceUiState, onDelete: (Long) -> Unit) {
-    val spent = state.transactions
-        .filter {
-            it.type == TransactionType.Expense &&
-                !it.excludeFromSummary &&
-                it.month() == budget.month &&
-                it.categoryId in budget.categoryIds
-        }
-        .sumOf { it.amount }
+    val spent = remember(state.transactions, budget.month, budget.categoryIds) {
+        state.transactions
+            .filter {
+                it.type == TransactionType.Expense &&
+                    !it.excludeFromSummary &&
+                    it.month() == budget.month &&
+                    it.categoryId in budget.categoryIds
+            }
+            .sumOf { it.amount }
+    }
     val progress = (spent / budget.limitAmount).toFloat().coerceIn(0f, 1f)
     val over = spent > budget.limitAmount
-    val names = state.categories.filter { it.id in budget.categoryIds }.joinToString { it.name }
+    val names = remember(state.categories, budget.categoryIds) {
+        state.categories.filter { it.id in budget.categoryIds }.joinToString { it.name }
+    }
 
     ElevatedPanel {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
