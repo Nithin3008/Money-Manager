@@ -113,8 +113,8 @@ enum class UiSurface(
     val lightPanelHex: String,
     val lightChipHex: String
 ) {
-    Midnight("Midnight", "#141414", "#1A1A1A", "#202020", "#2A2A2A", "#F7FAF2", "#FFFFFF", "#EFF6E8", "#E1ECD8"),
-    Graphite("Graphite", "#101113", "#17191D", "#20232A", "#2A2E37", "#F7F7F5", "#FFFFFF", "#EEEEEA", "#E2E3DE"),
+    Midnight("Midnight", "#141414", "#1A1A1A", "#202020", "#2A2A2A", "#FAFAFA", "#FFFFFF", "#F3F4F6", "#E8EAEE"),
+    Graphite("Graphite", "#101113", "#17191D", "#20232A", "#2A2E37", "#F7F8FA", "#FFFFFF", "#F0F2F5", "#E4E7EC"),
     Ocean("Ocean", "#07131D", "#0D1C2A", "#14293B", "#1B354A", "#F5FAFF", "#FFFFFF", "#EAF3FB", "#DDECF7"),
     Plum("Plum", "#160F1D", "#21172A", "#2B1F37", "#362844", "#FCF7FF", "#FFFFFF", "#F4ECFA", "#EADDF3"),
     Forest("Forest", "#0B1510", "#111F18", "#17291F", "#203529", "#F7FBF6", "#FFFFFF", "#ECF5EA", "#DDEBDA"),

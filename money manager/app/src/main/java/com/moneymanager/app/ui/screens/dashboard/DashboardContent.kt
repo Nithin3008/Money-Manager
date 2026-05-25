@@ -155,6 +155,7 @@ private fun FintrackBalanceHero(state: FinanceUiState) {
             }
             .sumOf { it.amount }
     }
+    val onPrimary = primaryContentColor()
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -165,17 +166,17 @@ private fun FintrackBalanceHero(state: FinanceUiState) {
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("Current bank balance", color = Color(0xFF141414).copy(alpha = 0.72f), style = MaterialTheme.typography.labelMedium)
+                    Text("Current bank balance", color = onPrimary.copy(alpha = 0.72f), style = MaterialTheme.typography.labelMedium)
                     Text(
                         state.money(currentBalance),
-                        color = Color(0xFF141414),
+                        color = onPrimary,
                         style = MaterialTheme.typography.headlineLarge,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                     Text(
                         balanceSource,
-                        color = Color(0xFF141414).copy(alpha = 0.62f),
+                        color = onPrimary.copy(alpha = 0.62f),
                         style = MaterialTheme.typography.bodyMedium,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -184,7 +185,7 @@ private fun FintrackBalanceHero(state: FinanceUiState) {
                 Box(
                     modifier = Modifier
                         .size(46.dp)
-                        .background(Color(0xFF141414), RoundedCornerShape(14.dp)),
+                        .background(onPrimary, RoundedCornerShape(14.dp)),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(Icons.Rounded.Wallet, contentDescription = null, tint = PrimaryBlue)
@@ -201,28 +202,29 @@ private fun FintrackBalanceHero(state: FinanceUiState) {
 
 @Composable
 private fun FintrackHeroPill(label: String, value: String, modifier: Modifier) {
+    val onPrimary = primaryContentColor()
     Column(
         modifier = modifier
-            .background(Color(0xFF141414).copy(alpha = 0.12f), RoundedCornerShape(12.dp))
+            .background(onPrimary.copy(alpha = 0.12f), RoundedCornerShape(12.dp))
             .padding(12.dp)
     ) {
-        Text(label, color = Color(0xFF141414).copy(alpha = 0.62f), style = MaterialTheme.typography.labelSmall)
-        Text(value, color = Color(0xFF141414), style = MaterialTheme.typography.titleMedium, maxLines = 1)
+        Text(label, color = onPrimary.copy(alpha = 0.62f), style = MaterialTheme.typography.labelSmall)
+        Text(value, color = onPrimary, style = MaterialTheme.typography.titleMedium, maxLines = 1)
     }
 }
 
 @Composable
 private fun MiniFlowChart() {
+    val onPrimary = primaryContentColor()
     Canvas(Modifier.fillMaxWidth().height(84.dp)) {
-        val dark = Color(0xFF141414)
-        val muted = dark.copy(alpha = 0.22f)
+        val muted = onPrimary.copy(alpha = 0.22f)
         val path = Path().apply {
             moveTo(0f, size.height * 0.68f)
             cubicTo(size.width * 0.22f, size.height * 0.18f, size.width * 0.38f, size.height * 0.9f, size.width * 0.58f, size.height * 0.44f)
             cubicTo(size.width * 0.74f, size.height * 0.08f, size.width * 0.88f, size.height * 0.22f, size.width, size.height * 0.12f)
         }
         drawLine(muted, Offset(0f, size.height * 0.82f), Offset(size.width, size.height * 0.82f), strokeWidth = 2f)
-        drawPath(path, dark, style = Stroke(width = 6f, cap = StrokeCap.Round))
+        drawPath(path, onPrimary, style = Stroke(width = 6f, cap = StrokeCap.Round))
         listOf(0.14f, 0.36f, 0.62f, 0.84f).forEachIndexed { index, x ->
             val barHeight = size.height * listOf(0.32f, 0.48f, 0.28f, 0.58f)[index]
             drawLine(

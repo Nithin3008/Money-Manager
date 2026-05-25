@@ -40,7 +40,6 @@ import com.moneymanager.app.model.MessageScanRange
 import com.moneymanager.app.ui.theme.LossRed
 import com.moneymanager.app.ui.theme.Navy900
 import com.moneymanager.app.ui.theme.Navy850
-import com.moneymanager.app.ui.theme.Navy950
 import com.moneymanager.app.ui.theme.PrimaryBlue
 import com.moneymanager.app.ui.theme.TextMuted
 import com.moneymanager.app.ui.theme.TextPrimary
@@ -63,7 +62,7 @@ fun MessageScanPanel(onScan: (MessageScanRange, LocalDate, LocalDate) -> Unit) {
         MessageScanRange.Custom -> "Update Range"
     }
 
-    val dark = Navy950 == Color(0xFF000000)
+    val dark = isDarkTheme()
 
     Card(
         modifier = Modifier
@@ -88,7 +87,7 @@ fun MessageScanPanel(onScan: (MessageScanRange, LocalDate, LocalDate) -> Unit) {
                         label = { Text(range.label) },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = PrimaryBlue,
-                            selectedLabelColor = if (dark) Color(0xFF141414) else Color.White,
+                            selectedLabelColor = primaryContentColor(),
                             containerColor = if (dark) Navy900 else Color.White,
                             labelColor = TextMuted
                         )
@@ -128,7 +127,7 @@ fun MessageScanPanel(onScan: (MessageScanRange, LocalDate, LocalDate) -> Unit) {
                 shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = PrimaryBlue,
-                    contentColor = if (dark) Color(0xFF141414) else Color.White
+                    contentColor = primaryContentColor()
                 )
             ) {
                 Text(buttonLabel, fontWeight = FontWeight.Bold)

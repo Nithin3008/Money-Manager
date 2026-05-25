@@ -137,7 +137,7 @@ internal fun MoneyChip(label: String, selected: Boolean, onClick: () -> Unit) {
         label = { Text(label) },
         colors = FilterChipDefaults.filterChipColors(
             selectedContainerColor = PrimaryBlue,
-            selectedLabelColor = if (dark) Color(0xFF141414) else Color.White,
+            selectedLabelColor = primaryContentColor(),
             containerColor = if (dark) Navy800 else Color.White,
             labelColor = TextMuted
         )

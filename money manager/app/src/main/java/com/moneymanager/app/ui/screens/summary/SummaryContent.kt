@@ -408,7 +408,7 @@ private fun TopCategoryCard(slice: ExpenseSlice, total: Double, state: FinanceUi
             contentAlignment = Alignment.Center
         ) {
             slice.icon?.let {
-                Icon(it, contentDescription = null, tint = Color(0xFF141414), modifier = Modifier.size(23.dp))
+                Icon(it, contentDescription = null, tint = accentContentColor(), modifier = Modifier.size(23.dp))
             }
         }
         Column(Modifier.weight(1f)) {

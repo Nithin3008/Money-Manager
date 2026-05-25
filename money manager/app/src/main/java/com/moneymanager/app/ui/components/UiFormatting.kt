@@ -27,19 +27,31 @@ private val parsedColorCache = mutableMapOf<String, Color>()
 private val moneyFormatterCache = ThreadLocal<MutableMap<CurrencyOption, NumberFormat>>()
 
 internal fun appBorderColor(): Color {
-    return if (isAmoledTheme()) Color(0xFF323232) else Color(0xFFD8E5CC)
+    return if (isAmoledTheme()) Color(0xFF323232) else Color(0xFFDDE3EA)
 }
 
 internal fun appDividerColor(): Color {
-    return if (isAmoledTheme()) Color(0xFF2A2A2A) else Color(0xFFD8E5CC)
+    return if (isAmoledTheme()) Color(0xFF2A2A2A) else Color(0xFFE4E8EF)
 }
 
 internal fun appTrackColor(): Color {
-    return if (isAmoledTheme()) Color(0xFF303030) else Color(0xFFE2ECD8)
+    return if (isAmoledTheme()) Color(0xFF303030) else Color(0xFFE8ECF2)
 }
 
 fun isAmoledTheme(): Boolean {
+    return isDarkTheme()
+}
+
+internal fun isDarkTheme(): Boolean {
     return TextPrimary == Color(0xFFF1F1F1)
+}
+
+internal fun primaryContentColor(): Color {
+    return if (isDarkTheme()) Color(0xFF141414) else Color.White
+}
+
+internal fun accentContentColor(): Color {
+    return if (isDarkTheme()) Color(0xFF141414) else Color.White
 }
 
 internal fun categoryColor(category: CategoryItem?, type: TransactionType): Color {

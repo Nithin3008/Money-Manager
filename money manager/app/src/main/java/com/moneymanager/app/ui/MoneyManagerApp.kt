@@ -234,7 +234,6 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
         },
         floatingActionButton = {
             if (state.selectedTab != ScreenTab.Settings) {
-                val fabDark = isAmoledTheme()
                 Button(
                     onClick = {
                         when (state.selectedTab) {
@@ -244,7 +243,7 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
                     },
                     colors = ButtonDefaults.buttonColors(
                         containerColor = PrimaryBlue,
-                    contentColor = if (fabDark) Color(0xFF141414) else Color.White
+                        contentColor = primaryContentColor()
                     ),
                     shape = CircleShape,
                     contentPadding = PaddingValues(18.dp)
@@ -463,10 +462,23 @@ private fun androidx.compose.foundation.lazy.LazyListScope.settingsContent(
         )
     }
     item {
+        ThemeSelector(
+            selected = state.themeMode,
+            onSelected = onThemeSelected
+        )
+    }
+    item {
         UiAccentSelector(
             selected = state.uiAccent,
-            darkMode = true,
+            darkMode = state.themeMode == ThemeMode.Dark,
             onSelected = onUiAccentSelected
+        )
+    }
+    item {
+        UiSurfaceSelector(
+            selected = state.uiSurface,
+            darkMode = state.themeMode == ThemeMode.Dark,
+            onSelected = onUiSurfaceSelected
         )
     }
     item {
@@ -1050,7 +1062,6 @@ private fun AddTransactionSheet(
 
             FintrackModePicker(
                 selected = mode,
-                accountsAvailable = state.accounts.size,
                 onSelected = { mode = it }
             )
 
@@ -1167,6 +1178,7 @@ private fun FintrackAmountCard(
     parsedAmount: Double,
     onAmountChanged: (String) -> Unit
 ) {
+    val onPrimary = primaryContentColor()
     val accent = when (mode) {
         AddMoneyMode.Income -> MoneyGreen
         AddMoneyMode.Expense -> LossRed
@@ -1188,10 +1200,10 @@ private fun FintrackAmountCard(
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text(mode.label, color = Color(0xFF141414).copy(alpha = 0.68f), style = MaterialTheme.typography.labelMedium)
+                    Text(mode.label, color = onPrimary.copy(alpha = 0.68f), style = MaterialTheme.typography.labelMedium)
                     Text(
                         signedPreview,
-                        color = Color(0xFF141414),
+                        color = onPrimary,
                         style = MaterialTheme.typography.headlineLarge,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -1201,7 +1213,7 @@ private fun FintrackAmountCard(
                     modifier = Modifier
                         .size(46.dp)
                         .clip(RoundedCornerShape(14.dp))
-                        .background(Color(0xFF141414)),
+                        .background(onPrimary),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
@@ -1223,15 +1235,15 @@ private fun FintrackAmountCard(
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                 singleLine = true,
                 colors = OutlinedTextFieldDefaults.colors(
-                    focusedTextColor = Color(0xFF141414),
-                    unfocusedTextColor = Color(0xFF141414),
-                    focusedBorderColor = Color(0xFF141414),
-                    unfocusedBorderColor = Color(0xFF141414).copy(alpha = 0.28f),
+                    focusedTextColor = onPrimary,
+                    unfocusedTextColor = onPrimary,
+                    focusedBorderColor = onPrimary,
+                    unfocusedBorderColor = onPrimary.copy(alpha = 0.28f),
                     focusedContainerColor = PrimaryBlue,
                     unfocusedContainerColor = PrimaryBlue,
-                    focusedLabelColor = Color(0xFF141414),
-                    unfocusedLabelColor = Color(0xFF141414).copy(alpha = 0.64f),
-                    cursorColor = Color(0xFF141414)
+                    focusedLabelColor = onPrimary,
+                    unfocusedLabelColor = onPrimary.copy(alpha = 0.64f),
+                    cursorColor = onPrimary
                 ),
                 shape = RoundedCornerShape(12.dp)
             )
@@ -1242,12 +1254,10 @@ private fun FintrackAmountCard(
 @Composable
 private fun FintrackModePicker(
     selected: AddMoneyMode,
-    accountsAvailable: Int,
     onSelected: (AddMoneyMode) -> Unit
 ) {
     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         AddMoneyMode.entries.forEach { mode ->
-            val enabled = mode != AddMoneyMode.Transfer || accountsAvailable >= 2
             val active = selected == mode
             val accent = when (mode) {
                 AddMoneyMode.Income -> MoneyGreen
@@ -1259,7 +1269,7 @@ private fun FintrackModePicker(
                     .weight(1f)
                     .height(84.dp)
                     .clip(RoundedCornerShape(14.dp))
-                    .clickable(enabled = enabled) { onSelected(mode) },
+                    .clickable { onSelected(mode) },
                 shape = RoundedCornerShape(14.dp),
                 colors = CardDefaults.cardColors(containerColor = if (active) accent else Navy850),
                 border = BorderStroke(1.dp, if (active) accent else appBorderColor())
@@ -1276,12 +1286,12 @@ private fun FintrackModePicker(
                             AddMoneyMode.Transfer -> Icons.Rounded.AccountBalance
                         },
                         contentDescription = null,
-                        tint = if (active && isAmoledTheme()) Color(0xFF141414) else if (enabled) accent else TextDim
+                        tint = if (active) accentContentColor() else accent
                     )
                     Spacer(Modifier.height(6.dp))
                     Text(
                         mode.label,
-                        color = if (active && isAmoledTheme()) Color(0xFF141414) else if (enabled) TextPrimary else TextDim,
+                        color = if (active) accentContentColor() else TextPrimary,
                         style = MaterialTheme.typography.labelMedium,
                         maxLines = 1
                     )
@@ -1326,6 +1336,7 @@ private fun TransactionDetailSheet(
         .take(7)
     val visibleCategories = if (showAllCategories) state.categories else frequentCategories
     val dateLabel = transaction.transactionDate().mediumDateLabel()
+    val incomeContent = primaryContentColor()
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     ModalBottomSheet(
@@ -1373,12 +1384,12 @@ private fun TransactionDetailSheet(
                         Column(Modifier.weight(1f)) {
                             Text(
                                 if (type == TransactionType.Income) "Income" else "Expense",
-                                color = if (type == TransactionType.Income) Color(0xFF141414).copy(alpha = 0.68f) else TextDim,
+                                color = if (type == TransactionType.Income) incomeContent.copy(alpha = 0.68f) else TextDim,
                                 style = MaterialTheme.typography.labelMedium
                             )
                             Text(
                                 signedAmount(transaction.amount, type, state.currency),
-                                color = if (type == TransactionType.Income) Color(0xFF141414) else LossRed,
+                                color = if (type == TransactionType.Income) incomeContent else LossRed,
                                 style = MaterialTheme.typography.headlineLarge,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
@@ -1388,7 +1399,7 @@ private fun TransactionDetailSheet(
                             modifier = Modifier
                                 .size(46.dp)
                                 .clip(RoundedCornerShape(14.dp))
-                                .background(if (type == TransactionType.Income) Color(0xFF141414) else LossRed.copy(alpha = 0.16f)),
+                                .background(if (type == TransactionType.Income) incomeContent else LossRed.copy(alpha = 0.16f)),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
@@ -1401,13 +1412,13 @@ private fun TransactionDetailSheet(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .background(if (type == TransactionType.Income) Color(0xFF141414).copy(alpha = 0.12f) else Navy800, RoundedCornerShape(12.dp))
+                            .background(if (type == TransactionType.Income) incomeContent.copy(alpha = 0.12f) else Navy800, RoundedCornerShape(12.dp))
                             .padding(12.dp),
                         verticalArrangement = Arrangement.spacedBy(5.dp)
                     ) {
                         Text(
                             transaction.name,
-                            color = if (type == TransactionType.Income) Color(0xFF141414) else TextPrimary,
+                            color = if (type == TransactionType.Income) incomeContent else TextPrimary,
                             style = MaterialTheme.typography.titleMedium,
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis
@@ -1415,14 +1426,14 @@ private fun TransactionDetailSheet(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
                                 dateLabel,
-                                color = if (type == TransactionType.Income) Color(0xFF141414).copy(alpha = 0.64f) else TextMuted,
+                                color = if (type == TransactionType.Income) incomeContent.copy(alpha = 0.64f) else TextMuted,
                                 style = MaterialTheme.typography.bodyMedium
                             )
                             if (transaction.isCreditCardTransaction) {
                                 Spacer(Modifier.width(8.dp))
                                 Text(
                                     "CC",
-                                    color = if (type == TransactionType.Income) Color(0xFF141414) else OtherIncomeGold,
+                                    color = if (type == TransactionType.Income) incomeContent else OtherIncomeGold,
                                     style = MaterialTheme.typography.labelMedium,
                                     fontWeight = FontWeight.Bold
                                 )
@@ -1614,13 +1625,13 @@ private fun EditTransactionTypeTile(
             Icon(
                 if (type == TransactionType.Income) Icons.Rounded.TrendingUp else Icons.Rounded.Wallet,
                 contentDescription = null,
-                tint = if (selected && isAmoledTheme()) Color(0xFF141414) else accent,
+                tint = if (selected) accentContentColor() else accent,
                 modifier = Modifier.size(20.dp)
             )
             Spacer(Modifier.width(8.dp))
             Text(
                 type.name,
-                color = if (selected && isAmoledTheme()) Color(0xFF141414) else TextPrimary,
+                color = if (selected) accentContentColor() else TextPrimary,
                 style = MaterialTheme.typography.titleMedium,
                 maxLines = 1
             )
@@ -1672,6 +1683,7 @@ private fun EditCategoryTile(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val onPrimary = primaryContentColor()
     Card(
         modifier = modifier
             .height(52.dp)
@@ -1857,6 +1869,7 @@ private fun BudgetPreviewCard(
     selectedCategoryCount: Int,
     selectedCategoryNames: String
 ) {
+    val onPrimary = primaryContentColor()
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(22.dp),
@@ -1866,17 +1879,17 @@ private fun BudgetPreviewCard(
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("Monthly limit", color = Color(0xFF141414).copy(alpha = 0.68f), style = MaterialTheme.typography.labelMedium)
+                    Text("Monthly limit", color = onPrimary.copy(alpha = 0.68f), style = MaterialTheme.typography.labelMedium)
                     Text(
                         state.money(amount),
-                        color = Color(0xFF141414),
+                        color = onPrimary,
                         style = MaterialTheme.typography.headlineLarge,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                     Text(
                         if (selectedCategoryCount == 0) "No categories selected" else selectedCategoryNames,
-                        color = Color(0xFF141414).copy(alpha = 0.62f),
+                        color = onPrimary.copy(alpha = 0.62f),
                         style = MaterialTheme.typography.bodyMedium,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -1886,7 +1899,7 @@ private fun BudgetPreviewCard(
                     modifier = Modifier
                         .size(46.dp)
                         .clip(RoundedCornerShape(14.dp))
-                        .background(Color(0xFF141414)),
+                        .background(onPrimary),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(Icons.Rounded.PieChart, contentDescription = null, tint = PrimaryBlue)
@@ -1902,14 +1915,15 @@ private fun BudgetPreviewCard(
 
 @Composable
 private fun BudgetPreviewPill(label: String, value: String, modifier: Modifier) {
+    val onPrimary = primaryContentColor()
     Column(
         modifier = modifier
             .clip(RoundedCornerShape(12.dp))
-            .background(Color(0xFF141414).copy(alpha = 0.12f))
+            .background(onPrimary.copy(alpha = 0.12f))
             .padding(12.dp)
     ) {
-        Text(label, color = Color(0xFF141414).copy(alpha = 0.62f), style = MaterialTheme.typography.labelSmall)
-        Text(value, color = Color(0xFF141414), style = MaterialTheme.typography.titleMedium, maxLines = 1)
+        Text(label, color = onPrimary.copy(alpha = 0.62f), style = MaterialTheme.typography.labelSmall)
+        Text(value, color = onPrimary, style = MaterialTheme.typography.titleMedium, maxLines = 1)
     }
 }
 
@@ -1969,7 +1983,7 @@ private fun BudgetCategoryTile(
                     category.icon,
                     contentDescription = null,
                     tint = if (selected) {
-                        if (isAmoledTheme()) Color(0xFF141414) else Color.White
+                        accentContentColor()
                     } else {
                         color
                     },
@@ -2150,7 +2164,7 @@ private fun CategoryPreviewCard(
                 Icon(
                     icon.icon,
                     contentDescription = null,
-                    tint = if (isAmoledTheme()) Color(0xFF141414) else Color.White,
+                    tint = accentContentColor(),
                     modifier = Modifier.size(30.dp)
                 )
             }
@@ -2217,13 +2231,13 @@ private fun CategoryIconTile(
             Icon(
                 option.icon,
                 contentDescription = null,
-                tint = if (selected && isAmoledTheme()) Color(0xFF141414) else if (selected) Color.White else TextMuted,
+                tint = if (selected) primaryContentColor() else TextMuted,
                 modifier = Modifier.size(22.dp)
             )
             Spacer(Modifier.height(6.dp))
             Text(
                 option.label,
-                color = if (selected && isAmoledTheme()) Color(0xFF141414) else if (selected) Color.White else TextMuted,
+                color = if (selected) primaryContentColor() else TextMuted,
                 style = MaterialTheme.typography.labelSmall,
                 textAlign = TextAlign.Center,
                 maxLines = 1,
@@ -2343,8 +2357,8 @@ private fun FintrackLogoMark(size: Dp) {
 private fun HeroMetricCard(label: String, value: String, helper: String) {
     val dark = isAmoledTheme()
     val container = if (dark) PrimaryBlue else MaterialTheme.colorScheme.primaryContainer
-    val labelColor = if (dark) Color(0xFF141414).copy(alpha = 0.72f) else MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.72f)
-    val valueColor = if (dark) Color(0xFF141414) else MaterialTheme.colorScheme.onPrimaryContainer
+    val valueColor = if (dark) primaryContentColor() else MaterialTheme.colorScheme.onPrimaryContainer
+    val labelColor = valueColor.copy(alpha = 0.72f)
     Card(
         modifier = Modifier.fillMaxWidth().height(158.dp),
         shape = MaterialTheme.shapes.extraLarge,
@@ -2363,7 +2377,7 @@ private fun HeroMetricCard(label: String, value: String, helper: String) {
                 overflow = TextOverflow.Ellipsis
             )
             Spacer(Modifier.height(8.dp))
-            Text(helper, color = if (dark) Color(0xFF141414).copy(alpha = 0.72f) else PrimarySoft, style = MaterialTheme.typography.bodyMedium)
+            Text(helper, color = if (dark) valueColor.copy(alpha = 0.72f) else PrimarySoft, style = MaterialTheme.typography.bodyMedium)
         }
     }
 }
@@ -2756,7 +2770,7 @@ private fun ProfileHeader(state: FinanceUiState) {
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Box(Modifier.size(92.dp).clip(RoundedCornerShape(24.dp)).background(PrimaryBlue), contentAlignment = Alignment.Center) {
-                Text(state.userName.take(1).uppercase(), color = Color(0xFF141414), fontSize = 34.sp, fontWeight = FontWeight.Bold)
+                Text(state.userName.take(1).uppercase(), color = primaryContentColor(), fontSize = 34.sp, fontWeight = FontWeight.Bold)
             }
             Text(state.userName, color = TextPrimary, style = MaterialTheme.typography.headlineMedium)
             Text("Local finance tracking", color = TextDim, style = MaterialTheme.typography.bodyMedium)
@@ -3013,7 +3027,7 @@ private fun DefaultAccountOption(
                 Icon(
                     imageVector = Icons.Rounded.Check,
                     contentDescription = null,
-                    tint = if (isAmoledTheme()) Color(0xFF141414) else Color.White,
+                    tint = primaryContentColor(),
                     modifier = Modifier.size(14.dp)
                 )
             }
@@ -3115,28 +3129,75 @@ private fun ThemeSelector(
     selected: ThemeMode,
     onSelected: (ThemeMode) -> Unit
 ) {
-    val dark = selected == ThemeMode.Dark
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         LabelText("THEME")
         ElevatedPanel {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text("Dark Mode", color = TextPrimary, style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        if (dark) "AMOLED black" else "Clean white",
-                        color = TextDim,
-                        style = MaterialTheme.typography.bodyMedium
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    "Choose how Money Manager looks.",
+                    color = TextMuted,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    ThemeModeTile(
+                        title = "Dark",
+                        subtitle = "AMOLED",
+                        selected = selected == ThemeMode.Dark,
+                        onClick = { onSelected(ThemeMode.Dark) },
+                        modifier = Modifier.weight(1f)
+                    )
+                    ThemeModeTile(
+                        title = "White",
+                        subtitle = "Clean light",
+                        selected = selected == ThemeMode.Light,
+                        onClick = { onSelected(ThemeMode.Light) },
+                        modifier = Modifier.weight(1f)
                     )
                 }
-                Switch(
-                    checked = dark,
-                    onCheckedChange = { onSelected(if (it) ThemeMode.Dark else ThemeMode.Light) },
-                    colors = appSwitchColors()
-                )
             }
+        }
+    }
+}
+
+@Composable
+private fun ThemeModeTile(
+    title: String,
+    subtitle: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val foreground = if (selected) primaryContentColor() else TextPrimary
+    Card(
+        modifier = modifier
+            .height(82.dp)
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = if (selected) PrimaryBlue else Navy800),
+        border = BorderStroke(1.dp, if (selected) PrimaryBlue else appBorderColor())
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(12.dp),
+            verticalArrangement = Arrangement.Center
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier
+                        .size(14.dp)
+                        .clip(CircleShape)
+                        .background(foreground.copy(alpha = if (selected) 1f else 0.46f))
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(title, color = foreground, style = MaterialTheme.typography.titleMedium, maxLines = 1)
+            }
+            Spacer(Modifier.height(6.dp))
+            Text(
+                subtitle,
+                color = foreground.copy(alpha = 0.68f),
+                style = MaterialTheme.typography.labelMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
     }
 }
@@ -3303,7 +3364,7 @@ private fun UiSurfaceSelector(
 
 @Composable
 private fun appSwitchColors() = SwitchDefaults.colors(
-    checkedThumbColor = Color(0xFF141414),
+    checkedThumbColor = primaryContentColor(),
     checkedTrackColor = PrimaryBlue,
     checkedBorderColor = PrimaryBlue,
     uncheckedThumbColor = TextMuted,
@@ -3314,7 +3375,7 @@ private fun appSwitchColors() = SwitchDefaults.colors(
 @Composable
 fun primaryButtonColors(): ButtonColors = ButtonDefaults.buttonColors(
     containerColor = PrimaryBlue,
-    contentColor = if (isAmoledTheme()) Color(0xFF141414) else Color.White
+    contentColor = primaryContentColor()
 )
 
 @Composable
@@ -3338,7 +3399,7 @@ private fun AddModeChip(mode: AddMoneyMode, selected: Boolean, enabled: Boolean,
         label = { Text(mode.label, fontWeight = FontWeight.Bold) },
         colors = FilterChipDefaults.filterChipColors(
             selectedContainerColor = if (selected) accent else accent.copy(alpha = 0.14f),
-            selectedLabelColor = if (selected && isAmoledTheme()) Color(0xFF141414) else accent,
+            selectedLabelColor = if (selected) accentContentColor() else accent,
             containerColor = if (isAmoledTheme()) Navy800 else Color.White,
             labelColor = TextMuted,
             disabledContainerColor = if (isAmoledTheme()) Navy800.copy(alpha = 0.42f) else Color.White.copy(alpha = 0.42f),
@@ -3355,7 +3416,7 @@ private fun BottomNavigation(selectedTab: ScreenTab, onTabSelected: (ScreenTab) 
             .fillMaxWidth()
             .padding(start = 18.dp, top = 12.dp, end = 18.dp, bottom = 18.dp),
         shape = RoundedCornerShape(22.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF1A1A1A)),
+        colors = CardDefaults.cardColors(containerColor = Navy900),
         border = BorderStroke(1.dp, appBorderColor())
     ) {
         Row(
@@ -3390,7 +3451,7 @@ private fun BottomNavigation(selectedTab: ScreenTab, onTabSelected: (ScreenTab) 
                         Icon(
                             tab.icon,
                             contentDescription = tab.label,
-                            tint = if (selected) Color(0xFF141414) else TextDim,
+                            tint = if (selected) primaryContentColor() else TextDim,
                             modifier = Modifier.size(19.dp)
                         )
                     }

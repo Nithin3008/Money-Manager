@@ -65,7 +65,7 @@ internal fun CategoryChoiceChip(
         label = { Text(category.name) },
         colors = FilterChipDefaults.filterChipColors(
             selectedContainerColor = color,
-            selectedLabelColor = if (isAmoledTheme()) Color(0xFF141414) else Color.White,
+            selectedLabelColor = accentContentColor(),
             containerColor = Navy800,
             labelColor = TextMuted
         )
@@ -88,7 +88,7 @@ internal fun TransactionTypeChip(type: TransactionType, selected: Boolean, onCli
         label = { Text(type.name, fontWeight = FontWeight.Bold) },
         colors = FilterChipDefaults.filterChipColors(
             selectedContainerColor = if (selected) accent else accent.copy(alpha = 0.14f),
-            selectedLabelColor = if (selected && isAmoledTheme()) Color(0xFF141414) else accent,
+            selectedLabelColor = if (selected) accentContentColor() else accent,
             containerColor = if (isAmoledTheme()) Navy800 else Color.White,
             labelColor = TextMuted
         )

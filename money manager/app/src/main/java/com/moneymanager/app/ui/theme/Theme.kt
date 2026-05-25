@@ -40,8 +40,8 @@ fun MoneyManagerTheme(
     uiSurface: UiSurface = UiSurface.Midnight,
     content: @Composable () -> Unit
 ) {
-    val dark = true
-    applyThemeTokens(dark, uiAccent, UiSurface.Midnight)
+    val dark = themeMode == ThemeMode.Dark
+    applyThemeTokens(dark, uiAccent, uiSurface)
     val colorScheme = expressiveColorScheme(dark)
 
     MaterialTheme(
@@ -86,8 +86,8 @@ private fun expressiveColorScheme(dark: Boolean) = if (dark) {
         surfaceContainerHighest = Navy800,
         primary = PrimaryBlue,
         onPrimary = Color.White,
-        primaryContainer = Color(0xFFE6FFC8),
-        onPrimaryContainer = Color(0xFF141414),
+        primaryContainer = PrimarySoft,
+        onPrimaryContainer = TextPrimary,
         secondary = MoneyGreen,
         onSecondary = Color.White,
         tertiary = WarningAmber,
