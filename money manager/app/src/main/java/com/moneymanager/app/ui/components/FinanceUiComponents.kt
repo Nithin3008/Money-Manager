@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import com.moneymanager.app.model.CategoryItem
 import com.moneymanager.app.model.FinanceUiState
 import com.moneymanager.app.model.LedgerTransaction
+import com.moneymanager.app.model.MoneyIcons
 import com.moneymanager.app.model.TransactionType
 import com.moneymanager.app.model.transactionDate
 import com.moneymanager.app.ui.theme.MoneyGreen
@@ -194,7 +195,12 @@ internal fun TransactionRow(
                     .background(color.copy(alpha = if (isAmoledTheme()) 0.18f else 0.12f)),
                 contentAlignment = Alignment.Center
             ) {
-                Box(Modifier.size(12.dp).clip(CircleShape).background(color))
+                androidx.compose.material3.Icon(
+                    imageVector = category?.icon ?: MoneyIcons.Category,
+                    contentDescription = null,
+                    tint = color,
+                    modifier = Modifier.size(23.dp)
+                )
             }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {

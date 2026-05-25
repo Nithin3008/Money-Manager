@@ -88,18 +88,18 @@ enum class UiAccent(
     val softDarkHex: String,
     val softLightHex: String
 ) {
-    Sky("Lime", "#B4F077", "#4E7D1C", "#B4F077", "#4E7D1C"),
-    Mint("Mint", "#61E6A4", "#007A52", "#B8FFD7", "#006C49"),
-    Rose("Rose", "#FF7A8A", "#B32648", "#FFD9DE", "#A3193D"),
-    Amber("Amber", "#FFD166", "#8A5600", "#FFE2A3", "#7A4B00"),
-    Violet("Violet", "#B589FF", "#6750A4", "#D8C2FF", "#5B45A0"),
-    Cyan("Cyan", "#38D5E8", "#006878", "#B3EBF4", "#005E6C"),
-    Coral("Coral", "#FF9F7A", "#A33D22", "#FFD7C7", "#91341B"),
-    Pink("Pink", "#F472B6", "#9D2868", "#FFD7EC", "#8A1F5B"),
-    Emerald("Emerald", "#4ADE80", "#167A3A", "#C4FBD3", "#0D6F31"),
-    Indigo("Indigo", "#818CF8", "#3F51B5", "#DCE1FF", "#3342A2"),
-    Teal("Teal", "#2DD4BF", "#00796B", "#B6F1E8", "#006D60"),
-    Slate("Slate", "#A7B3CC", "#526178", "#D9E2F2", "#445268")
+    Sky("Metallic Blue", "#7EA2FF", "#2F5FD0", "#B8C7FF", "#274FAD"),
+    Mint("Cool Teal", "#3FE0C4", "#087F7A", "#A7F3E6", "#0B6F6A"),
+    Rose("Raspberry", "#FF6FAE", "#C0266D", "#FFD1E6", "#A01C58"),
+    Amber("Goldenrod", "#F5C542", "#A16207", "#FFE7A3", "#854D0E"),
+    Violet("Amethyst", "#B794F6", "#6D28D9", "#E9D5FF", "#5B21B6"),
+    Cyan("Aqua Lapis", "#35D6E7", "#0277BD", "#B8F3FA", "#0369A1"),
+    Coral("Terracotta", "#FF8A65", "#B45335", "#FFD6C8", "#93452C"),
+    Pink("Salmon Pop", "#FF7A90", "#BE3A57", "#FFD0DA", "#A62D49"),
+    Emerald("Modern Myrtle", "#48D6A5", "#087C64", "#BDEEDC", "#066B56"),
+    Indigo("Electric Blue", "#5BC0FF", "#1D4ED8", "#BFDBFE", "#1E40AF"),
+    Teal("Jade Energy", "#54D17A", "#138A4E", "#C8F6D4", "#0F7A43"),
+    Slate("Ruby Slate", "#F0627D", "#9F1239", "#FFD0DB", "#881337")
 }
 
 enum class UiSurface(

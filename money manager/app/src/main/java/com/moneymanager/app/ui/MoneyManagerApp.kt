@@ -1750,6 +1750,7 @@ private fun AddBudgetSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .fillMaxHeight(0.9f)
                 .verticalScroll(rememberScrollState())
                 .animateContentSize(tween(260, easing = FastOutSlowInEasing))
                 .imePadding()
@@ -2041,6 +2042,7 @@ private fun AddCategorySheet(onDismiss: () -> Unit, onAdd: (String, String, Stri
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .fillMaxHeight(0.9f)
                 .verticalScroll(rememberScrollState())
                 .animateContentSize(tween(260, easing = FastOutSlowInEasing))
                 .imePadding()
@@ -3208,7 +3210,7 @@ private fun UiAccentSelector(
     darkMode: Boolean,
     onSelected: (UiAccent) -> Unit
 ) {
-    val accentOptions = remember { UiAccent.entries.take(10) }
+    val accentOptions = remember { UiAccent.entries }
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         LabelText("APP COLOR")
@@ -3483,19 +3485,19 @@ private fun inputColors() = OutlinedTextFieldDefaults.colors(
 )
 
 private val categoryPalette = listOf(
-    "#B4F077",
-    "#8BE35D",
-    "#FF7A8A",
-    "#FFD166",
-    "#B589FF",
-    "#38D5E8",
-    "#FF9F43",
-    "#F472B6",
-    "#4ADE80",
-    "#60A5FA",
-    "#A78BFA",
-    "#F87171",
-    "#2DD4BF",
-    "#FBBF24",
-    "#94A3B8"
+    "#2F5FD0",
+    "#087F7A",
+    "#C0266D",
+    "#A16207",
+    "#6D28D9",
+    "#0277BD",
+    "#B45335",
+    "#BE3A57",
+    "#087C64",
+    "#1D4ED8",
+    "#138A4E",
+    "#9F1239",
+    "#FF8A65",
+    "#35D6E7",
+    "#F5C542"
 )
