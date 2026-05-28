@@ -18,20 +18,44 @@ data class SmsDebugExportResult(
     val scannedCount: Int
 )
 
+data class SmsScanProgress(
+    val processed: Int,
+    val total: Int
+)
+
 class TodaySmsScanner(private val context: Context) {
-    fun scanToday(): List<ParsedTransactionMessage> = scanRange(LocalDate.now(), LocalDate.now())
+    fun scanToday(
+        categories: List<LocalLlmCategoryOption> = emptyList(),
+        useLocalLlm: Boolean = false,
+        onProgress: (SmsScanProgress) -> Unit = {}
+    ): List<ParsedTransactionMessage> =
+        scanRange(LocalDate.now(), LocalDate.now(), categories, useLocalLlm, onProgress)
 
-    fun scanYesterday(): List<ParsedTransactionMessage> {
+    fun scanYesterday(
+        categories: List<LocalLlmCategoryOption> = emptyList(),
+        useLocalLlm: Boolean = false,
+        onProgress: (SmsScanProgress) -> Unit = {}
+    ): List<ParsedTransactionMessage> {
         val yesterday = LocalDate.now().minusDays(1)
-        return scanRange(yesterday, yesterday)
+        return scanRange(yesterday, yesterday, categories, useLocalLlm, onProgress)
     }
 
-    fun scanLast7Days(): List<ParsedTransactionMessage> {
+    fun scanLast7Days(
+        categories: List<LocalLlmCategoryOption> = emptyList(),
+        useLocalLlm: Boolean = false,
+        onProgress: (SmsScanProgress) -> Unit = {}
+    ): List<ParsedTransactionMessage> {
         val today = LocalDate.now()
-        return scanRange(today.minusDays(6), today)
+        return scanRange(today.minusDays(6), today, categories, useLocalLlm, onProgress)
     }
 
-    fun scanRange(startDate: LocalDate, endDate: LocalDate): List<ParsedTransactionMessage> {
+    fun scanRange(
+        startDate: LocalDate,
+        endDate: LocalDate,
+        categories: List<LocalLlmCategoryOption> = emptyList(),
+        useLocalLlm: Boolean = false,
+        onProgress: (SmsScanProgress) -> Unit = {}
+    ): List<ParsedTransactionMessage> {
         val startMillis = startDate.atStartOfDay(ZoneId.systemDefault())
             .toInstant()
             .toEpochMilli()
@@ -43,8 +67,9 @@ class TodaySmsScanner(private val context: Context) {
 
         val messages = mutableListOf<ParsedTransactionMessage>()
         val projection = arrayOf(Telephony.Sms.DATE, Telephony.Sms.BODY, Telephony.Sms.ADDRESS)
-        val selection = "${Telephony.Sms.DATE} >= ? AND ${Telephony.Sms.DATE} <= ?"
+        val selection = buildSmsCandidateSelection()
         val args = arrayOf(startMillis.toString(), endMillis.toString())
+        val rows = mutableListOf<SmsCandidateRow>()
 
         context.contentResolver.query(
             Telephony.Sms.CONTENT_URI,
@@ -57,10 +82,32 @@ class TodaySmsScanner(private val context: Context) {
             val bodyIndex = cursor.getColumnIndexOrThrow(Telephony.Sms.BODY)
             val addressIndex = cursor.getColumnIndexOrThrow(Telephony.Sms.ADDRESS)
             while (cursor.moveToNext()) {
-                val timestampMillis = cursor.getLong(dateIndex)
-                val body = cursor.getString(bodyIndex)
-                val sender = cursor.getString(addressIndex)
-                TransactionMessageParser.parse(body, timestampMillis, sender)?.let(messages::add)
+                rows += SmsCandidateRow(
+                    timestampMillis = cursor.getLong(dateIndex),
+                    body = cursor.getString(bodyIndex).orEmpty(),
+                    sender = cursor.getString(addressIndex)
+                )
+            }
+        }
+
+        val total = rows.size
+        onProgress(SmsScanProgress(processed = 0, total = total))
+        rows.forEachIndexed { index, row ->
+            TransactionMessageParser.parse(
+                message = row.body,
+                transactionTimestampMillis = row.timestampMillis,
+                sender = row.sender,
+                categories = categories,
+                useLocalLlm = useLocalLlm
+            )?.let(messages::add)
+            val processed = index + 1
+            if (processed == total || processed % 2 == 0) {
+                onProgress(SmsScanProgress(processed = processed, total = total))
+            }
+            if (useLocalLlm && TransactionMessageParser.localLlmInterpreter != null) {
+                Thread.sleep(150L)
+            } else if (processed % 4 == 0) {
+                Thread.yield()
             }
         }
 
@@ -77,7 +124,7 @@ class TodaySmsScanner(private val context: Context) {
             .toEpochMilli()
 
         val projection = arrayOf(Telephony.Sms.DATE, Telephony.Sms.BODY, Telephony.Sms.ADDRESS)
-        val selection = "${Telephony.Sms.DATE} >= ? AND ${Telephony.Sms.DATE} <= ?"
+        val selection = buildSmsCandidateSelection()
         val args = arrayOf(startMillis.toString(), endMillis.toString())
         val rows = mutableListOf<String>()
         var scannedCount = 0
@@ -168,6 +215,44 @@ class TodaySmsScanner(private val context: Context) {
             "outstanding"
         ).any { it in lower }
     }
+
+    private fun buildSmsCandidateSelection(): String {
+        val body = Telephony.Sms.BODY
+        val moneyClauses = listOf(
+            "$body LIKE '%Rs%'",
+            "$body LIKE '%INR%'",
+            "$body LIKE '%rupees%'",
+            "$body LIKE '%₹%'"
+        )
+        val bankClauses = listOf(
+            "$body LIKE '%debited%'",
+            "$body LIKE '%credited%'",
+            "$body LIKE '%debit%'",
+            "$body LIKE '%credit%'",
+            "$body LIKE '%spent%'",
+            "$body LIKE '%paid%'",
+            "$body LIKE '%received%'",
+            "$body LIKE '%deposited%'",
+            "$body LIKE '%withdrawn%'",
+            "$body LIKE '%upi%'",
+            "$body LIKE '%NEFT%'",
+            "$body LIKE '%RTGS%'",
+            "$body LIKE '%IMPS%'",
+            "$body LIKE '%a/c%'",
+            "$body LIKE '%account%'",
+            "$body LIKE '%bank%'",
+            "$body LIKE '%card%'"
+        )
+        return "${Telephony.Sms.DATE} >= ? AND ${Telephony.Sms.DATE} <= ? " +
+            "AND (${moneyClauses.joinToString(" OR ")}) " +
+            "AND (${bankClauses.joinToString(" OR ")})"
+    }
+
+    private data class SmsCandidateRow(
+        val timestampMillis: Long,
+        val body: String,
+        val sender: String?
+    )
 
     private fun creditCardArtifactReason(message: String, parsedType: TransactionType?): String {
         return when {

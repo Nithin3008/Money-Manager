@@ -15,14 +15,15 @@ object SmsTransactionNormalizer {
         val withoutCardArtifacts = messages.filterNot { isNonLedgerTransactionArtifact(it.rawMessage, it.type) }
         if (withoutCardArtifacts.size <= 1) return withoutCardArtifacts
         val sorted = withoutCardArtifacts.sortedBy { it.transactionTimestampMillis }
+        val normalized = sorted.toMutableList()
         val droppedIndices = mutableSetOf<Int>()
 
         for (i in sorted.indices) {
             if (i in droppedIndices) continue
-            val a = sorted[i]
+            val a = normalized[i]
             for (j in i + 1 until sorted.size) {
                 if (j in droppedIndices) continue
-                val b = sorted[j]
+                val b = normalized[j]
                 if (b.transactionTimestampMillis - a.transactionTimestampMillis > PAIR_WINDOW_MS) break
                 if (sameAmount(a.amount, b.amount) && a.type != b.type) {
                     when {
@@ -31,15 +32,15 @@ object SmsTransactionNormalizer {
                             droppedIndices.add(dropIncomeIdx)
                         }
                         looksLikeInternalTransfer(a, b) -> {
-                            val dropIncomeIdx = if (a.type == TransactionType.Income) i else j
-                            droppedIndices.add(dropIncomeIdx)
+                            normalized[i] = a.asInternalTransfer()
+                            normalized[j] = b.asInternalTransfer()
                         }
                     }
                 }
             }
         }
 
-        return sorted.filterIndexed { idx, msg ->
+        return normalized.filterIndexed { idx, msg ->
             idx !in droppedIndices && !isNonLedgerTransactionArtifact(msg.rawMessage, msg.type)
         }
     }
@@ -199,14 +200,21 @@ object SmsTransactionNormalizer {
     }
 
     private fun looksLikeInternalTransfer(a: ParsedTransactionMessage, b: ParsedTransactionMessage): Boolean {
+        if (a.isInternalTransfer || b.isInternalTransfer) return true
+
         val combined = a.rawMessage.lowercase() + " " + b.rawMessage.lowercase()
         val transferHints = listOf(
             "transfer to own",
             "transfer from own",
+            "own account",
+            "own a/c",
             "internal transfer",
             "txn-a2a",
+            "a2a transfer",
             "a/c transfer",
             "account transfer",
+            "account to account",
+            "a/c to a/c",
             "to self",
             "from self",
             "neft to",
@@ -221,7 +229,21 @@ object SmsTransactionNormalizer {
                 a.accountHint != b.accountHint
         val bankLikeCounterparties = listOf(a.counterparty.lowercase(), b.counterparty.lowercase())
             .all { it.contains("bank") || it.contains("transfer") || it.contains("self") }
-        return sameNamedBankDifferentAccounts && bankLikeCounterparties
+        return sameNamedBankDifferentAccounts && (bankLikeCounterparties || hasTransferRail(combined))
+    }
+
+    private fun ParsedTransactionMessage.asInternalTransfer(): ParsedTransactionMessage {
+        return copy(
+            name = "Internal Transfer",
+            counterparty = "Internal Transfer",
+            requiresUserReview = false,
+            isInternalTransfer = true,
+            excludeFromSummary = true
+        )
+    }
+
+    private fun hasTransferRail(message: String): Boolean {
+        return listOf("transfer", "neft", "rtgs", "imps", "upi").any { it in message }
     }
 
     private fun sameAmount(a: Double, b: Double): Boolean = abs(a - b) <= AMOUNT_EPSILON

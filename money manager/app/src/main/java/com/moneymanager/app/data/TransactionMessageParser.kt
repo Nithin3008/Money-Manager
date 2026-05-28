@@ -12,10 +12,51 @@ data class ParsedTransactionMessage(
     val transactionTimestampMillis: Long = System.currentTimeMillis(),
     val accountHint: String? = null,
     val requiresUserReview: Boolean = false,
-    val isCreditCardTransaction: Boolean = false
+    val isCreditCardTransaction: Boolean = false,
+    val isInternalTransfer: Boolean = false,
+    val excludeFromSummary: Boolean = false,
+    val suggestedCategoryId: Long? = null,
+    val categoryRequiresUserReview: Boolean = false
+)
+
+/**
+ * Contract for an on-device LLM or compact local classifier.
+ *
+ * Implementations should run fully offline and return only fields supported by the message text.
+ * The parser still validates critical fields before using them.
+ */
+fun interface LocalLlmTransactionInterpreter {
+    fun interpret(
+        message: String,
+        sender: String?,
+        categories: List<LocalLlmCategoryOption>
+    ): LocalLlmTransactionInterpretation?
+}
+
+data class LocalLlmCategoryOption(
+    val id: Long,
+    val name: String
+)
+
+data class LocalLlmTransactionInterpretation(
+    val amount: Double? = null,
+    val type: TransactionType? = null,
+    val bankName: String? = null,
+    val accountHint: String? = null,
+    val counterparty: String? = null,
+    val isCreditCardTransaction: Boolean? = null,
+    val isInternalTransfer: Boolean? = null,
+    val suggestedCategoryId: Long? = null,
+    val confidence: Double = 0.0
 )
 
 object TransactionMessageParser {
+
+    private const val MIN_LOCAL_LLM_CONFIDENCE = 0.65
+    private const val AMOUNT_EPSILON = 0.02
+
+    @Volatile
+    var localLlmInterpreter: LocalLlmTransactionInterpreter? = null
 
     private val amountRegex = Regex(
         """(?i)(?:rs\.?|r\.|inr|rupees?|₹)\s*([\d,]+(?:\.\d{1,2})?)"""
@@ -57,7 +98,9 @@ object TransactionMessageParser {
     fun parse(
         message: String,
         transactionTimestampMillis: Long = System.currentTimeMillis(),
-        sender: String? = null
+        sender: String? = null,
+        categories: List<LocalLlmCategoryOption> = emptyList(),
+        useLocalLlm: Boolean = false
     ): ParsedTransactionMessage? {
         val normalized = message.replace('\n', ' ').trim()
         if (SmsTransactionNormalizer.isCreditCardDueReminder(normalized)) return null
@@ -65,46 +108,66 @@ object TransactionMessageParser {
         if (SmsTransactionNormalizer.isCreditCardStatementArtifact(normalized)) return null
         if (!looksLikeBankTransaction(normalized)) return null
 
-        val amount = amountRegex.find(normalized)
-            ?.groupValues?.getOrNull(1)
-            ?.replace(",", "")
-            ?.toDoubleOrNull()
+        val amountCandidates = extractAmounts(normalized)
+        val llmInterpretation = if (useLocalLlm) {
+            localLlmInterpreter
+                ?.interpret(normalized, sender, categories)
+                ?.takeIf { it.confidence >= MIN_LOCAL_LLM_CONFIDENCE }
+        } else {
+            null
+        }
+        val suggestedCategoryId = llmInterpretation
+            ?.suggestedCategoryId
+            ?.takeIf { suggested -> categories.any { it.id == suggested } }
+
+        val amount = llmInterpretation
+            ?.amount
+            ?.takeIf { interpreted -> amountCandidates.any { sameAmount(it, interpreted) } }
+            ?: amountCandidates.firstOrNull()
             ?: return null
 
-        val detectedType = detectTransactionType(normalized)
+        val detectedType = llmInterpretation?.type ?: detectTransactionType(normalized)
         val requiresUserReview = detectedType == null
         val type = detectedType ?: TransactionType.Expense
-        val isCreditCardTransaction = SmsTransactionNormalizer.isCreditCardSpend(normalized)
+        val isCreditCardTransaction = llmInterpretation?.isCreditCardTransaction
+            ?: SmsTransactionNormalizer.isCreditCardSpend(normalized)
+        val isInternalTransfer = llmInterpretation?.isInternalTransfer
+            ?: looksLikeInternalTransferMessage(normalized)
 
         val senderLabel = sender?.let(::bankNameFromSender)
-        val baseBankName = bankRegex.find(normalized)
+        val baseBankName = llmInterpretation?.bankName?.cleanModelField(maxLength = 32)?.uppercase()
+            ?: bankRegex.find(normalized)
             ?.value?.trim()?.uppercase()
             ?: senderLabel
             ?: "Bank"
         val accountHint = if (looksLikeCreditCard(normalized)) {
             null
         } else {
-            extractAccountHint(normalized)
+            llmInterpretation?.accountHint?.filter(Char::isDigit)?.takeLast(6)?.takeIf { it.length >= 3 }
+                ?: extractAccountHint(normalized)
         }
         val bankName = accountHint?.let { "$baseBankName A/C $it" } ?: baseBankName
 
+        val modelCounterparty = llmInterpretation?.counterparty
+            ?.cleanModelField(maxLength = 40)
+            ?.takeIf { it.isNotBlank() && !it.lowercase().startsWith("rs") }
+        val iciciCounterparty = if (isIciciCreditCardBillDebit(normalized)) "Credit Card Bill" else null
+
         // Try the semicolon pattern first, then fall back to to/at/for.
         var counterparty = (
-                if (isIciciCreditCardBillDebit(normalized)) {
-                    "Credit Card Bill"
-                } else {
-                    null
-                }
-                    ?: cardSpentOnMerchantRegex.find(normalized)?.groupValues?.getOrNull(1)
-                    ?: cardSpentAtMerchantRegex.find(normalized)?.groupValues?.getOrNull(1)
-                    ?: cardUpiMerchantRegex.find(normalized)?.groupValues?.getOrNull(1)
-                    ?: merchantSemicolonRegex.find(normalized)?.groupValues?.getOrNull(1)
-                    ?: merchantToRegex.find(normalized)?.groupValues?.getOrNull(1)
-                        ?.substringBefore(" on ")
-                        ?.substringBefore(" ref")
-                        ?.substringBefore(" using")
-                    ?: if (type == TransactionType.Income) "Bank Credit" else "Bank Transaction"
-                ).trim()
+            modelCounterparty
+                ?: iciciCounterparty
+                ?: cardSpentOnMerchantRegex.find(normalized)?.groupValues?.getOrNull(1)
+                ?: cardSpentAtMerchantRegex.find(normalized)?.groupValues?.getOrNull(1)
+                ?: cardUpiMerchantRegex.find(normalized)?.groupValues?.getOrNull(1)
+                ?: merchantSemicolonRegex.find(normalized)?.groupValues?.getOrNull(1)
+                ?: merchantToRegex.find(normalized)?.groupValues?.getOrNull(1)
+                    ?.substringBefore(" on ")
+                    ?.substringBefore(" ref")
+                    ?.substringBefore(" using")
+                ?: if (isInternalTransfer) "Internal Transfer" else null
+                ?: if (type == TransactionType.Income) "Bank Credit" else "Bank Transaction"
+            ).trim()
 
         // Avoid taking the amount as counterparty
         if (counterparty.lowercase().startsWith("rs")) {
@@ -123,7 +186,11 @@ object TransactionMessageParser {
             transactionTimestampMillis = transactionTimestampMillis,
             accountHint = accountHint,
             requiresUserReview = requiresUserReview,
-            isCreditCardTransaction = isCreditCardTransaction
+            isCreditCardTransaction = isCreditCardTransaction,
+            isInternalTransfer = isInternalTransfer,
+            excludeFromSummary = isInternalTransfer,
+            suggestedCategoryId = suggestedCategoryId,
+            categoryRequiresUserReview = suggestedCategoryId != null
         )
     }
 
@@ -177,6 +244,16 @@ object TransactionMessageParser {
         return hasMoney && hasBankWord
     }
 
+    private fun extractAmounts(message: String): List<Double> {
+        return amountRegex.findAll(message)
+            .mapNotNull { match ->
+                match.groupValues.getOrNull(1)
+                    ?.replace(",", "")
+                    ?.toDoubleOrNull()
+            }
+            .toList()
+    }
+
     private fun extractAccountHint(message: String): String? {
         return accountHintRegexes.firstNotNullOfOrNull { regex ->
             regex.find(message)?.groupValues?.getOrNull(1)
@@ -186,6 +263,40 @@ object TransactionMessageParser {
     private fun looksLikeCreditCard(message: String): Boolean {
         val lower = message.lowercase()
         return listOf("credit card", "card bill", "cc payment", "card ending", "card no").any { it in lower }
+    }
+
+    private fun looksLikeInternalTransferMessage(message: String): Boolean {
+        val lower = message.lowercase()
+        val explicitHints = listOf(
+            "transfer to own",
+            "transfer from own",
+            "own account",
+            "own a/c",
+            "my account",
+            "my a/c",
+            "your account",
+            "your a/c",
+            "self transfer",
+            "to self",
+            "from self",
+            "between your accounts",
+            "between your a/c",
+            "internal transfer",
+            "account to account",
+            "a/c to a/c",
+            "txn-a2a",
+            "a2a transfer"
+        )
+        if (explicitHints.any { it in lower }) return true
+
+        val hasTransferRail = listOf("transfer", "neft", "rtgs", "imps", "upi").any { it in lower }
+        if (!hasTransferRail) return false
+
+        val distinctAccountHints = accountHintRegexes
+            .flatMap { regex -> regex.findAll(message).mapNotNull { it.groupValues.getOrNull(1) } }
+            .map { it.takeLast(4) }
+            .distinct()
+        return distinctAccountHints.size >= 2 && listOf("own", "self", "my account", "your account").any { it in lower }
     }
 
     private fun isIciciCreditCardBillDebit(message: String): Boolean {
@@ -207,5 +318,16 @@ object TransactionMessageParser {
             "YESBANK" in compact -> "YES BANK"
             else -> null
         }
+    }
+
+    private fun String.cleanModelField(maxLength: Int): String {
+        return replace(Regex("""[\t\r\n]+"""), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+            .take(maxLength)
+    }
+
+    private fun sameAmount(a: Double, b: Double): Boolean {
+        return kotlin.math.abs(a - b) <= AMOUNT_EPSILON
     }
 }

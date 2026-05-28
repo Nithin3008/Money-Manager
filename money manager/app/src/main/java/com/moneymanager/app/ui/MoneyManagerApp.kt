@@ -202,6 +202,14 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
         }
     }
 
+    val modelImportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            viewModel.importOfflineLlmModel(uri)
+        }
+    }
+
     if (state.isAppInitializing) {
         InitialLoadingScreen()
         return
@@ -309,6 +317,10 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
                         onSalaryWindowDaysChanged = viewModel::setSalaryShiftWindowDays,
                         onSalaryCategorySelected = viewModel::setSalaryCategoryId,
                         onSalaryKeywordsToggled = viewModel::setSalaryKeywordsForUncategorized,
+                        onOfflineLlmParsingToggled = viewModel::setOfflineLlmParsingEnabled,
+                        onDownloadOfflineLlmModel = viewModel::requestOfflineLlmModelDownload,
+                        onImportOfflineLlmModel = { modelImportLauncher.launch(arrayOf("*/*")) },
+                        onDeleteOfflineLlmModel = viewModel::deleteOfflineLlmModel,
                         onDeleteAccount = viewModel::deleteAccount,
                         onUpdateAccountBalance = viewModel::updateAccountBalance,
                         onAddAccount = viewModel::addBankAccount,
@@ -429,6 +441,10 @@ private fun androidx.compose.foundation.lazy.LazyListScope.settingsContent(
     onSalaryWindowDaysChanged: (Int) -> Unit,
     onSalaryCategorySelected: (Long?) -> Unit,
     onSalaryKeywordsToggled: (Boolean) -> Unit,
+    onOfflineLlmParsingToggled: (Boolean) -> Unit,
+    onDownloadOfflineLlmModel: () -> Unit,
+    onImportOfflineLlmModel: () -> Unit,
+    onDeleteOfflineLlmModel: () -> Unit,
     onDeleteAccount: (Long) -> Unit,
     onUpdateAccountBalance: (Long, Double) -> Unit,
     onAddAccount: (String, Double) -> Unit,
@@ -497,6 +513,15 @@ private fun androidx.compose.foundation.lazy.LazyListScope.settingsContent(
         )
     }
     item {
+        OfflineLlmSettings(
+            state = state,
+            onEnabledChanged = onOfflineLlmParsingToggled,
+            onDownload = onDownloadOfflineLlmModel,
+            onImport = onImportOfflineLlmModel,
+            onDelete = onDeleteOfflineLlmModel
+        )
+    }
+    item {
         CategorySettingsGroup(
             categories = state.categories,
             onDelete = onDeleteCategory,
@@ -522,6 +547,123 @@ private fun androidx.compose.foundation.lazy.LazyListScope.settingsContent(
     }
     item {
         DeleteDataPanel(onDeleteAllData = onDeleteAllData)
+    }
+}
+
+@Composable
+private fun OfflineLlmSettings(
+    state: FinanceUiState,
+    onEnabledChanged: (Boolean) -> Unit,
+    onDownload: () -> Unit,
+    onImport: () -> Unit,
+    onDelete: () -> Unit
+) {
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+    val status = when {
+        state.offlineLlmParsingEnabled && state.offlineLlmModelDownloaded ->
+            "On-device model active. SMS stays on this phone."
+        state.isOfflineLlmModelDownloading ->
+            "Downloading model..."
+        state.offlineLlmParsingEnabled ->
+            "Enabled after the one-time model download."
+        state.offlineLlmModelDownloaded ->
+            "Model downloaded. Parsing is currently off."
+        else ->
+            "Optional one-time download for smarter SMS parsing."
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        LabelText("OFFLINE LLM")
+        ElevatedPanel {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconTile(Icons.Rounded.Sms, PrimarySoft)
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("LLM message parsing", color = TextPrimary, style = MaterialTheme.typography.titleMedium)
+                        Text(status, color = TextDim, style = MaterialTheme.typography.bodyMedium)
+                    }
+                    Switch(
+                        checked = state.offlineLlmParsingEnabled,
+                        onCheckedChange = onEnabledChanged,
+                        colors = appSwitchColors()
+                    )
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedButton(
+                        onClick = onDownload,
+                        enabled = !state.offlineLlmModelDownloaded && !state.isOfflineLlmModelDownloading,
+                        modifier = Modifier.weight(1f).height(52.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, PrimarySoft)
+                    ) {
+                        Text(
+                            if (state.isOfflineLlmModelDownloading) "Downloading" else "Download model",
+                            color = PrimarySoft,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    OutlinedButton(
+                        onClick = onImport,
+                        enabled = !state.isOfflineLlmModelDownloading,
+                        modifier = Modifier.weight(1f).height(52.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, PrimarySoft)
+                    ) {
+                        Text("Import file", color = PrimarySoft, fontWeight = FontWeight.Bold)
+                    }
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedButton(
+                        onClick = { showDeleteConfirm = true },
+                        enabled = !state.isOfflineLlmModelDownloading &&
+                            (state.offlineLlmModelDownloaded || state.offlineLlmParsingEnabled),
+                        modifier = Modifier.fillMaxWidth().height(52.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, LossRed)
+                    ) {
+                        Text("Delete model", color = LossRed, fontWeight = FontWeight.Bold)
+                    }
+                }
+                if (state.offlineLlmStatusMessage.isNotBlank()) {
+                    Text(state.offlineLlmStatusMessage, color = TextDim, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+    }
+
+    if (showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            title = { Text("Delete offline model?") },
+            text = {
+                Text(
+                    "This removes the local model files and turns off LLM parsing. Rule parsing will continue.",
+                    color = TextMuted
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDeleteConfirm = false
+                        onDelete()
+                    }
+                ) {
+                    Text("Delete", color = LossRed, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirm = false }) {
+                    Text("Cancel")
+                }
+            },
+            containerColor = Navy850,
+            titleContentColor = TextPrimary,
+            textContentColor = TextMuted
+        )
     }
 }
 
@@ -732,10 +874,11 @@ private fun DeleteDataPanel(onDeleteAllData: () -> Unit) {
 }
 
 @Composable
-private fun RegistrationScreen(onComplete: (String, List<Pair<String, Double>>, Int) -> Unit) {
+private fun RegistrationScreen(onComplete: (String, List<Pair<String, Double>>, Int, Boolean) -> Unit) {
     var name by remember { mutableStateOf("") }
     val accounts = remember { mutableStateListOf(AccountDraft()) }
     var defaultAccountIndex by remember { mutableStateOf(0) }
+    var offlineLlmParsingOptIn by remember { mutableStateOf(false) }
     val validWithOriginalIndex = accounts.mapIndexedNotNull { index, draft ->
         val amount = draft.balance.toDoubleOrNull()
         val accountName = draft.displayName()
@@ -824,8 +967,37 @@ private fun RegistrationScreen(onComplete: (String, List<Pair<String, Double>>, 
             }
         }
         item {
+            ElevatedPanel {
+                Row(
+                    modifier = Modifier.padding(14.dp).fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("Offline LLM parsing", color = TextPrimary, style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            "Optional one-time download for smarter SMS detection. You can turn it off or delete it later.",
+                            color = TextDim,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                    Switch(
+                        checked = offlineLlmParsingOptIn,
+                        onCheckedChange = { offlineLlmParsingOptIn = it },
+                        colors = appSwitchColors()
+                    )
+                }
+            }
+        }
+        item {
             Button(
-                onClick = { onComplete(name, validWithOriginalIndex.map { it.second }, defaultValidIndex) },
+                onClick = {
+                    onComplete(
+                        name,
+                        validWithOriginalIndex.map { it.second },
+                        defaultValidIndex,
+                        offlineLlmParsingOptIn
+                    )
+                },
                 enabled = name.isNotBlank() && validWithOriginalIndex.isNotEmpty(),
                 modifier = Modifier.fillMaxWidth().height(58.dp),
                 shape = RoundedCornerShape(12.dp),
@@ -1354,7 +1526,12 @@ private fun TransactionDetailSheet(
             )
         }
     ) {
-        Box(Modifier.fillMaxWidth().imePadding()) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.9f)
+                .imePadding()
+        ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()

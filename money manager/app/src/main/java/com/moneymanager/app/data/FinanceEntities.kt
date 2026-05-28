@@ -14,6 +14,8 @@ data class UserSettingsEntity(
     val salaryCategoryId: Long? = null,
     val salaryKeywordsForUncategorized: Boolean = true,
     val bankSmsSetupCompleted: Boolean = false,
+    val offlineLlmParsingEnabled: Boolean = false,
+    val offlineLlmModelDownloaded: Boolean = false,
     val summaryAccountFilterIdsCsv: String = "",
     val uiAccent: String = "Sky",
     val uiSurface: String = "Midnight",

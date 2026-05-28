@@ -15,10 +15,10 @@ class TransactionNotificationListener : NotificationListenerService() {
         val extras = sbn.notification.extras
         val title = extras.getCharSequence("android.title")?.toString().orEmpty()
         val text = extras.getCharSequence("android.text")?.toString().orEmpty()
-        val parsed = TransactionMessageParser.parse("$title $text") ?: return
-        if (parsed.amount <= 0.0) return
 
         CoroutineScope(Dispatchers.IO).launch {
+            val parsed = TransactionMessageParser.parse("$title $text", useLocalLlm = false) ?: return@launch
+            if (parsed.amount <= 0.0) return@launch
             FinanceRepository(FinanceDatabase.get(applicationContext).dao()).saveDraft(
                 DetectedTransactionDraft(
                     id = 0,

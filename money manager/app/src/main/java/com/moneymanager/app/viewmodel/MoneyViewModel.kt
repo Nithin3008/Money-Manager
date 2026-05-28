@@ -3,14 +3,22 @@ package com.moneymanager.app.viewmodel
 import android.Manifest
 import android.app.Application
 import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Process
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.moneymanager.app.data.FinanceDatabase
 import com.moneymanager.app.data.FinanceRepository
+import com.moneymanager.app.data.LiteRtLmTransactionInterpreter
+import com.moneymanager.app.data.LocalLlmCategoryOption
+import com.moneymanager.app.data.OfflineLlmModelConfig
+import com.moneymanager.app.data.OfflineLlmModelManager
 import com.moneymanager.app.data.SmsBankKeys
+import com.moneymanager.app.data.SmsScanProgress
 import com.moneymanager.app.data.SmsTransactionNormalizer
 import com.moneymanager.app.data.TodaySmsScanner
+import com.moneymanager.app.data.TransactionMessageParser
 import com.moneymanager.app.model.BankAccount
 import com.moneymanager.app.model.BudgetPlan
 import com.moneymanager.app.model.MessageScanRange
@@ -32,11 +40,19 @@ import java.time.ZoneId
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.time.YearMonth
 
 class MoneyViewModel(application: Application) : AndroidViewModel(application) {
+    private companion object {
+        const val OFFLINE_LLM_RUNTIME_ENABLED = false
+    }
+
     private val repository = FinanceRepository(FinanceDatabase.get(application).dao())
+    private val offlineLlmModelManager = OfflineLlmModelManager(application)
+    private var offlineLlmInterpreter: LiteRtLmTransactionInterpreter? = null
 
     private val _uiState = MutableStateFlow(FinanceUiState())
     val uiState: StateFlow<FinanceUiState> = _uiState
@@ -45,7 +61,17 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
         reload()
     }
 
-    fun completeRegistration(name: String, accounts: List<Pair<String, Double>>, defaultAccountIndex: Int) {
+    override fun onCleared() {
+        closeOfflineLlmInterpreter()
+        super.onCleared()
+    }
+
+    fun completeRegistration(
+        name: String,
+        accounts: List<Pair<String, Double>>,
+        defaultAccountIndex: Int,
+        offlineLlmParsingOptIn: Boolean
+    ) {
         viewModelScope.launch {
             val accountIds = accounts
                 .filter { it.first.isNotBlank() && it.second >= 0.0 }
@@ -56,6 +82,13 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
                 _uiState.value.copy(
                     userName = name.trim(),
                     bankSmsSetupCompleted = true,
+                    offlineLlmParsingEnabled = offlineLlmParsingOptIn && OFFLINE_LLM_RUNTIME_ENABLED,
+                    offlineLlmModelDownloaded = false,
+                    offlineLlmStatusMessage = if (offlineLlmParsingOptIn && !OFFLINE_LLM_RUNTIME_ENABLED) {
+                        "Offline LLM runtime is disabled in this build to prevent crashes. Rule parsing stays active."
+                    } else {
+                        _uiState.value.offlineLlmStatusMessage
+                    },
                     defaultAccountId = defaultId
                 )
             )
@@ -63,7 +96,8 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
             scanMessages(
                 range = MessageScanRange.Custom,
                 startDate = LocalDate.now().minusMonths(3),
-                endDate = LocalDate.now()
+                endDate = LocalDate.now(),
+                useLocalLlm = false
             )
         }
     }
@@ -191,6 +225,122 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun setOfflineLlmParsingEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            if (!enabled) closeOfflineLlmInterpreter()
+            val modelReady = offlineLlmModelManager.isModelReady()
+            val runtimeEnabled = enabled && OFFLINE_LLM_RUNTIME_ENABLED
+            val next = _uiState.value.copy(
+                offlineLlmParsingEnabled = runtimeEnabled,
+                offlineLlmModelDownloaded = modelReady,
+                offlineLlmStatusMessage = when {
+                    enabled && !OFFLINE_LLM_RUNTIME_ENABLED -> "Offline LLM runtime is disabled in this build to prevent crashes. Rule parsing stays active."
+                    runtimeEnabled && modelReady -> "Offline LLM model is ready."
+                    runtimeEnabled -> "Download the offline model to turn LLM parsing on."
+                    else -> "Offline LLM parsing is off. Rule parsing stays active."
+                }
+            )
+            repository.persistUserSettings(next)
+            _uiState.value = next
+        }
+    }
+
+    fun requestOfflineLlmModelDownload() {
+        viewModelScope.launch {
+            if (_uiState.value.isOfflineLlmModelDownloading) return@launch
+            _uiState.update {
+                it.copy(
+                    isOfflineLlmModelDownloading = true,
+                    offlineLlmStatusMessage = "Downloading ${OfflineLlmModelConfig.modelDisplayName}..."
+                )
+            }
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    offlineLlmModelManager.downloadModel()
+                }
+            }.onSuccess { result ->
+                val next = _uiState.value.copy(
+                    offlineLlmParsingEnabled = OFFLINE_LLM_RUNTIME_ENABLED,
+                    offlineLlmModelDownloaded = true,
+                    isOfflineLlmModelDownloading = false,
+                    offlineLlmStatusMessage = if (OFFLINE_LLM_RUNTIME_ENABLED) {
+                        "Offline model ready (${result.bytes / (1024 * 1024)} MB)."
+                    } else {
+                        "Offline model saved (${result.bytes / (1024 * 1024)} MB). LLM runtime is disabled in this build to prevent crashes."
+                    }
+                )
+                repository.persistUserSettings(next)
+                _uiState.value = next
+            }.onFailure { error ->
+                closeOfflineLlmInterpreter()
+                val next = _uiState.value.copy(
+                    offlineLlmModelDownloaded = offlineLlmModelManager.isModelReady(),
+                    isOfflineLlmModelDownloading = false,
+                    offlineLlmStatusMessage = error.message
+                        ?: "Offline model download failed. Rule parsing stays active."
+                )
+                repository.persistUserSettings(next)
+                _uiState.value = next
+            }
+        }
+    }
+
+    fun importOfflineLlmModel(uri: Uri) {
+        viewModelScope.launch {
+            if (_uiState.value.isOfflineLlmModelDownloading) return@launch
+            _uiState.update {
+                it.copy(
+                    isOfflineLlmModelDownloading = true,
+                    offlineLlmStatusMessage = "Importing offline model..."
+                )
+            }
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    offlineLlmModelManager.importModel(uri)
+                }
+            }.onSuccess { result ->
+                val next = _uiState.value.copy(
+                    offlineLlmParsingEnabled = OFFLINE_LLM_RUNTIME_ENABLED,
+                    offlineLlmModelDownloaded = true,
+                    isOfflineLlmModelDownloading = false,
+                    offlineLlmStatusMessage = if (OFFLINE_LLM_RUNTIME_ENABLED) {
+                        "Offline model imported (${result.bytes / (1024 * 1024)} MB)."
+                    } else {
+                        "Offline model imported (${result.bytes / (1024 * 1024)} MB). LLM runtime is disabled in this build to prevent crashes."
+                    }
+                )
+                repository.persistUserSettings(next)
+                _uiState.value = next
+            }.onFailure { error ->
+                closeOfflineLlmInterpreter()
+                val next = _uiState.value.copy(
+                    offlineLlmModelDownloaded = offlineLlmModelManager.isModelReady(),
+                    isOfflineLlmModelDownloading = false,
+                    offlineLlmStatusMessage = error.message
+                        ?: "Offline model import failed. Rule parsing stays active."
+                )
+                repository.persistUserSettings(next)
+                _uiState.value = next
+            }
+        }
+    }
+
+    fun deleteOfflineLlmModel() {
+        viewModelScope.launch {
+            closeOfflineLlmInterpreter()
+            withContext(Dispatchers.IO) {
+                offlineLlmModelManager.deleteModel()
+            }
+            val next = _uiState.value.copy(
+                offlineLlmParsingEnabled = false,
+                offlineLlmModelDownloaded = false,
+                offlineLlmStatusMessage = "Offline LLM model removed. Rule parsing stays active."
+            )
+            repository.persistUserSettings(next)
+            _uiState.value = next
+        }
+    }
+
     fun setSummaryAccountFilter(accountIds: Set<Long>) {
         viewModelScope.launch {
             val next = _uiState.value.copy(summarySelectedAccountIds = accountIds)
@@ -275,6 +425,10 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
 
     fun deleteAllSavedData() {
         viewModelScope.launch {
+            closeOfflineLlmInterpreter()
+            withContext(Dispatchers.IO) {
+                offlineLlmModelManager.deleteModel()
+            }
             repository.clearAllSavedData()
             _uiState.value = FinanceUiState(isAppInitializing = false)
             reloadState()
@@ -287,9 +441,16 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
             val fromDb = state.transactions.mapNotNull { it.smsBankLabel }.distinct()
             val scanned = if (hasSmsPermission()) {
                 val today = LocalDate.now()
-                TodaySmsScanner(getApplication()).scanRange(today.minusDays(120), today)
-                    .map { it.bankName }
-                    .distinct()
+                withContext(Dispatchers.IO) {
+                    Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND)
+                    TodaySmsScanner(getApplication()).scanRange(
+                        startDate = today.minusDays(120),
+                        endDate = today,
+                        useLocalLlm = false
+                    )
+                        .map { it.bankName }
+                        .distinct()
+                }
             } else {
                 emptyList()
             }
@@ -551,12 +712,12 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun scanTodayMessages() {
-        scanMessages(MessageScanRange.Today)
+        scanMessages(MessageScanRange.Today, useLocalLlm = false)
     }
 
     fun scanCurrentActivityPeriod() {
         val state = _uiState.value
-        scanMessages(MessageScanRange.Custom, state.activityStartDate, state.activityEndDate)
+        scanMessages(MessageScanRange.Custom, state.activityStartDate, state.activityEndDate, useLocalLlm = false)
     }
 
     fun exportPreviousMonthSmsDebug() {
@@ -586,28 +747,59 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
 
     fun populateLastThreeMonths() {
         val today = LocalDate.now()
-        scanMessages(MessageScanRange.Custom, today.minusMonths(3), today)
+        scanMessages(MessageScanRange.Custom, today.minusMonths(3), today, useLocalLlm = false)
     }
 
-    fun scanMessages(range: MessageScanRange, startDate: LocalDate? = null, endDate: LocalDate? = null) {
+    fun scanMessages(
+        range: MessageScanRange,
+        startDate: LocalDate? = null,
+        endDate: LocalDate? = null,
+        useLocalLlm: Boolean = false
+    ) {
         if (_uiState.value.isScanningMessages) return
 
         viewModelScope.launch {
-            _uiState.update { it.copy(isScanningMessages = true, scanStatusMessage = "Scanning messages...") }
+            val effectiveUseLocalLlm = useLocalLlm && OFFLINE_LLM_RUNTIME_ENABLED
+            if (!effectiveUseLocalLlm) closeOfflineLlmInterpreter()
+            _uiState.update {
+                it.copy(
+                    isScanningMessages = true,
+                    scanStartedAtMillis = System.currentTimeMillis(),
+                    scanProcessedCount = 0,
+                    scanTotalCount = 0,
+                    scanStatusMessage = if (effectiveUseLocalLlm) {
+                        "Scanning messages with offline LLM..."
+                    } else {
+                        "Scanning messages..."
+                    }
+                )
+            }
             val hasPermission = hasSmsPermission()
             val parsedMessages = if (hasPermission) {
-                when (range) {
-                    MessageScanRange.Today -> TodaySmsScanner(getApplication()).scanToday()
-                    MessageScanRange.Yesterday -> TodaySmsScanner(getApplication()).scanYesterday()
-                    MessageScanRange.Week -> TodaySmsScanner(getApplication()).scanLast7Days()
-                    MessageScanRange.Custom -> {
-                        val today = LocalDate.now()
-                        val start = startDate ?: today
-                        val end = endDate?.coerceAtMost(today) ?: today
-                        if (start > end) {
-                            emptyList()
-                        } else {
-                            TodaySmsScanner(getApplication()).scanRange(start, end)
+                val categoryOptions = localLlmCategoryOptions()
+                val progressCallback: (SmsScanProgress) -> Unit = { progress ->
+                    _uiState.update {
+                        it.copy(
+                            scanProcessedCount = progress.processed,
+                            scanTotalCount = progress.total
+                        )
+                    }
+                }
+                withContext(Dispatchers.IO) {
+                    Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND)
+                    when (range) {
+                        MessageScanRange.Today -> TodaySmsScanner(getApplication()).scanToday(categoryOptions, effectiveUseLocalLlm, progressCallback)
+                        MessageScanRange.Yesterday -> TodaySmsScanner(getApplication()).scanYesterday(categoryOptions, effectiveUseLocalLlm, progressCallback)
+                        MessageScanRange.Week -> TodaySmsScanner(getApplication()).scanLast7Days(categoryOptions, effectiveUseLocalLlm, progressCallback)
+                        MessageScanRange.Custom -> {
+                            val today = LocalDate.now()
+                            val start = startDate ?: today
+                            val end = endDate?.coerceAtMost(today) ?: today
+                            if (start > end) {
+                                emptyList()
+                            } else {
+                                TodaySmsScanner(getApplication()).scanRange(start, end, categoryOptions, effectiveUseLocalLlm, progressCallback)
+                            }
                         }
                     }
                 }
@@ -619,6 +811,9 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
                 reloadState {
                     it.copy(
                         isScanningMessages = false,
+                        scanStartedAtMillis = null,
+                        scanProcessedCount = 0,
+                        scanTotalCount = 0,
                         scanStatusMessage = "SMS permission is needed before scanning can populate transactions."
                     )
                 }
@@ -640,14 +835,15 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
                 val normRaw = normalizedSmsRaw(msg.rawMessage)
                 if (normRaw.isBlank() || normRaw in normalizedExisting) return@forEach
                 normalizedExisting.add(normRaw)
-                val categoryId = inferCategoryId(msg) ?: _uiState.value.categories.firstOrNull { category ->
+                val learnedCategoryId = inferCategoryId(msg)
+                val categoryId = msg.suggestedCategoryId ?: learnedCategoryId ?: _uiState.value.categories.firstOrNull { category ->
                     category.name == "Uncategorized"
                 }?.id ?: 0L
                 val availableAccounts = accountsSnapshot.values.toList()
                 val accountId = SmsBankKeys.resolveAccountId(msg.bankName, availableAccounts)
                     ?: availableAccounts.singleOrNull()?.id
                 if (accountId != null) autoMappedCount += 1
-                if (msg.requiresUserReview) {
+                if (msg.requiresUserReview || msg.categoryRequiresUserReview) {
                     repository.saveDraft(
                         DetectedTransactionDraft(
                             id = 0,
@@ -676,7 +872,7 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
                     isAutoDetected = true,
                     rawMessage = msg.rawMessage,
                     smsBankLabel = msg.bankName,
-                    excludeFromSummary = msg.isCreditCardTransaction,
+                    excludeFromSummary = msg.excludeFromSummary || msg.isCreditCardTransaction,
                     isCreditCardTransaction = msg.isCreditCardTransaction
                 )
                 repository.addTransaction(transaction)
@@ -707,6 +903,9 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
             reloadState {
                 it.copy(
                     isScanningMessages = false,
+                    scanStartedAtMillis = null,
+                    scanProcessedCount = 0,
+                    scanTotalCount = 0,
                     scanStatusMessage = status,
                     selectedMonth = newestMonth ?: it.selectedMonth
                 )
@@ -834,9 +1033,15 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
             activityStartDate = current.activityStartDate,
             activityEndDate = current.activityEndDate,
             isScanningMessages = current.isScanningMessages,
+            scanStartedAtMillis = current.scanStartedAtMillis,
+            scanProcessedCount = current.scanProcessedCount,
+            scanTotalCount = current.scanTotalCount,
+            isOfflineLlmModelDownloading = current.isOfflineLlmModelDownloading,
             scanStatusMessage = current.scanStatusMessage,
+            offlineLlmStatusMessage = current.offlineLlmStatusMessage,
             budgetWarning = current.budgetWarning,
-            discoveredSmsBanks = current.discoveredSmsBanks
+            discoveredSmsBanks = current.discoveredSmsBanks,
+            offlineLlmModelDownloaded = offlineLlmModelManager.isModelReady()
         )
         _uiState.value = transform(loaded)
     }
@@ -846,6 +1051,55 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
             getApplication(),
             Manifest.permission.READ_SMS
         ) == PackageManager.PERMISSION_GRANTED
+    }
+
+    private suspend fun configureOfflineLlmInterpreter(state: FinanceUiState) {
+        if (!OFFLINE_LLM_RUNTIME_ENABLED) {
+            closeOfflineLlmInterpreter()
+            _uiState.update {
+                it.copy(
+                    offlineLlmParsingEnabled = false,
+                    offlineLlmStatusMessage = "Offline LLM runtime is disabled in this build to prevent crashes. Rule parsing stays active."
+                )
+            }
+            return
+        }
+        if (!state.offlineLlmParsingEnabled || !offlineLlmModelManager.isModelReady()) {
+            closeOfflineLlmInterpreter()
+            return
+        }
+        if (offlineLlmInterpreter != null) return
+
+        runCatching {
+            withContext(Dispatchers.Default) {
+                LiteRtLmTransactionInterpreter(
+                    context = getApplication(),
+                    modelPath = offlineLlmModelManager.modelFile.absolutePath
+                ).also { it.initialize() }
+            }
+        }.onSuccess { interpreter ->
+            offlineLlmInterpreter = interpreter
+            TransactionMessageParser.localLlmInterpreter = interpreter
+            _uiState.update {
+                it.copy(
+                    offlineLlmModelDownloaded = true,
+                    offlineLlmStatusMessage = "Offline LLM parsing is ready."
+                )
+            }
+        }.onFailure { error ->
+            closeOfflineLlmInterpreter()
+            _uiState.update {
+                it.copy(
+                    offlineLlmStatusMessage = "Offline LLM could not start: ${error.message ?: "unknown error"}"
+                )
+            }
+        }
+    }
+
+    private fun closeOfflineLlmInterpreter() {
+        TransactionMessageParser.localLlmInterpreter = null
+        offlineLlmInterpreter?.close()
+        offlineLlmInterpreter = null
     }
 
     private fun suggestCategoryId(name: String): Long? {
@@ -885,5 +1139,14 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
             categories = _uiState.value.categories,
             transactions = _uiState.value.transactions
         )
+    }
+
+    private fun localLlmCategoryOptions(): List<LocalLlmCategoryOption> {
+        return _uiState.value.categories.map { category ->
+            LocalLlmCategoryOption(
+                id = category.id,
+                name = category.name
+            )
+        }
     }
 }
