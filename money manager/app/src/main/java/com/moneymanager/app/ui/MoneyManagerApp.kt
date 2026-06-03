@@ -356,8 +356,7 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
             transaction = selectedTransaction,
             onDismiss = viewModel::cancelEditTransactionCategory,
             onSave = viewModel::updateTransactionDetails,
-            onDelete = viewModel::deleteTransaction,
-            onAddCustomCategory = viewModel::createCategoryForTransaction
+            onDelete = viewModel::deleteTransaction
         )
     }
 
@@ -924,9 +923,11 @@ private fun transferBalanceText(
     if (from == null || to == null) {
         return "Transfers need two different bank accounts. They are excluded from income and expense reports."
     }
-    val debit = if (amount > 0.0) " -> ${state.money(from.balance - amount)}" else ""
-    val credit = if (amount > 0.0) " -> ${state.money(to.balance + amount)}" else ""
-    return "${from.name}: ${state.money(from.balance)}$debit | ${to.name}: ${state.money(to.balance)}$credit"
+    val fromBalance = from.balance
+    val toBalance = to.balance
+    val debit = if (amount > 0.0) " -> ${state.money(fromBalance - amount)}" else ""
+    val credit = if (amount > 0.0) " -> ${state.money(toBalance + amount)}" else ""
+    return "${from.name}: ${state.money(fromBalance)}$debit | ${to.name}: ${state.money(toBalance)}$credit"
 }
 
 @Composable
@@ -986,7 +987,7 @@ private fun AccountDraftRow(
                 shape = RoundedCornerShape(12.dp)
             )
             Text(
-                "Example: HDFC + 4466 helps match SMS like A/c XX4466. Balance becomes the current anchor.",
+                "Example: HDFC + 4466 helps match SMS like A/c XX4466. Balance is kept as the current bank balance.",
                 color = TextDim,
                 style = MaterialTheme.typography.bodySmall
             )
@@ -1308,17 +1309,13 @@ private fun TransactionDetailSheet(
     transaction: LedgerTransaction?,
     onDismiss: () -> Unit,
     onSave: (Long, TransactionType, Long, String?) -> Unit,
-    onDelete: (Long) -> Unit,
-    onAddCustomCategory: (Long, String, String, String) -> Unit
+    onDelete: (Long) -> Unit
 ) {
     if (transaction == null) return
     var categoryId by remember { mutableStateOf(transaction.categoryId) }
     var type by remember { mutableStateOf(transaction.type) }
     var showAllCategories by remember { mutableStateOf(false) }
     var showOriginalMessage by remember { mutableStateOf(false) }
-    var showCustomCategoryForm by remember { mutableStateOf(false) }
-    var customCategoryName by remember { mutableStateOf("") }
-    var customColor by remember { mutableStateOf(categoryPalette.first()) }
     var description by remember(transaction.id) { mutableStateOf(transaction.description.orEmpty()) }
     val categoryRanking = remember(state.transactions, state.categories) {
         state.transactions
@@ -1479,35 +1476,8 @@ private fun TransactionDetailSheet(
                         categories = visibleCategories,
                         selectedCategoryId = categoryId,
                         type = type,
-                        showCustomCategoryForm = showCustomCategoryForm,
-                        onCategorySelected = { categoryId = it },
-                        onCustomSelected = { showCustomCategoryForm = !showCustomCategoryForm }
+                        onCategorySelected = { categoryId = it }
                     )
-                    if (showCustomCategoryForm) {
-                        OutlinedTextField(
-                            value = customCategoryName,
-                            onValueChange = { customCategoryName = it },
-                            modifier = Modifier.fillMaxWidth(),
-                            label = { Text("Custom category") },
-                            singleLine = true,
-                            colors = inputColors(),
-                            shape = RoundedCornerShape(12.dp)
-                        )
-                        ColorSwatches(selected = customColor, onSelected = { customColor = it })
-                        Button(
-                            onClick = {
-                                onAddCustomCategory(transaction.id, customCategoryName, "category", customColor)
-                                customCategoryName = ""
-                                showCustomCategoryForm = false
-                            },
-                            enabled = customCategoryName.isNotBlank(),
-                            modifier = Modifier.fillMaxWidth().height(50.dp),
-                            shape = RoundedCornerShape(12.dp),
-                            colors = primaryButtonColors()
-                        ) {
-                            Text("Create Category", fontWeight = FontWeight.Bold)
-                        }
-                    }
                 }
             }
 
@@ -1649,9 +1619,7 @@ private fun EditCategoryGrid(
     categories: List<CategoryItem>,
     selectedCategoryId: Long,
     type: TransactionType,
-    showCustomCategoryForm: Boolean,
-    onCategorySelected: (Long) -> Unit,
-    onCustomSelected: () -> Unit
+    onCategorySelected: (Long) -> Unit
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         categories.chunked(2).forEach { rowCategories ->
@@ -1670,13 +1638,6 @@ private fun EditCategoryGrid(
                 }
             }
         }
-        EditCategoryTile(
-            label = "Custom category",
-            color = PrimaryBlue,
-            selected = showCustomCategoryForm,
-            onClick = onCustomSelected,
-            modifier = Modifier.fillMaxWidth()
-        )
     }
 }
 
@@ -2980,7 +2941,7 @@ private fun AccountSettingsGroup(
                                         )
                                     }
                                     Text(
-                                        "This value is treated as the current balance. History is reconstructed backward from it.",
+                                        "This value is treated as the current bank balance. New transactions update it from here.",
                                         color = TextDim,
                                         style = MaterialTheme.typography.bodySmall
                                     )

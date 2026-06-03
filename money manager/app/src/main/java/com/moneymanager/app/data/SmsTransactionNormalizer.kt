@@ -174,15 +174,22 @@ object SmsTransactionNormalizer {
 
     fun isCreditCardSpend(rawMessage: String?): Boolean {
         val raw = rawMessage?.lowercase().orEmpty()
-        val hasCard = listOf(
+        val hasCardText = listOf(
             "credit card",
             "bank card",
             "hdfc bank card",
             "icici bank card",
             "card xx",
-            "card "
+            "card ",
+            "card ending",
+            "card no",
+            "card number"
         ).any { it in raw }
-        if (!hasCard) return false
+        val hasCardNumberHint = Regex("""(?i)\b(?:card|cc)\s*(?:no\.?|number|ending|x+|[*]+)?\s*(?:x+|[*]+)?\d{3,6}\b""")
+            .containsMatchIn(raw)
+        if (!hasCardText && !hasCardNumberHint) return false
+        if (hasCreditCardPaymentContext(raw)) return false
+
         val hasSpendVerb = listOf(
             "spent",
             "purchase",
@@ -191,11 +198,38 @@ object SmsTransactionNormalizer {
             "txn at",
             "transaction done",
             "has been made",
-            "made at"
+            "made at",
+            "charged",
+            "swiped"
         ).any { it in raw }
         val hasCardDebitPurchase = Regex("""(?i)\bcredit card\b.*\bdebited\b.*\bfor\s+(?:upi|[a-z0-9*_-]+)""")
             .containsMatchIn(raw)
-        return hasSpendVerb || hasCardDebitPurchase
+        val hasCardDebitAtMerchant = Regex("""(?i)\b(?:card|cc)\b.*\b(?:debited|charged|used|paid)\b.*\b(?:at|for|on)\b""")
+            .containsMatchIn(raw) ||
+            Regex("""(?i)\b(?:debited|charged|used|paid)\b.*\b(?:card|cc)\b.*\b(?:at|for|on)\b""")
+                .containsMatchIn(raw)
+        return hasSpendVerb || hasCardDebitPurchase || hasCardDebitAtMerchant
+    }
+
+    private fun hasCreditCardPaymentContext(raw: String): Boolean {
+        return listOf(
+            "card payment",
+            "cc payment",
+            "credit card payment",
+            "card bill",
+            "bill payment",
+            "bill paid",
+            "amount due",
+            "total amount due",
+            "minimum amount due",
+            "amt due",
+            "payment received",
+            "received towards",
+            "credited towards",
+            "thank you for payment",
+            "payment due",
+            "outstanding"
+        ).any { it in raw }
     }
 
     private fun looksLikeInternalTransfer(a: ParsedTransactionMessage, b: ParsedTransactionMessage): Boolean {

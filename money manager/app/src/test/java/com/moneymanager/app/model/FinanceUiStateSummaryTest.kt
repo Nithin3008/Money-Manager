@@ -2,6 +2,7 @@ package com.moneymanager.app.model
 
 import com.moneymanager.app.data.ParsedTransactionMessage
 import com.moneymanager.app.data.SmsTransactionNormalizer
+import com.moneymanager.app.data.TransactionMessageParser
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.ZoneId
@@ -51,6 +52,27 @@ class FinanceUiStateSummaryTest {
         assertEquals(45_000.0, state.monthIncome, 0.001)
         assertEquals(5_000.0, state.monthExpense, 0.001)
         assertEquals(40_000.0, state.monthReportNet, 0.001)
+    }
+
+    @Test
+    fun currentBalanceUsesOnlySelectedBankAccount() {
+        val defaultState = state(
+            defaultAccountId = bankA.id,
+            transactions = emptyList()
+        )
+        val selectedBankState = state(
+            defaultAccountId = bankA.id,
+            summarySelectedAccountIds = setOf(bankB.id),
+            transactions = emptyList()
+        )
+        val allBanksState = state(
+            defaultAccountId = null,
+            transactions = emptyList()
+        )
+
+        assertEquals(50_000.0, defaultState.currentBalanceAnchor, 0.001)
+        assertEquals(25_000.0, selectedBankState.currentBalanceAnchor, 0.001)
+        assertEquals(75_000.0, allBanksState.currentBalanceAnchor, 0.001)
     }
 
     @Test
@@ -111,10 +133,26 @@ class FinanceUiStateSummaryTest {
             )
         )
 
+        assertEquals(50_000.0, state.currentBalanceAnchor, 0.001)
         assertEquals(32_000.0, state.balanceAtStartOfSelectedMonth, 0.001)
         assertEquals(45_000.0, state.balanceAtEndOfSelectedMonth, 0.001)
         assertEquals(13_000.0, state.calendarMonthNet, 0.001)
         assertEquals(0.0, state.selectedMonthReconciliationGap, 0.001)
+    }
+
+    @Test
+    fun creditCardSpendDoesNotMoveBankBalance() {
+        val state = state(
+            defaultAccountId = bankA.id,
+            accounts = listOf(bankA.copy(balance = 50_000.0), bankB),
+            transactions = listOf(
+                tx(1, 2_500.0, TransactionType.Expense, "2026-04-10", bankA.id, creditCard = true),
+                tx(2, 5_000.0, TransactionType.Income, "2026-04-11", bankA.id)
+            )
+        )
+
+        assertEquals(50_000.0, state.currentBalanceAnchor, 0.001)
+        assertEquals(5_000.0, state.calendarMonthNet, 0.001)
     }
 
     @Test
@@ -148,6 +186,40 @@ class FinanceUiStateSummaryTest {
         assertFalse(filtered.single().rawMessage.contains("received towards", ignoreCase = true))
     }
 
+    @Test
+    fun incomeSmsWithAccountHintParsesAsBankIncome() {
+        val parsed = TransactionMessageParser.parse(
+            message = "Rs.5000 credited to A/c XX1234 by NEFT from ACME LTD",
+            transactionTimestampMillis = millis("2026-04-30"),
+            sender = "HDFC"
+        )
+
+        assertTrue(parsed != null)
+        assertEquals(TransactionType.Income, parsed?.type)
+        assertEquals("HDFC A/C 1234", parsed?.bankName)
+        assertFalse(parsed?.isCreditCardTransaction ?: true)
+    }
+
+    @Test
+    fun cardSpendWithoutCreditCardTextStillGetsCardFlag() {
+        val raw = "Rs.1250 debited on your HDFC card ending 4321 at AMAZON on 01-Jun"
+        val parsed = TransactionMessageParser.parse(
+            message = raw,
+            transactionTimestampMillis = millis("2026-04-30"),
+            sender = "HDFC"
+        )
+
+        assertTrue(SmsTransactionNormalizer.isCreditCardSpend(raw))
+        assertTrue(parsed?.isCreditCardTransaction ?: false)
+    }
+
+    @Test
+    fun cardBillPaymentDebitIsNotMarkedAsCardSpend() {
+        val raw = "Rs.33368 debited from A/c 1234 for credit card payment"
+
+        assertFalse(SmsTransactionNormalizer.isCreditCardSpend(raw))
+    }
+
     private fun state(
         defaultAccountId: Long?,
         accounts: List<BankAccount> = listOf(bankA, bankB),
@@ -169,7 +241,8 @@ class FinanceUiStateSummaryTest {
         date: String,
         accountId: Long?,
         raw: String? = null,
-        exclude: Boolean = false
+        exclude: Boolean = false,
+        creditCard: Boolean = false
     ): LedgerTransaction = LedgerTransaction(
         id = id,
         name = if (type == TransactionType.Income) "Bank Credit" else "Spend",
@@ -179,7 +252,8 @@ class FinanceUiStateSummaryTest {
         accountId = accountId,
         timestampMillis = millis(date),
         rawMessage = raw,
-        excludeFromSummary = exclude
+        excludeFromSummary = exclude,
+        isCreditCardTransaction = creditCard
     )
 
     private fun parsed(

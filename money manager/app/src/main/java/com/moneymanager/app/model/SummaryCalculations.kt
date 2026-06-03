@@ -28,7 +28,11 @@ internal object SummaryCalculations {
     }
 
     fun balanceTransactions(state: FinanceUiState): List<LedgerTransaction> {
-        return state.transactions.filter { passesAccountFilter(state, it) }
+        return state.transactions.filter { passesAccountFilter(state, it) && affectsBankBalance(it) }
+    }
+
+    fun affectsBankBalance(tx: LedgerTransaction): Boolean {
+        return !tx.isCreditCardTransaction
     }
 
     fun signedMovement(tx: LedgerTransaction): Double {
