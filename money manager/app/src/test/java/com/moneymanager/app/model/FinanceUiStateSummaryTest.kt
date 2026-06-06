@@ -141,7 +141,7 @@ class FinanceUiStateSummaryTest {
     }
 
     @Test
-    fun creditCardSpendDoesNotMoveBankBalance() {
+    fun creditCardSpendMovesBankBalanceWhenAssignedToAccount() {
         val state = state(
             defaultAccountId = bankA.id,
             accounts = listOf(bankA.copy(balance = 50_000.0), bankB),
@@ -152,7 +152,36 @@ class FinanceUiStateSummaryTest {
         )
 
         assertEquals(50_000.0, state.currentBalanceAnchor, 0.001)
-        assertEquals(5_000.0, state.calendarMonthNet, 0.001)
+        assertEquals(2_500.0, state.calendarMonthNet, 0.001)
+    }
+
+    @Test
+    fun investmentRowsStayOutOfIncomeExpenseAndBankBalance() {
+        val state = state(
+            defaultAccountId = null,
+            accounts = listOf(bankA.copy(balance = 50_000.0), bankB),
+            categories = DefaultCategories.items + listOf(DefaultCategories.items.first().copy(
+                id = 99L,
+                name = "Investments",
+                isDefault = false
+            ), DefaultCategories.items.first().copy(
+                id = 98L,
+                name = "Savings",
+                iconKey = "investment",
+                isDefault = false
+            )),
+            transactions = listOf(
+                tx(1, 10_000.0, TransactionType.Expense, "2026-04-10", bankA.id, categoryId = 6L),
+                tx(2, 9_500.0, TransactionType.Expense, "2026-04-12", bankA.id, categoryId = 98L),
+                tx(3, 8_000.0, TransactionType.Expense, "2026-04-13", bankA.id, categoryId = 99L)
+            )
+        )
+
+        assertEquals(0.0, state.monthIncome, 0.001)
+        assertEquals(9_500.0, state.monthExpense, 0.001)
+        assertEquals(18_000.0, state.monthInvestment, 0.001)
+        assertEquals(75_000.0, state.currentBalanceAnchor, 0.001)
+        assertEquals(-9_500.0, state.calendarMonthNet, 0.001)
     }
 
     @Test
@@ -223,12 +252,14 @@ class FinanceUiStateSummaryTest {
     private fun state(
         defaultAccountId: Long?,
         accounts: List<BankAccount> = listOf(bankA, bankB),
+        categories: List<CategoryItem> = DefaultCategories.items,
         summarySelectedAccountIds: Set<Long> = emptySet(),
         transactions: List<LedgerTransaction>
     ): FinanceUiState = FinanceUiState(
         isAppInitializing = false,
         selectedMonth = YearMonth.of(2026, 4),
         accounts = accounts,
+        categories = categories,
         transactions = transactions,
         defaultAccountId = defaultAccountId,
         summarySelectedAccountIds = summarySelectedAccountIds
@@ -242,13 +273,14 @@ class FinanceUiStateSummaryTest {
         accountId: Long?,
         raw: String? = null,
         exclude: Boolean = false,
-        creditCard: Boolean = false
+        creditCard: Boolean = false,
+        categoryId: Long = 0L
     ): LedgerTransaction = LedgerTransaction(
         id = id,
         name = if (type == TransactionType.Income) "Bank Credit" else "Spend",
         amount = amount,
         type = type,
-        categoryId = 0L,
+        categoryId = categoryId,
         accountId = accountId,
         timestampMillis = millis(date),
         rawMessage = raw,

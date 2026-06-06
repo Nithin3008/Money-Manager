@@ -43,6 +43,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ReceiptLong
+import androidx.compose.material.icons.automirrored.rounded.TrendingUp
 import androidx.compose.material.icons.rounded.AccountBalance
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.BarChart
@@ -55,7 +56,6 @@ import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PieChart
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Sms
-import androidx.compose.material.icons.rounded.TrendingUp
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material.icons.rounded.Wallet
@@ -877,6 +877,7 @@ private data class AccountDraft(
 private enum class AddMoneyMode(val label: String) {
     Expense("Expense"),
     Income("Income"),
+    Investment("Investment"),
     Transfer("Transfer")
 }
 
@@ -1015,6 +1016,10 @@ private fun AddTransactionSheet(
     }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val transactionType = if (mode == AddMoneyMode.Income) TransactionType.Income else TransactionType.Expense
+    val investmentCategoryId = remember(state.categories) {
+        state.investmentCategoryIds.firstOrNull()
+            ?: categoryId
+    }
     val parsedAmount = amount.toDoubleOrNull() ?: 0.0
     val transferReady = mode != AddMoneyMode.Transfer ||
         (parsedAmount > 0.0 && fromAccountId != null && toAccountId != null && fromAccountId != toAccountId)
@@ -1046,7 +1051,7 @@ private fun AddTransactionSheet(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("Add Transaction", color = PrimaryBlue, style = MaterialTheme.typography.headlineMedium)
-                    Text("Record a payment, income, or transfer.", color = TextMuted, style = MaterialTheme.typography.bodyMedium)
+                    Text("Record a payment, income, investment, or transfer.", color = TextMuted, style = MaterialTheme.typography.bodyMedium)
                 }
                 IconButton(onClick = onDismiss) {
                     Icon(Icons.Rounded.Close, contentDescription = "Close", tint = TextMuted)
@@ -1081,7 +1086,7 @@ private fun AddTransactionSheet(
                         value = name,
                         onValueChange = { name = it },
                         modifier = Modifier.fillMaxWidth(),
-                        label = { Text(if (mode == AddMoneyMode.Transfer) "Transfer note" else "Transaction name") },
+                        label = { Text(if (mode == AddMoneyMode.Transfer) "Transfer note" else if (mode == AddMoneyMode.Investment) "Investment name" else "Transaction name") },
                         singleLine = true,
                         colors = inputColors(),
                         shape = RoundedCornerShape(12.dp)
@@ -1114,6 +1119,17 @@ private fun AddTransactionSheet(
                             transferBalanceText(state, fromAccountId, toAccountId, parsedAmount),
                             color = TextDim,
                             style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+            } else if (mode == AddMoneyMode.Investment) {
+                ElevatedPanel {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text("Investment", color = TextPrimary, style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            "Saved separately from income, spending, budgets, and bank balances.",
+                            color = TextDim,
+                            style = MaterialTheme.typography.bodyMedium
                         )
                     }
                 }
@@ -1153,6 +1169,8 @@ private fun AddTransactionSheet(
                     onClick = {
                         if (mode == AddMoneyMode.Transfer) {
                             onTransfer(name, parsedAmount, fromAccountId, toAccountId)
+                        } else if (mode == AddMoneyMode.Investment) {
+                            onAdd(name, parsedAmount, TransactionType.Expense, investmentCategoryId, null, null, false)
                         } else {
                             onAdd(name, parsedAmount, transactionType, categoryId, accountId, null, false)
                         }
@@ -1183,6 +1201,7 @@ private fun FintrackAmountCard(
     val accent = when (mode) {
         AddMoneyMode.Income -> MoneyGreen
         AddMoneyMode.Expense -> LossRed
+        AddMoneyMode.Investment -> OtherIncomeGold
         AddMoneyMode.Transfer -> PrimaryBlue
     }
     val signedPreview = when {
@@ -1219,8 +1238,9 @@ private fun FintrackAmountCard(
                 ) {
                     Icon(
                         when (mode) {
-                            AddMoneyMode.Income -> Icons.Rounded.TrendingUp
+                            AddMoneyMode.Income -> Icons.AutoMirrored.Rounded.TrendingUp
                             AddMoneyMode.Expense -> Icons.Rounded.Wallet
+                            AddMoneyMode.Investment -> Icons.AutoMirrored.Rounded.TrendingUp
                             AddMoneyMode.Transfer -> Icons.Rounded.AccountBalance
                         },
                         contentDescription = null,
@@ -1263,6 +1283,7 @@ private fun FintrackModePicker(
             val accent = when (mode) {
                 AddMoneyMode.Income -> MoneyGreen
                 AddMoneyMode.Expense -> LossRed
+                AddMoneyMode.Investment -> OtherIncomeGold
                 AddMoneyMode.Transfer -> PrimaryBlue
             }
             Card(
@@ -1282,8 +1303,9 @@ private fun FintrackModePicker(
                 ) {
                     Icon(
                         when (mode) {
-                            AddMoneyMode.Income -> Icons.Rounded.TrendingUp
+                            AddMoneyMode.Income -> Icons.AutoMirrored.Rounded.TrendingUp
                             AddMoneyMode.Expense -> Icons.Rounded.Wallet
+                            AddMoneyMode.Investment -> Icons.AutoMirrored.Rounded.TrendingUp
                             AddMoneyMode.Transfer -> Icons.Rounded.AccountBalance
                         },
                         contentDescription = null,
@@ -1405,7 +1427,7 @@ private fun TransactionDetailSheet(
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
-                                if (type == TransactionType.Income) Icons.Rounded.TrendingUp else Icons.Rounded.Wallet,
+                                if (type == TransactionType.Income) Icons.AutoMirrored.Rounded.TrendingUp else Icons.Rounded.Wallet,
                                 contentDescription = null,
                                 tint = if (type == TransactionType.Income) PrimaryBlue else LossRed
                             )
@@ -1598,7 +1620,7 @@ private fun EditTransactionTypeTile(
             horizontalArrangement = Arrangement.Center
         ) {
             Icon(
-                if (type == TransactionType.Income) Icons.Rounded.TrendingUp else Icons.Rounded.Wallet,
+                if (type == TransactionType.Income) Icons.AutoMirrored.Rounded.TrendingUp else Icons.Rounded.Wallet,
                 contentDescription = null,
                 tint = if (selected) accentContentColor() else accent,
                 modifier = Modifier.size(20.dp)
@@ -3351,6 +3373,7 @@ private fun AddModeChip(mode: AddMoneyMode, selected: Boolean, enabled: Boolean,
     val accent = when (mode) {
         AddMoneyMode.Income -> MoneyGreen
         AddMoneyMode.Expense -> LossRed
+        AddMoneyMode.Investment -> OtherIncomeGold
         AddMoneyMode.Transfer -> PrimaryBlue
     }
     val scale by animateFloatAsState(

@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ReceiptLong
+import androidx.compose.material.icons.automirrored.rounded.TrendingUp
 import androidx.compose.material.icons.rounded.AccountBalance
 import androidx.compose.material.icons.rounded.Category
 import androidx.compose.material.icons.rounded.Check
@@ -81,11 +82,13 @@ internal fun LazyListScope.dashboardContent(
         FintrackBalanceHero(state)
     }
     item {
+        val currentMonth = YearMonth.now()
         FintrackQuickActions(
             accounts = state.accounts.size,
             categories = state.categories.size,
             budgets = state.activeBudgets.size,
-            transactions = state.transactions.size
+            transactions = state.transactions.size,
+            investment = state.money(state.investmentTotalFor(currentMonth))
         )
     }
     if (state.todayDetectedDrafts.isNotEmpty()) {
@@ -145,11 +148,12 @@ private fun FintrackBalanceHero(state: FinanceUiState) {
         ?: state.accounts.firstOrNull()
     val currentBalance = currentAccount?.balance ?: 0.0
     val balanceSource = currentAccount?.name ?: "No bank selected"
-    val monthExpense = remember(state.transactions, currentMonth) {
+    val monthExpense = remember(state.transactions, state.categories, currentMonth) {
         state.transactions
             .asSequence()
             .filter {
-                !it.excludeFromSummary &&
+                !state.isInvestmentTransaction(it) &&
+                    !it.excludeFromSummary &&
                     it.type == TransactionType.Expense &&
                     YearMonth.from(it.transactionDate()) == currentMonth
             }
@@ -243,7 +247,8 @@ private fun FintrackQuickActions(
     accounts: Int,
     categories: Int,
     budgets: Int,
-    transactions: Int
+    transactions: Int,
+    investment: String
 ) {
     ElevatedPanel {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -253,9 +258,10 @@ private fun FintrackQuickActions(
                 ActionTile(Icons.AutoMirrored.Rounded.ReceiptLong, "History", transactions.toString(), Modifier.weight(1f))
             }
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                ActionTile(Icons.Rounded.Category, "Categories", categories.toString(), Modifier.weight(1f))
+                ActionTile(Icons.AutoMirrored.Rounded.TrendingUp, "Investment", investment, Modifier.weight(1f))
                 ActionTile(Icons.Rounded.PieChart, "Budgets", budgets.toString(), Modifier.weight(1f))
             }
+            ActionTile(Icons.Rounded.Category, "Categories", categories.toString(), Modifier.fillMaxWidth())
         }
     }
 }
@@ -278,7 +284,11 @@ private fun ActionTile(icon: ImageVector, label: String, value: String, modifier
 private fun FintrackTodaySegments(state: FinanceUiState) {
     val totals = remember(state.categories, state.todayTransactions) {
         state.categories.map { category ->
-            val transactions = state.todayTransactions.filter { it.categoryId == category.id && !it.excludeFromSummary }
+            val transactions = state.todayTransactions.filter {
+                it.categoryId == category.id &&
+                    !state.isInvestmentTransaction(it) &&
+                    !it.excludeFromSummary
+            }
             MonthlyCategoryTotal(
                 category = category,
                 income = transactions.filter { it.type == TransactionType.Income }.sumOf { it.amount },

@@ -31,6 +31,12 @@ interface FinanceDao {
     @Query("DELETE FROM categories WHERE id = :id AND isDefault = 0")
     suspend fun deleteCustomCategory(id: Long)
 
+    @Query("DELETE FROM categories WHERE id = :id")
+    suspend fun deleteCategory(id: Long)
+
+    @Query("UPDATE transactions SET categoryId = :toCategoryId WHERE categoryId = :fromCategoryId")
+    suspend fun moveTransactionsToCategory(fromCategoryId: Long, toCategoryId: Long)
+
     @Query("SELECT * FROM categories ORDER BY isDefault DESC, id ASC")
     suspend fun getCategories(): List<CategoryEntity>
 

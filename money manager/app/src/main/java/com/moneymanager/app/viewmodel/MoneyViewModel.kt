@@ -346,7 +346,7 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
     ) {
         if (name.isBlank() || amount <= 0.0) return
         viewModelScope.launch {
-            val transaction = LedgerTransaction(
+            val draftTransaction = LedgerTransaction(
                 id = 0,
                 name = name.trim(),
                 amount = amount,
@@ -360,6 +360,7 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
                 excludeFromSummary = false,
                 isCreditCardTransaction = false
             )
+            val transaction = normalizeInvestmentTransaction(draftTransaction)
             repository.addTransaction(transaction)
             applyTransactionBalanceMovement(transaction)
             val warning = BudgetWarningCalculator.findBudgetWarning(_uiState.value, transaction)
@@ -454,7 +455,12 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
     fun editTransactionCategory(transactionId: Long, categoryId: Long) {
         viewModelScope.launch {
             val transaction = _uiState.value.transactions.firstOrNull { it.id == transactionId } ?: return@launch
-            repository.updateTransaction(transaction.copy(categoryId = categoryId))
+            val updatedTransaction = normalizeInvestmentTransaction(
+                transaction.copy(categoryId = categoryId),
+                originalTransaction = transaction
+            )
+            reconcileBalanceForTransactionUpdate(transaction, updatedTransaction)
+            repository.updateTransaction(updatedTransaction)
             reloadState { it.copy(showTransactionDetailSheet = false, selectedTransactionId = null) }
         }
     }
@@ -462,10 +468,13 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
     fun updateTransactionDetails(transactionId: Long, type: TransactionType, categoryId: Long, description: String?) {
         viewModelScope.launch {
             val transaction = _uiState.value.transactions.firstOrNull { it.id == transactionId } ?: return@launch
-            val updatedTransaction = transaction.copy(
-                type = type,
-                categoryId = categoryId,
-                description = description?.trim()?.takeIf { it.isNotBlank() }
+            val updatedTransaction = normalizeInvestmentTransaction(
+                transaction.copy(
+                    type = type,
+                    categoryId = categoryId,
+                    description = description?.trim()?.takeIf { it.isNotBlank() }
+                ),
+                originalTransaction = transaction
             )
             reconcileBalanceForTransactionUpdate(transaction, updatedTransaction)
             repository.updateTransaction(updatedTransaction)
@@ -597,7 +606,7 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
                 addAll(_uiState.value.detectedDrafts.map { normalizedSmsRaw(it.rawMessage) })
             }.toMutableSet()
             val filteredParsed = SmsTransactionNormalizer.filterImportBatch(parsedMessages)
-            val accountsSnapshot = _uiState.value.accounts
+            val accountsSnapshot = _uiState.value.accounts.associateBy { it.id }.toMutableMap()
             repository.cleanupCreditCardRepaymentArtifacts()
             var importedCount = 0
             var reviewCount = 0
@@ -610,8 +619,9 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
                 val categoryId = inferCategoryId(msg) ?: _uiState.value.categories.firstOrNull { category ->
                     category.name == "Uncategorized"
                 }?.id ?: 0L
-                val accountId = SmsBankKeys.resolveAccountId(msg.bankName, accountsSnapshot)
-                    ?: accountsSnapshot.singleOrNull()?.id
+                val availableAccounts = accountsSnapshot.values.toList()
+                val accountId = SmsBankKeys.resolveAccountId(msg.bankName, availableAccounts)
+                    ?: availableAccounts.singleOrNull()?.id
                 if (accountId != null) autoMappedCount += 1
                 if (msg.requiresUserReview) {
                     repository.saveDraft(
@@ -631,7 +641,7 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
                     reviewCount += 1
                     return@forEach
                 }
-                val transaction = LedgerTransaction(
+                val draftTransaction = LedgerTransaction(
                     id = 0,
                     name = msg.counterparty,
                     amount = msg.amount,
@@ -645,7 +655,9 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
                     excludeFromSummary = msg.isCreditCardTransaction,
                     isCreditCardTransaction = msg.isCreditCardTransaction
                 )
+                val transaction = normalizeInvestmentTransaction(draftTransaction)
                 repository.addTransaction(transaction)
+                applyTransactionBalanceMovement(transaction, accountsSnapshot)
                 importedCount += 1
             }
 
@@ -687,7 +699,7 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
             }
             val accountsSnapshot = _uiState.value.accounts
             val isCreditCardTransaction = SmsTransactionNormalizer.isCreditCardSpend(draft.rawMessage)
-            val transaction = LedgerTransaction(
+            val draftTransaction = LedgerTransaction(
                 id = 0,
                 name = draft.counterparty,
                 amount = draft.amount,
@@ -702,10 +714,9 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
                 excludeFromSummary = isCreditCardTransaction,
                 isCreditCardTransaction = isCreditCardTransaction
             )
+            val transaction = normalizeInvestmentTransaction(draftTransaction)
             repository.addTransaction(transaction)
-            if (shouldApplyStoredBalanceMovement(transaction)) {
-                applyTransactionBalanceMovement(transaction)
-            }
+            applyTransactionBalanceMovement(transaction)
             repository.deleteDraft(draftId)
             reloadState()
         }
@@ -759,29 +770,41 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
 
     private suspend fun reconcileBalanceForTransactionUpdate(
         oldTransaction: LedgerTransaction,
-        newTransaction: LedgerTransaction
+        newTransaction: LedgerTransaction,
+        accountsById: MutableMap<Long, BankAccount>? = null
     ) {
         val oldAccountId = oldTransaction.accountId
         val newAccountId = newTransaction.accountId
         if (oldAccountId == null && newAccountId == null) return
 
         if (oldAccountId != null && oldAccountId == newAccountId) {
-            val account = _uiState.value.accounts.firstOrNull { it.id == oldAccountId } ?: return
             val delta = storedBalanceMovement(newTransaction) - storedBalanceMovement(oldTransaction)
             if (delta != 0.0) {
-                repository.updateAccount(account.copy(balance = account.balance + delta))
+                updateAccountBalance(oldAccountId, delta, accountsById)
             }
             return
         }
 
         oldAccountId?.let { accountId ->
-            val account = _uiState.value.accounts.firstOrNull { it.id == accountId } ?: return@let
-            repository.updateAccount(account.copy(balance = account.balance - storedBalanceMovement(oldTransaction)))
+            updateAccountBalance(accountId, -storedBalanceMovement(oldTransaction), accountsById)
         }
         newAccountId?.let { accountId ->
-            val account = _uiState.value.accounts.firstOrNull { it.id == accountId } ?: return@let
-            repository.updateAccount(account.copy(balance = account.balance + storedBalanceMovement(newTransaction)))
+            updateAccountBalance(accountId, storedBalanceMovement(newTransaction), accountsById)
         }
+    }
+
+    private suspend fun updateAccountBalance(
+        accountId: Long,
+        delta: Double,
+        accountsById: MutableMap<Long, BankAccount>? = null
+    ) {
+        if (delta == 0.0) return
+        val account = accountsById?.get(accountId)
+            ?: _uiState.value.accounts.firstOrNull { it.id == accountId }
+            ?: return
+        val updated = account.copy(balance = account.balance + delta)
+        repository.updateAccount(updated)
+        accountsById?.put(accountId, updated)
     }
 
     private suspend fun moveAccountBalanceForTransaction(
@@ -802,7 +825,6 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun storedBalanceMovement(transaction: LedgerTransaction): Double {
-        if (!shouldApplyStoredBalanceMovement(transaction)) return 0.0
         return if (transaction.type == TransactionType.Income) {
             transaction.amount
         } else {
@@ -810,9 +832,23 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun shouldApplyStoredBalanceMovement(transaction: LedgerTransaction): Boolean {
-        if (transaction.isCreditCardTransaction) return false
-        return !transaction.isAutoDetected
+    private fun normalizeInvestmentTransaction(
+        transaction: LedgerTransaction,
+        originalTransaction: LedgerTransaction? = null
+    ): LedgerTransaction {
+        val state = _uiState.value
+        if (state.isInvestmentTransaction(transaction)) {
+            return transaction.copy(
+                type = TransactionType.Expense,
+                accountId = null,
+                excludeFromSummary = true
+            )
+        }
+
+        val wasInvestment = originalTransaction?.let { state.isInvestmentTransaction(it) } == true
+        if (!wasInvestment) return transaction
+        if (transaction.isCreditCardTransaction) return transaction.copy(excludeFromSummary = true)
+        return transaction.copy(excludeFromSummary = false)
     }
 
     private suspend fun reloadState(transform: (FinanceUiState) -> FinanceUiState = { it }) {
@@ -870,6 +906,7 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
         if (categoryId == uncategorizedId) return
         val sourceKey = CategoryLearning.categoryLearningKey(source.name, source.rawMessage, source.type, source.smsBankLabel)
         if (sourceKey.isBlank()) return
+        val accountsSnapshot = _uiState.value.accounts.associateBy { it.id }.toMutableMap()
         _uiState.value.transactions
             .filter {
                 it.id != source.id &&
@@ -877,7 +914,12 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
                     CategoryLearning.categoryLearningKey(it.name, it.rawMessage, it.type, it.smsBankLabel) == sourceKey
             }
             .forEach {
-                repository.updateTransaction(it.copy(type = type, categoryId = categoryId))
+                val updated = normalizeInvestmentTransaction(
+                    it.copy(type = type, categoryId = categoryId),
+                    originalTransaction = it
+                )
+                reconcileBalanceForTransactionUpdate(it, updated, accountsSnapshot)
+                repository.updateTransaction(updated)
             }
     }
 
