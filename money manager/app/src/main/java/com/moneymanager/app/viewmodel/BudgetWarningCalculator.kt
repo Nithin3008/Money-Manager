@@ -9,6 +9,8 @@ import com.moneymanager.app.model.month
 internal object BudgetWarningCalculator {
     fun findBudgetWarning(state: FinanceUiState, transaction: LedgerTransaction): BudgetWarning? {
         if (transaction.type != TransactionType.Expense) return null
+        if (state.isInvestmentTransaction(transaction)) return null
+        if (transaction.excludeFromSummary) return null
 
         val matchingBudget = state.budgets.firstOrNull {
             it.month == transaction.month() && transaction.categoryId in it.categoryIds
@@ -17,6 +19,8 @@ internal object BudgetWarningCalculator {
         val spent = state.transactions
             .filter {
                 it.type == TransactionType.Expense &&
+                    !state.isInvestmentTransaction(it) &&
+                    !it.excludeFromSummary &&
                     it.month() == matchingBudget.month &&
                     it.categoryId in matchingBudget.categoryIds
             }

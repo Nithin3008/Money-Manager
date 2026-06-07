@@ -298,6 +298,30 @@ data class FinanceUiState(
         monthReportIncome - monthExpense
     }
 
+    val investmentCategoryIds: Set<Long> by lazy(LazyThreadSafetyMode.NONE) {
+        categories
+            .filter { it.isInvestmentCategoryName() }
+            .map { it.id }
+            .toSet()
+    }
+
+    fun isInvestmentTransaction(transaction: LedgerTransaction): Boolean {
+        return transaction.categoryId in investmentCategoryIds
+    }
+
+    fun investmentTotalFor(month: YearMonth): Double {
+        if (investmentCategoryIds.isEmpty()) return 0.0
+        return transactions
+            .filter {
+                it.categoryId in investmentCategoryIds && it.month() == month
+            }
+            .sumOf { it.amount }
+    }
+
+    val monthInvestment: Double by lazy(LazyThreadSafetyMode.NONE) {
+        investmentTotalFor(selectedMonth)
+    }
+
     /** Actual credits dated inside [selectedMonth] (calendar), for comparison when payroll shift moves income. */
     val calendarMonthIncomeTotal: Double by lazy(LazyThreadSafetyMode.NONE) {
         SummaryCalculations.calendarMonthIncomeTotal(this)
@@ -395,6 +419,11 @@ data class FinanceUiState(
     }
 }
 
+private fun CategoryItem.isInvestmentCategoryName(): Boolean {
+    val normalized = name.trim().lowercase()
+    return normalized == "investment" || normalized == "investments"
+}
+
 object DefaultCategories {
     val items = listOf(
         CategoryItem(0, "Uncategorized", "category", Icons.Rounded.Category, true, "#8F95A3"),
@@ -402,7 +431,8 @@ object DefaultCategories {
         CategoryItem(2, "Food", "food", Icons.Rounded.Dining, true, "#FFC857"),
         CategoryItem(3, "Shopping", "shopping", Icons.Rounded.ShoppingBag, true, "#FF4FB8"),
         CategoryItem(4, "Fuel", "fuel", Icons.Rounded.LocalGasStation, true, "#FF8A3D"),
-        CategoryItem(5, "Rent", "rent", Icons.Rounded.Home, true, "#FF6B7A")
+        CategoryItem(5, "Rent", "rent", Icons.Rounded.Home, true, "#FF6B7A"),
+        CategoryItem(6, "Investment", "investment", Icons.AutoMirrored.Rounded.TrendingUp, true, "#8B5CF6")
     )
 }
 

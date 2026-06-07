@@ -43,6 +43,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ReceiptLong
+import androidx.compose.material.icons.automirrored.rounded.TrendingUp
 import androidx.compose.material.icons.rounded.AccountBalance
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.BarChart
@@ -55,7 +56,6 @@ import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PieChart
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Sms
-import androidx.compose.material.icons.rounded.TrendingUp
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material.icons.rounded.Wallet
@@ -368,8 +368,7 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
             transaction = selectedTransaction,
             onDismiss = viewModel::cancelEditTransactionCategory,
             onSave = viewModel::updateTransactionDetails,
-            onDelete = viewModel::deleteTransaction,
-            onAddCustomCategory = viewModel::createCategoryForTransaction
+            onDelete = viewModel::deleteTransaction
         )
     }
 
@@ -894,7 +893,7 @@ private fun RegistrationScreen(onComplete: (String, List<Pair<String, Double>>, 
             .background(Navy950)
             .statusBarsPadding()
             .imePadding(),
-        contentPadding = PaddingValues(start = 24.dp, top = 54.dp, end = 24.dp, bottom = 180.dp),
+        contentPadding = PaddingValues(start = 24.dp, top = 28.dp, end = 24.dp, bottom = 72.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         item {
@@ -1012,16 +1011,16 @@ private fun RegistrationScreen(onComplete: (String, List<Pair<String, Double>>, 
 @Composable
 private fun FintrackAuthHero() {
     Column(
-        modifier = Modifier.fillMaxWidth().padding(bottom = 18.dp),
+        modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(34.dp)
+        verticalArrangement = Arrangement.spacedBy(22.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             FintrackLogoMark(size = 34.dp)
             Spacer(Modifier.width(8.dp))
             Text("Money Manager", color = PrimaryBlue, style = MaterialTheme.typography.headlineMedium)
         }
-        Spacer(Modifier.height(180.dp))
+        Spacer(Modifier.height(42.dp))
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(
                 "Take Control of Your Finances",
@@ -1050,6 +1049,7 @@ private data class AccountDraft(
 private enum class AddMoneyMode(val label: String) {
     Expense("Expense"),
     Income("Income"),
+    Investment("Investment"),
     Transfer("Transfer")
 }
 
@@ -1096,9 +1096,11 @@ private fun transferBalanceText(
     if (from == null || to == null) {
         return "Transfers need two different bank accounts. They are excluded from income and expense reports."
     }
-    val debit = if (amount > 0.0) " -> ${state.money(from.balance - amount)}" else ""
-    val credit = if (amount > 0.0) " -> ${state.money(to.balance + amount)}" else ""
-    return "${from.name}: ${state.money(from.balance)}$debit | ${to.name}: ${state.money(to.balance)}$credit"
+    val fromBalance = from.balance
+    val toBalance = to.balance
+    val debit = if (amount > 0.0) " -> ${state.money(fromBalance - amount)}" else ""
+    val credit = if (amount > 0.0) " -> ${state.money(toBalance + amount)}" else ""
+    return "${from.name}: ${state.money(fromBalance)}$debit | ${to.name}: ${state.money(toBalance)}$credit"
 }
 
 @Composable
@@ -1158,7 +1160,7 @@ private fun AccountDraftRow(
                 shape = RoundedCornerShape(12.dp)
             )
             Text(
-                "Example: HDFC + 4466 helps match SMS like A/c XX4466. Balance becomes the current anchor.",
+                "Example: HDFC + 4466 helps match SMS like A/c XX4466. Balance is kept as the current bank balance.",
                 color = TextDim,
                 style = MaterialTheme.typography.bodySmall
             )
@@ -1186,6 +1188,10 @@ private fun AddTransactionSheet(
     }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val transactionType = if (mode == AddMoneyMode.Income) TransactionType.Income else TransactionType.Expense
+    val investmentCategoryId = remember(state.categories) {
+        state.investmentCategoryIds.firstOrNull()
+            ?: categoryId
+    }
     val parsedAmount = amount.toDoubleOrNull() ?: 0.0
     val transferReady = mode != AddMoneyMode.Transfer ||
         (parsedAmount > 0.0 && fromAccountId != null && toAccountId != null && fromAccountId != toAccountId)
@@ -1217,7 +1223,7 @@ private fun AddTransactionSheet(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("Add Transaction", color = PrimaryBlue, style = MaterialTheme.typography.headlineMedium)
-                    Text("Record a payment, income, or transfer.", color = TextMuted, style = MaterialTheme.typography.bodyMedium)
+                    Text("Record a payment, income, investment, or transfer.", color = TextMuted, style = MaterialTheme.typography.bodyMedium)
                 }
                 IconButton(onClick = onDismiss) {
                     Icon(Icons.Rounded.Close, contentDescription = "Close", tint = TextMuted)
@@ -1252,7 +1258,7 @@ private fun AddTransactionSheet(
                         value = name,
                         onValueChange = { name = it },
                         modifier = Modifier.fillMaxWidth(),
-                        label = { Text(if (mode == AddMoneyMode.Transfer) "Transfer note" else "Transaction name") },
+                        label = { Text(if (mode == AddMoneyMode.Transfer) "Transfer note" else if (mode == AddMoneyMode.Investment) "Investment name" else "Transaction name") },
                         singleLine = true,
                         colors = inputColors(),
                         shape = RoundedCornerShape(12.dp)
@@ -1285,6 +1291,17 @@ private fun AddTransactionSheet(
                             transferBalanceText(state, fromAccountId, toAccountId, parsedAmount),
                             color = TextDim,
                             style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+            } else if (mode == AddMoneyMode.Investment) {
+                ElevatedPanel {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text("Investment", color = TextPrimary, style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            "Saved separately from income, spending, budgets, and bank balances.",
+                            color = TextDim,
+                            style = MaterialTheme.typography.bodyMedium
                         )
                     }
                 }
@@ -1324,6 +1341,8 @@ private fun AddTransactionSheet(
                     onClick = {
                         if (mode == AddMoneyMode.Transfer) {
                             onTransfer(name, parsedAmount, fromAccountId, toAccountId)
+                        } else if (mode == AddMoneyMode.Investment) {
+                            onAdd(name, parsedAmount, TransactionType.Expense, investmentCategoryId, null, null, false)
                         } else {
                             onAdd(name, parsedAmount, transactionType, categoryId, accountId, null, false)
                         }
@@ -1354,6 +1373,7 @@ private fun FintrackAmountCard(
     val accent = when (mode) {
         AddMoneyMode.Income -> MoneyGreen
         AddMoneyMode.Expense -> LossRed
+        AddMoneyMode.Investment -> OtherIncomeGold
         AddMoneyMode.Transfer -> PrimaryBlue
     }
     val signedPreview = when {
@@ -1390,8 +1410,9 @@ private fun FintrackAmountCard(
                 ) {
                     Icon(
                         when (mode) {
-                            AddMoneyMode.Income -> Icons.Rounded.TrendingUp
+                            AddMoneyMode.Income -> Icons.AutoMirrored.Rounded.TrendingUp
                             AddMoneyMode.Expense -> Icons.Rounded.Wallet
+                            AddMoneyMode.Investment -> Icons.AutoMirrored.Rounded.TrendingUp
                             AddMoneyMode.Transfer -> Icons.Rounded.AccountBalance
                         },
                         contentDescription = null,
@@ -1434,6 +1455,7 @@ private fun FintrackModePicker(
             val accent = when (mode) {
                 AddMoneyMode.Income -> MoneyGreen
                 AddMoneyMode.Expense -> LossRed
+                AddMoneyMode.Investment -> OtherIncomeGold
                 AddMoneyMode.Transfer -> PrimaryBlue
             }
             Card(
@@ -1453,8 +1475,9 @@ private fun FintrackModePicker(
                 ) {
                     Icon(
                         when (mode) {
-                            AddMoneyMode.Income -> Icons.Rounded.TrendingUp
+                            AddMoneyMode.Income -> Icons.AutoMirrored.Rounded.TrendingUp
                             AddMoneyMode.Expense -> Icons.Rounded.Wallet
+                            AddMoneyMode.Investment -> Icons.AutoMirrored.Rounded.TrendingUp
                             AddMoneyMode.Transfer -> Icons.Rounded.AccountBalance
                         },
                         contentDescription = null,
@@ -1480,17 +1503,13 @@ private fun TransactionDetailSheet(
     transaction: LedgerTransaction?,
     onDismiss: () -> Unit,
     onSave: (Long, TransactionType, Long, String?) -> Unit,
-    onDelete: (Long) -> Unit,
-    onAddCustomCategory: (Long, String, String, String) -> Unit
+    onDelete: (Long) -> Unit
 ) {
     if (transaction == null) return
     var categoryId by remember { mutableStateOf(transaction.categoryId) }
     var type by remember { mutableStateOf(transaction.type) }
     var showAllCategories by remember { mutableStateOf(false) }
     var showOriginalMessage by remember { mutableStateOf(false) }
-    var showCustomCategoryForm by remember { mutableStateOf(false) }
-    var customCategoryName by remember { mutableStateOf("") }
-    var customColor by remember { mutableStateOf(categoryPalette.first()) }
     var description by remember(transaction.id) { mutableStateOf(transaction.description.orEmpty()) }
     val categoryRanking = remember(state.transactions, state.categories) {
         state.transactions
@@ -1580,7 +1599,7 @@ private fun TransactionDetailSheet(
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
-                                if (type == TransactionType.Income) Icons.Rounded.TrendingUp else Icons.Rounded.Wallet,
+                                if (type == TransactionType.Income) Icons.AutoMirrored.Rounded.TrendingUp else Icons.Rounded.Wallet,
                                 contentDescription = null,
                                 tint = if (type == TransactionType.Income) PrimaryBlue else LossRed
                             )
@@ -1651,35 +1670,8 @@ private fun TransactionDetailSheet(
                         categories = visibleCategories,
                         selectedCategoryId = categoryId,
                         type = type,
-                        showCustomCategoryForm = showCustomCategoryForm,
-                        onCategorySelected = { categoryId = it },
-                        onCustomSelected = { showCustomCategoryForm = !showCustomCategoryForm }
+                        onCategorySelected = { categoryId = it }
                     )
-                    if (showCustomCategoryForm) {
-                        OutlinedTextField(
-                            value = customCategoryName,
-                            onValueChange = { customCategoryName = it },
-                            modifier = Modifier.fillMaxWidth(),
-                            label = { Text("Custom category") },
-                            singleLine = true,
-                            colors = inputColors(),
-                            shape = RoundedCornerShape(12.dp)
-                        )
-                        ColorSwatches(selected = customColor, onSelected = { customColor = it })
-                        Button(
-                            onClick = {
-                                onAddCustomCategory(transaction.id, customCategoryName, "category", customColor)
-                                customCategoryName = ""
-                                showCustomCategoryForm = false
-                            },
-                            enabled = customCategoryName.isNotBlank(),
-                            modifier = Modifier.fillMaxWidth().height(50.dp),
-                            shape = RoundedCornerShape(12.dp),
-                            colors = primaryButtonColors()
-                        ) {
-                            Text("Create Category", fontWeight = FontWeight.Bold)
-                        }
-                    }
                 }
             }
 
@@ -1800,7 +1792,7 @@ private fun EditTransactionTypeTile(
             horizontalArrangement = Arrangement.Center
         ) {
             Icon(
-                if (type == TransactionType.Income) Icons.Rounded.TrendingUp else Icons.Rounded.Wallet,
+                if (type == TransactionType.Income) Icons.AutoMirrored.Rounded.TrendingUp else Icons.Rounded.Wallet,
                 contentDescription = null,
                 tint = if (selected) accentContentColor() else accent,
                 modifier = Modifier.size(20.dp)
@@ -1821,9 +1813,7 @@ private fun EditCategoryGrid(
     categories: List<CategoryItem>,
     selectedCategoryId: Long,
     type: TransactionType,
-    showCustomCategoryForm: Boolean,
-    onCategorySelected: (Long) -> Unit,
-    onCustomSelected: () -> Unit
+    onCategorySelected: (Long) -> Unit
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         categories.chunked(2).forEach { rowCategories ->
@@ -1842,13 +1832,6 @@ private fun EditCategoryGrid(
                 }
             }
         }
-        EditCategoryTile(
-            label = "Custom category",
-            color = PrimaryBlue,
-            selected = showCustomCategoryForm,
-            onClick = onCustomSelected,
-            modifier = Modifier.fillMaxWidth()
-        )
     }
 }
 
@@ -3152,7 +3135,7 @@ private fun AccountSettingsGroup(
                                         )
                                     }
                                     Text(
-                                        "This value is treated as the current balance. History is reconstructed backward from it.",
+                                        "This value is treated as the current bank balance. New transactions update it from here.",
                                         color = TextDim,
                                         style = MaterialTheme.typography.bodySmall
                                     )
@@ -3562,6 +3545,7 @@ private fun AddModeChip(mode: AddMoneyMode, selected: Boolean, enabled: Boolean,
     val accent = when (mode) {
         AddMoneyMode.Income -> MoneyGreen
         AddMoneyMode.Expense -> LossRed
+        AddMoneyMode.Investment -> OtherIncomeGold
         AddMoneyMode.Transfer -> PrimaryBlue
     }
     val scale by animateFloatAsState(

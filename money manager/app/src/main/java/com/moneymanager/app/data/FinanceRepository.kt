@@ -155,6 +155,76 @@ class FinanceRepository(private val dao: FinanceDao) {
     }
 
     private suspend fun seedDefaultCategories() {
-        DefaultCategories.items.forEach { dao.seedCategory(it.toEntity()) }
+        val existing = dao.getCategories().toMutableList()
+        DefaultCategories.items.forEach { category ->
+            if (category.isInvestmentCategoryName()) {
+                consolidateInvestmentCategory(existing, category)
+                return@forEach
+            }
+
+            if (existing.any { it.matchesDefaultCategory(category) }) return@forEach
+
+            val entity = if (existing.none { it.id == category.id }) {
+                category.toEntity()
+            } else {
+                category.copy(id = nextCategoryId(existing)).toEntity()
+            }
+            dao.seedCategory(entity)
+            existing.add(entity)
+        }
+    }
+
+    private fun nextCategoryId(existing: List<CategoryEntity>): Long {
+        val usedIds = existing.map { it.id }.toSet()
+        var nextId = (existing.maxOfOrNull { it.id } ?: 0L) + 1L
+        while (nextId in usedIds) nextId += 1L
+        return nextId
+    }
+
+    private suspend fun consolidateInvestmentCategory(
+        existing: MutableList<CategoryEntity>,
+        defaultCategory: CategoryItem
+    ) {
+        val investmentCategories = existing.filter { it.isInvestmentCategoryName() }
+        val defaultIdHolder = existing.firstOrNull { it.id == defaultCategory.id }
+        if (defaultIdHolder != null && !defaultIdHolder.isInvestmentCategoryName()) {
+            val relocated = defaultIdHolder.copy(id = nextCategoryId(existing))
+            dao.saveCategory(relocated)
+            dao.moveTransactionsToCategory(defaultIdHolder.id, relocated.id)
+            dao.deleteCategory(defaultIdHolder.id)
+            existing[existing.indexOf(defaultIdHolder)] = relocated
+        }
+
+        val defaultInvestment = defaultCategory.toEntity()
+        dao.saveCategory(defaultInvestment)
+
+        if (existing.none { it.id == defaultInvestment.id }) {
+            existing.add(defaultInvestment)
+        } else {
+            existing[existing.indexOfFirst { it.id == defaultInvestment.id }] = defaultInvestment
+        }
+
+        investmentCategories
+            .filter { it.id != defaultInvestment.id }
+            .forEach { duplicate ->
+                dao.moveTransactionsToCategory(duplicate.id, defaultInvestment.id)
+                dao.deleteCategory(duplicate.id)
+                existing.removeAll { it.id == duplicate.id }
+            }
+    }
+
+    private fun CategoryEntity.isInvestmentCategoryName(): Boolean {
+        val name = name.trim().lowercase()
+        return name == "investment" || name == "investments"
+    }
+
+    private fun CategoryItem.isInvestmentCategoryName(): Boolean {
+        val name = name.trim().lowercase()
+        return name == "investment" || name == "investments"
+    }
+
+    private fun CategoryEntity.matchesDefaultCategory(category: CategoryItem): Boolean {
+        return name.equals(category.name, ignoreCase = true) ||
+            iconKey.equals(category.iconKey, ignoreCase = true)
     }
 }

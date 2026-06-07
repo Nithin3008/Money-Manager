@@ -57,15 +57,13 @@ internal fun accentContentColor(): Color {
 internal fun categoryColor(category: CategoryItem?, type: TransactionType): Color {
     if (category == null) return TextMuted
     if (category.name == "Uncategorized") return if (isAmoledTheme()) Color(0xFF9B9B9B) else Color(0xFF737373)
-    if (type == TransactionType.Income) return MoneyGreen
     return colorFromHex(category.colorHex)
 }
 
 internal fun categoryColor(category: String, type: TransactionType): Color {
-    if (type == TransactionType.Income) return MoneyGreen
     return when (category) {
         "Uncategorized" -> if (isAmoledTheme()) Color(0xFF9B9B9B) else Color(0xFF737373)
-        "Grocery" -> Color(0xFFB4F077)
+        "Grocery" -> Color(0xFF38E68B)
         "Food" -> Color(0xFFFFC857)
         "Shopping" -> Color(0xFFFF4FB8)
         "Fuel" -> Color(0xFFFF8A3D)

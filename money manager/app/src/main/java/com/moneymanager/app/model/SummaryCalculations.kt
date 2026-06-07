@@ -28,7 +28,15 @@ internal object SummaryCalculations {
     }
 
     fun balanceTransactions(state: FinanceUiState): List<LedgerTransaction> {
-        return state.transactions.filter { passesAccountFilter(state, it) }
+        return state.transactions.filter {
+            passesAccountFilter(state, it) &&
+                affectsBankBalance(it) &&
+                !state.isInvestmentTransaction(it)
+        }
+    }
+
+    fun affectsBankBalance(tx: LedgerTransaction): Boolean {
+        return tx.accountId != null
     }
 
     fun signedMovement(tx: LedgerTransaction): Double {
@@ -46,6 +54,7 @@ internal object SummaryCalculations {
         val monthStart = state.selectedMonth.atDay(1)
         val monthEnd = state.selectedMonth.atEndOfMonth()
         return state.transactions.filter { tx ->
+            if (state.isInvestmentTransaction(tx)) return@filter false
             if (tx.excludeFromSummary) return@filter false
             if (!passesAccountFilter(state, tx)) return@filter false
             val date = tx.transactionDate()
