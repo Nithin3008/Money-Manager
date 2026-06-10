@@ -93,22 +93,9 @@ internal fun LazyListScope.summaryContent(
 @Composable
 private fun MetricGrid(state: FinanceUiState) {
     val currency = state.currency
-    val creditCardActivity = remember(
-        state.transactions,
-        state.selectedMonth,
-        state.activeSummaryAccountIds
-    ) {
-        state.transactions
-            .filter {
-                it.isCreditCardTransaction &&
-                    YearMonth.from(it.transactionDate()) == state.selectedMonth &&
-                    (state.activeSummaryAccountIds.isEmpty() || it.accountId in state.activeSummaryAccountIds)
-            }
-            .sumOf { it.amount }
-    }
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            SmallMetric("Total spent", money(state.monthExpense, currency), LossRed, Modifier.weight(1f))
+            SmallMetric("Cash spent", money(state.monthExpense, currency), LossRed, Modifier.weight(1f))
             SmallMetric(
                 "Daily avg",
                 money(state.monthExpense / state.selectedMonth.lengthOfMonth().coerceAtLeast(1), currency),
@@ -118,7 +105,7 @@ private fun MetricGrid(state: FinanceUiState) {
         }
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             SmallMetric("Balance", money(state.currentBalanceAnchor, currency), PrimaryBlue, Modifier.weight(1f))
-            SmallMetric("Card spend", money(creditCardActivity, currency), TextPrimary, Modifier.weight(1f))
+            SmallMetric("CC spend", money(state.monthCreditCardSpend, currency), OtherIncomeGold, Modifier.weight(1f))
         }
     }
 }
@@ -129,7 +116,7 @@ private fun SummaryAccountFilterRow(
     onToggleAccount: (Long) -> Unit,
     onClearFilter: () -> Unit
 ) {
-    val defaultAccount = state.accounts.firstOrNull { it.id == state.defaultAccountId }
+    val defaultAccount = state.bankAccounts.firstOrNull { it.id == state.defaultAccountId }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         LabelText("ACCOUNTS")
         ChipRow {
@@ -474,8 +461,8 @@ private fun availableMonths(state: FinanceUiState): List<YearMonth> {
 
 private fun categoryTotals(state: FinanceUiState): List<MonthlyCategoryTotal> {
     return state.categories.map { category ->
-        val expense = state.monthTransactions
-            .filter { it.categoryId == category.id && it.type == TransactionType.Expense }
+        val expense = state.monthExpenseTransactions
+            .filter { it.categoryId == category.id }
             .sumOf { it.amount }
         MonthlyCategoryTotal(
             category = category,

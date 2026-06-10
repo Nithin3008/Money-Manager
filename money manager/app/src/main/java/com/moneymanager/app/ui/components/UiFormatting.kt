@@ -132,14 +132,23 @@ internal fun DetectedTransactionDraft.signedAmount(currency: CurrencyOption): St
 }
 
 internal fun signedAmount(amount: Double, type: TransactionType, currency: CurrencyOption): String {
+    if (type == TransactionType.Transfer) return money(amount, currency)
     val prefix = if (type == TransactionType.Income) "+" else "-"
     return "$prefix${money(amount, currency)}"
 }
 
 internal fun TransactionType.amountColor(): Color {
-    return if (this == TransactionType.Income) MoneyGreen else LossRed
+    return when (this) {
+        TransactionType.Income -> MoneyGreen
+        TransactionType.Expense -> LossRed
+        TransactionType.Transfer -> TextMuted
+    }
 }
 
 internal fun TransactionType.bankVerb(): String {
-    return if (this == TransactionType.Income) "credited" else "debited"
+    return when (this) {
+        TransactionType.Income -> "credited"
+        TransactionType.Expense -> "debited"
+        TransactionType.Transfer -> "transferred"
+    }
 }

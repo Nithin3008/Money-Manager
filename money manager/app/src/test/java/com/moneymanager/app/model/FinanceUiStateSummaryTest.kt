@@ -15,6 +15,12 @@ class FinanceUiStateSummaryTest {
 
     private val bankA = BankAccount(id = 1L, name = "Primary 1234", balance = 50_000.0)
     private val bankB = BankAccount(id = 2L, name = "Second 9876", balance = 25_000.0)
+    private val creditCard = BankAccount(
+        id = 3L,
+        name = "HDFC Card 4321",
+        balance = 7_000.0,
+        type = AccountType.CreditCard
+    )
 
     @Test
     fun summaryUsesCalendarMonthDepositsAndExpensesForDefaultAccount() {
@@ -121,6 +127,33 @@ class FinanceUiStateSummaryTest {
     }
 
     @Test
+    fun transferTransactionMovesCashForSelectedBankWithoutIncomeOrExpense() {
+        val state = state(
+            defaultAccountId = bankA.id,
+            accounts = listOf(bankA.copy(balance = 50_000.0), bankB),
+            transactions = listOf(
+                LedgerTransaction(
+                    id = 1,
+                    name = "Transfer: Primary to Second",
+                    amount = 20_000.0,
+                    type = TransactionType.Transfer,
+                    categoryId = 0L,
+                    accountId = null,
+                    timestampMillis = millis("2026-04-10"),
+                    excludeFromSummary = true,
+                    fromAccountId = bankA.id,
+                    toAccountId = bankB.id
+                ),
+                tx(2, 2_500.0, TransactionType.Expense, "2026-04-11", bankA.id)
+            )
+        )
+
+        assertEquals(0.0, state.monthIncome, 0.001)
+        assertEquals(2_500.0, state.monthExpense, 0.001)
+        assertEquals(-22_500.0, state.calendarMonthNet, 0.001)
+    }
+
+    @Test
     fun balanceReconstructionBacktracksFromCurrentBalance() {
         val state = state(
             defaultAccountId = bankA.id,
@@ -141,7 +174,7 @@ class FinanceUiStateSummaryTest {
     }
 
     @Test
-    fun creditCardSpendMovesBankBalanceWhenAssignedToAccount() {
+    fun creditCardSpendIsSeparatedFromCashExpenseWithoutMovingBankBalance() {
         val state = state(
             defaultAccountId = bankA.id,
             accounts = listOf(bankA.copy(balance = 50_000.0), bankB),
@@ -152,7 +185,67 @@ class FinanceUiStateSummaryTest {
         )
 
         assertEquals(50_000.0, state.currentBalanceAnchor, 0.001)
-        assertEquals(2_500.0, state.calendarMonthNet, 0.001)
+        assertEquals(0.0, state.monthExpense, 0.001)
+        assertEquals(2_500.0, state.monthCreditCardSpend, 0.001)
+        assertEquals(5_000.0, state.calendarMonthNet, 0.001)
+    }
+
+    @Test
+    fun creditCardAccountOutstandingIsNotPartOfCashBalance() {
+        val state = state(
+            defaultAccountId = null,
+            accounts = listOf(bankA.copy(balance = 50_000.0), creditCard),
+            transactions = listOf(
+                tx(1, 2_500.0, TransactionType.Expense, "2026-04-10", creditCard.id, creditCard = true)
+            )
+        )
+
+        assertEquals(50_000.0, state.currentBalanceAnchor, 0.001)
+        assertEquals(7_000.0, state.creditCardOutstanding, 0.001)
+        assertEquals(0.0, state.monthExpense, 0.001)
+        assertEquals(2_500.0, state.monthCreditCardSpend, 0.001)
+        assertEquals(0.0, state.calendarMonthNet, 0.001)
+    }
+
+    @Test
+    fun creditCardSpendTotalIgnoresSummaryBankFilterLikeInvestment() {
+        val state = state(
+            defaultAccountId = bankA.id,
+            accounts = listOf(bankA.copy(balance = 50_000.0), bankB, creditCard),
+            summarySelectedAccountIds = setOf(bankB.id),
+            transactions = listOf(
+                tx(1, 2_500.0, TransactionType.Expense, "2026-04-10", creditCard.id, creditCard = true),
+                tx(2, 2_000.0, TransactionType.Expense, "2026-04-11", bankB.id)
+            )
+        )
+
+        assertEquals(2_000.0, state.monthExpense, 0.001)
+        assertEquals(2_500.0, state.monthCreditCardSpend, 0.001)
+    }
+
+    @Test
+    fun creditCardBillPaymentTransferReducesCashMovementOnlyForBankSide() {
+        val state = state(
+            defaultAccountId = bankA.id,
+            accounts = listOf(bankA.copy(balance = 50_000.0), creditCard.copy(balance = 7_000.0)),
+            transactions = listOf(
+                LedgerTransaction(
+                    id = 1,
+                    name = "Credit card payment",
+                    amount = 3_000.0,
+                    type = TransactionType.Transfer,
+                    categoryId = 0L,
+                    accountId = null,
+                    timestampMillis = millis("2026-04-10"),
+                    excludeFromSummary = true,
+                    fromAccountId = bankA.id,
+                    toAccountId = creditCard.id
+                )
+            )
+        )
+
+        assertEquals(0.0, state.monthExpense, 0.001)
+        assertEquals(-3_000.0, state.calendarMonthNet, 0.001)
     }
 
     @Test
@@ -178,10 +271,27 @@ class FinanceUiStateSummaryTest {
         )
 
         assertEquals(0.0, state.monthIncome, 0.001)
-        assertEquals(9_500.0, state.monthExpense, 0.001)
-        assertEquals(18_000.0, state.monthInvestment, 0.001)
+        assertEquals(0.0, state.monthExpense, 0.001)
+        assertEquals(27_500.0, state.monthInvestment, 0.001)
         assertEquals(75_000.0, state.currentBalanceAnchor, 0.001)
-        assertEquals(-9_500.0, state.calendarMonthNet, 0.001)
+        assertEquals(0.0, state.calendarMonthNet, 0.001)
+    }
+
+    @Test
+    fun investmentTotalsIgnoreSummaryBankFilter() {
+        val state = state(
+            defaultAccountId = bankA.id,
+            accounts = listOf(bankA.copy(balance = 50_000.0), bankB),
+            summarySelectedAccountIds = setOf(bankB.id),
+            transactions = listOf(
+                tx(1, 10_000.0, TransactionType.Expense, "2026-04-10", bankA.id, categoryId = 6L),
+                tx(2, 2_000.0, TransactionType.Expense, "2026-04-11", bankB.id)
+            )
+        )
+
+        assertEquals(10_000.0, state.monthInvestment, 0.001)
+        assertEquals(2_000.0, state.monthExpense, 0.001)
+        assertEquals(-2_000.0, state.calendarMonthNet, 0.001)
     }
 
     @Test
@@ -240,13 +350,29 @@ class FinanceUiStateSummaryTest {
 
         assertTrue(SmsTransactionNormalizer.isCreditCardSpend(raw))
         assertTrue(parsed?.isCreditCardTransaction ?: false)
+        assertEquals("HDFC CARD 4321", parsed?.bankName)
     }
 
     @Test
     fun cardBillPaymentDebitIsNotMarkedAsCardSpend() {
         val raw = "Rs.33368 debited from A/c 1234 for credit card payment"
+        val parsed = TransactionMessageParser.parse(
+            message = raw,
+            transactionTimestampMillis = millis("2026-04-30"),
+            sender = "HDFC"
+        )
 
         assertFalse(SmsTransactionNormalizer.isCreditCardSpend(raw))
+        assertTrue(SmsTransactionNormalizer.isCreditCardBillPaymentDebit(raw))
+        assertTrue(parsed?.isInternalTransfer ?: false)
+        assertTrue(parsed?.excludeFromSummary ?: false)
+    }
+
+    @Test
+    fun approvedCreditCardPaymentTransferIsNotCleanedAsArtifact() {
+        val raw = "Rs.33368 debited from A/c 1234 for credit card payment"
+
+        assertFalse(SmsTransactionNormalizer.isNonLedgerTransactionArtifact(raw, TransactionType.Transfer))
     }
 
     private fun state(

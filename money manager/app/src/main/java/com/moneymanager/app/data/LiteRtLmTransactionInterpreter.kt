@@ -156,6 +156,7 @@ class LiteRtLmTransactionInterpreter(
         return when (this?.trim()?.lowercase()) {
             "income", "credit", "credited" -> TransactionType.Income
             "expense", "debit", "debited" -> TransactionType.Expense
+            "transfer", "internal transfer" -> TransactionType.Transfer
             else -> null
         }
     }

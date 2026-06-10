@@ -1,6 +1,7 @@
 package com.moneymanager.app.data
 
 import com.moneymanager.app.model.BankAccount
+import com.moneymanager.app.model.AccountType
 import com.moneymanager.app.model.BudgetPlan
 import com.moneymanager.app.model.CategoryItem
 import com.moneymanager.app.model.CurrencyOption
@@ -65,7 +66,8 @@ internal fun AccountEntity.toModel() = BankAccount(
     id = id,
     name = name,
     balance = balance,
-    smsMatchKey = smsMatchKey
+    smsMatchKey = smsMatchKey,
+    type = AccountType.entries.firstOrNull { it.name == accountType } ?: AccountType.Bank
 )
 
 internal fun CategoryEntity.toModel() = CategoryItem(
@@ -98,7 +100,9 @@ internal fun TransactionEntity.toModel() = LedgerTransaction(
     smsBankLabel = smsBankLabel,
     excludeFromSummary = excludeFromSummary,
     isCreditCardTransaction = isCreditCardTransaction,
-    description = description
+    description = description,
+    fromAccountId = fromAccountId,
+    toAccountId = toAccountId
 )
 
 internal fun LedgerTransaction.toEntity(id: Long = this.id) = TransactionEntity(
@@ -114,7 +118,9 @@ internal fun LedgerTransaction.toEntity(id: Long = this.id) = TransactionEntity(
     smsBankLabel = smsBankLabel,
     excludeFromSummary = excludeFromSummary,
     isCreditCardTransaction = isCreditCardTransaction,
-    description = description
+    description = description,
+    fromAccountId = fromAccountId,
+    toAccountId = toAccountId
 )
 
 internal fun BudgetEntity.toModel() = BudgetPlan(
@@ -143,7 +149,9 @@ internal fun DetectedDraftEntity.toModel() = DetectedTransactionDraft(
     rawMessage = rawMessage,
     suggestedCategoryId = suggestedCategoryId,
     detectedAtMillis = detectedAtMillis,
-    transactionTimestampMillis = if (transactionTimestampMillis == 0L) detectedAtMillis else transactionTimestampMillis
+    transactionTimestampMillis = if (transactionTimestampMillis == 0L) detectedAtMillis else transactionTimestampMillis,
+    fromAccountId = fromAccountId,
+    toAccountId = toAccountId
 )
 
 internal fun DetectedTransactionDraft.toEntity(id: Long = this.id) = DetectedDraftEntity(
@@ -156,5 +164,7 @@ internal fun DetectedTransactionDraft.toEntity(id: Long = this.id) = DetectedDra
     rawMessage = rawMessage,
     suggestedCategoryId = suggestedCategoryId,
     detectedAtMillis = detectedAtMillis,
-    transactionTimestampMillis = transactionTimestampMillis
+    transactionTimestampMillis = transactionTimestampMillis,
+    fromAccountId = fromAccountId,
+    toAccountId = toAccountId
 )

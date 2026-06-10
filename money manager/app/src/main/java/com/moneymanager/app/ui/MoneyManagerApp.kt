@@ -114,6 +114,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.moneymanager.app.model.AccountType
 import com.moneymanager.app.model.BankAccount
 import com.moneymanager.app.model.BudgetPlan
 import com.moneymanager.app.model.CategoryItem
@@ -124,6 +125,7 @@ import com.moneymanager.app.model.FinanceUiState
 import com.moneymanager.app.model.LedgerTransaction
 import com.moneymanager.app.model.MonthlyCategoryTotal
 import com.moneymanager.app.model.MoneyIcons
+import com.moneymanager.app.model.RegistrationAccountInput
 import com.moneymanager.app.model.ScreenTab
 import com.moneymanager.app.model.ThemeMode
 import com.moneymanager.app.model.TransactionType
@@ -324,6 +326,7 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
                         onDeleteAccount = viewModel::deleteAccount,
                         onUpdateAccountBalance = viewModel::updateAccountBalance,
                         onAddAccount = viewModel::addBankAccount,
+                        onAddCreditCard = viewModel::addCreditCardAccount,
                         onDefaultAccountSelected = viewModel::setDefaultAccount,
                         onDeleteCategory = viewModel::deleteCategory,
                         onCategoryColorSelected = viewModel::updateCategoryColor,
@@ -372,9 +375,9 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
         )
     }
 
-    if (state.hasCompletedRegistration && state.accounts.isNotEmpty() && state.defaultAccountId == null) {
+    if (state.hasCompletedRegistration && state.bankAccounts.isNotEmpty() && state.defaultAccountId == null) {
         DefaultBankPrompt(
-            accounts = state.accounts,
+            accounts = state.bankAccounts,
             onSelected = viewModel::setDefaultAccount
         )
     }
@@ -447,6 +450,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.settingsContent(
     onDeleteAccount: (Long) -> Unit,
     onUpdateAccountBalance: (Long, Double) -> Unit,
     onAddAccount: (String, Double) -> Unit,
+    onAddCreditCard: (String, Double) -> Unit,
     onDefaultAccountSelected: (Long?) -> Unit,
     onDeleteCategory: (Long) -> Unit,
     onCategoryColorSelected: (Long, String) -> Unit,
@@ -467,6 +471,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.settingsContent(
             onDelete = onDeleteAccount,
             onUpdateBalance = onUpdateAccountBalance,
             onAddAccount = onAddAccount,
+            onAddCreditCard = onAddCreditCard,
             onDefaultAccountSelected = onDefaultAccountSelected
         )
     }
@@ -560,15 +565,15 @@ private fun OfflineLlmSettings(
     var showDeleteConfirm by remember { mutableStateOf(false) }
     val status = when {
         state.offlineLlmParsingEnabled && state.offlineLlmModelDownloaded ->
-            "On-device model active. SMS stays on this phone."
+            "Local AI assist active for credit cards and possible transfers."
         state.isOfflineLlmModelDownloading ->
             "Downloading model..."
         state.offlineLlmParsingEnabled ->
-            "Enabled after the one-time model download."
+            "Enabled after the one-time model import or download."
         state.offlineLlmModelDownloaded ->
-            "Model downloaded. Parsing is currently off."
+            "Model downloaded. AI assist is currently off."
         else ->
-            "Optional one-time download for smarter SMS parsing."
+            "Optional local assist for tricky SMS. Rules stay primary."
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -582,7 +587,7 @@ private fun OfflineLlmSettings(
                     IconTile(Icons.Rounded.Sms, PrimarySoft)
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
-                        Text("LLM message parsing", color = TextPrimary, style = MaterialTheme.typography.titleMedium)
+                        Text("AI assist for tricky SMS", color = TextPrimary, style = MaterialTheme.typography.titleMedium)
                         Text(status, color = TextDim, style = MaterialTheme.typography.bodyMedium)
                     }
                     Switch(
@@ -640,7 +645,7 @@ private fun OfflineLlmSettings(
             title = { Text("Delete offline model?") },
             text = {
                 Text(
-                    "This removes the local model files and turns off LLM parsing. Rule parsing will continue.",
+                    "This removes the local model files and turns off AI assist. Rule parsing will continue.",
                     color = TextMuted
                 )
             },
@@ -873,7 +878,7 @@ private fun DeleteDataPanel(onDeleteAllData: () -> Unit) {
 }
 
 @Composable
-private fun RegistrationScreen(onComplete: (String, List<Pair<String, Double>>, Int, Boolean) -> Unit) {
+private fun RegistrationScreen(onComplete: (String, List<RegistrationAccountInput>, Int, Boolean) -> Unit) {
     var name by remember { mutableStateOf("") }
     val accounts = remember { mutableStateListOf(AccountDraft()) }
     var defaultAccountIndex by remember { mutableStateOf(0) }
@@ -881,11 +886,22 @@ private fun RegistrationScreen(onComplete: (String, List<Pair<String, Double>>, 
     val validWithOriginalIndex = accounts.mapIndexedNotNull { index, draft ->
         val amount = draft.balance.toDoubleOrNull()
         val accountName = draft.displayName()
-        if (accountName.isBlank() || amount == null || amount < 0.0) null else index to (accountName to amount)
+        if (accountName.isBlank() || amount == null || amount < 0.0) {
+            null
+        } else {
+            index to RegistrationAccountInput(
+                name = accountName,
+                balance = amount,
+                type = draft.type
+            )
+        }
     }
-    val defaultValidIndex = validWithOriginalIndex.indexOfFirst { it.first == defaultAccountIndex }
+    val defaultValidIndex = validWithOriginalIndex.indexOfFirst {
+        it.first == defaultAccountIndex && it.second.type == AccountType.Bank
+    }
         .takeIf { it >= 0 }
-        ?: 0
+        ?: validWithOriginalIndex.indexOfFirst { it.second.type == AccountType.Bank }
+    val hasValidBankAccount = validWithOriginalIndex.any { it.second.type == AccountType.Bank }
 
     LazyColumn(
         modifier = Modifier
@@ -911,12 +927,20 @@ private fun RegistrationScreen(onComplete: (String, List<Pair<String, Double>>, 
                 shape = RoundedCornerShape(12.dp)
             )
         }
-        item { LabelText("BANK ACCOUNTS") }
+        item { LabelText("ACCOUNTS & CREDIT CARDS") }
         items(accounts.size) { index ->
             AccountDraftRow(
                 account = accounts[index],
                 accountNumber = index + 1,
                 canRemove = accounts.size > 1,
+                onTypeChanged = { type ->
+                    accounts[index] = accounts[index].copy(type = type)
+                    if (type == AccountType.CreditCard && defaultAccountIndex == index) {
+                        defaultAccountIndex = accounts.indexOfFirst { it.type == AccountType.Bank }
+                            .takeIf { it >= 0 }
+                            ?: 0
+                    }
+                },
                 onNameChanged = { accounts[index] = accounts[index].copy(name = it) },
                 onLastDigitsChanged = { accounts[index] = accounts[index].copy(lastDigits = it.filter(Char::isDigit).take(4)) },
                 onBalanceChanged = { accounts[index] = accounts[index].copy(balance = it) },
@@ -928,20 +952,37 @@ private fun RegistrationScreen(onComplete: (String, List<Pair<String, Double>>, 
                             defaultAccountIndex > index -> defaultAccountIndex - 1
                             else -> defaultAccountIndex
                         }.coerceIn(0, accounts.lastIndex)
+                        if (accounts.getOrNull(defaultAccountIndex)?.type != AccountType.Bank) {
+                            defaultAccountIndex = accounts.indexOfFirst { it.type == AccountType.Bank }
+                                .takeIf { it >= 0 }
+                                ?: 0
+                        }
                     }
                 }
             )
         }
         item {
-            OutlinedButton(
-                onClick = { accounts.add(AccountDraft()) },
-                modifier = Modifier.fillMaxWidth().height(52.dp),
-                shape = RoundedCornerShape(12.dp),
-                border = BorderStroke(1.dp, PrimarySoft)
-            ) {
-                Icon(Icons.Rounded.Add, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
-                Text("Add another account")
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedButton(
+                    onClick = { accounts.add(AccountDraft(type = AccountType.Bank)) },
+                    modifier = Modifier.weight(1f).height(52.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, PrimarySoft)
+                ) {
+                    Icon(Icons.Rounded.Add, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Bank")
+                }
+                OutlinedButton(
+                    onClick = { accounts.add(AccountDraft(type = AccountType.CreditCard)) },
+                    modifier = Modifier.weight(1f).height(52.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, PrimarySoft)
+                ) {
+                    Icon(Icons.Rounded.Add, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Card")
+                }
             }
         }
         item {
@@ -949,12 +990,13 @@ private fun RegistrationScreen(onComplete: (String, List<Pair<String, Double>>, 
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("Default bank", color = TextPrimary, style = MaterialTheme.typography.titleMedium)
                     Text(
-                        "Used for Today, Summary, and new manual transactions. Change it later in Settings.",
+                        "Used for Today, Summary, and new manual transactions. Credit cards are tracked separately.",
                         color = TextDim,
                         style = MaterialTheme.typography.bodySmall
                     )
                     ChipRow {
                         accounts.forEachIndexed { index, account ->
+                            if (account.type != AccountType.Bank) return@forEachIndexed
                             MoneyChip(
                                 label = account.displayName().ifBlank { "Account ${index + 1}" },
                                 selected = defaultAccountIndex == index,
@@ -972,9 +1014,9 @@ private fun RegistrationScreen(onComplete: (String, List<Pair<String, Double>>, 
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text("Offline LLM parsing", color = TextPrimary, style = MaterialTheme.typography.titleMedium)
+                        Text("AI assist for tricky SMS", color = TextPrimary, style = MaterialTheme.typography.titleMedium)
                         Text(
-                            "Optional one-time download for smarter SMS detection. You can turn it off or delete it later.",
+                            "Optional local model. It only assists credit-card and possible transfer messages, and review is still required.",
                             color = TextDim,
                             style = MaterialTheme.typography.bodySmall
                         )
@@ -997,7 +1039,7 @@ private fun RegistrationScreen(onComplete: (String, List<Pair<String, Double>>, 
                         offlineLlmParsingOptIn
                     )
                 },
-                enabled = name.isNotBlank() && validWithOriginalIndex.isNotEmpty(),
+                enabled = name.isNotBlank() && hasValidBankAccount && defaultValidIndex >= 0,
                 modifier = Modifier.fillMaxWidth().height(58.dp),
                 shape = RoundedCornerShape(12.dp),
                 colors = primaryButtonColors()
@@ -1039,7 +1081,8 @@ private fun FintrackAuthHero() {
 private data class AccountDraft(
     val name: String = "",
     val lastDigits: String = "",
-    val balance: String = ""
+    val balance: String = "",
+    val type: AccountType = AccountType.Bank
 ) {
     fun displayName(): String = listOf(name.trim(), lastDigits.trim())
         .filter { it.isNotBlank() }
@@ -1108,6 +1151,7 @@ private fun AccountDraftRow(
     account: AccountDraft,
     accountNumber: Int,
     canRemove: Boolean,
+    onTypeChanged: (AccountType) -> Unit,
     onNameChanged: (String) -> Unit,
     onLastDigitsChanged: (String) -> Unit,
     onBalanceChanged: (String) -> Unit,
@@ -1116,10 +1160,14 @@ private fun AccountDraftRow(
     ElevatedPanel {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Rounded.AccountBalance, contentDescription = null, tint = PrimarySoft)
+                Icon(
+                    if (account.type == AccountType.Bank) Icons.Rounded.AccountBalance else Icons.Rounded.Wallet,
+                    contentDescription = null,
+                    tint = PrimarySoft
+                )
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    "Account $accountNumber",
+                    "${account.type.label} $accountNumber",
                     color = TextPrimary,
                     style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.weight(1f)
@@ -1130,11 +1178,20 @@ private fun AccountDraftRow(
                     }
                 }
             }
+            ChipRow {
+                AccountType.entries.forEach { type ->
+                    MoneyChip(
+                        label = type.label,
+                        selected = account.type == type,
+                        onClick = { onTypeChanged(type) }
+                    )
+                }
+            }
             OutlinedTextField(
                 value = account.name,
                 onValueChange = onNameChanged,
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("Bank name") },
+                label = { Text(if (account.type == AccountType.Bank) "Bank name" else "Card name") },
                 singleLine = true,
                 colors = inputColors(),
                 shape = RoundedCornerShape(12.dp)
@@ -1143,7 +1200,7 @@ private fun AccountDraftRow(
                 value = account.lastDigits,
                 onValueChange = onLastDigitsChanged,
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("Last 4 account digits") },
+                label = { Text(if (account.type == AccountType.Bank) "Last 4 account digits" else "Last 4 card digits") },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 singleLine = true,
                 colors = inputColors(),
@@ -1153,14 +1210,18 @@ private fun AccountDraftRow(
                 value = account.balance,
                 onValueChange = onBalanceChanged,
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("Current balance") },
+                label = { Text(if (account.type == AccountType.Bank) "Current balance" else "Current outstanding") },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                 singleLine = true,
                 colors = inputColors(),
                 shape = RoundedCornerShape(12.dp)
             )
             Text(
-                "Example: HDFC + 4466 helps match SMS like A/c XX4466. Balance is kept as the current bank balance.",
+                if (account.type == AccountType.Bank) {
+                    "Example: HDFC + 4466 helps match SMS like A/c XX4466. Balance is kept as the current bank balance."
+                } else {
+                    "Example: HDFC Card + 4321 helps match card spends and bill payments. Outstanding is tracked separately."
+                },
                 color = TextDim,
                 style = MaterialTheme.typography.bodySmall
             )
@@ -1180,7 +1241,7 @@ private fun AddTransactionSheet(
     var amount by remember { mutableStateOf("") }
     var mode by remember { mutableStateOf(AddMoneyMode.Expense) }
     var categoryId by remember { mutableStateOf(state.categories.first().id) }
-    val defaultAccount = state.accounts.firstOrNull { it.id == state.defaultAccountId } ?: state.accounts.firstOrNull()
+    val defaultAccount = state.bankAccounts.firstOrNull { it.id == state.defaultAccountId } ?: state.bankAccounts.firstOrNull()
     var accountId by remember(state.defaultAccountId, state.accounts) { mutableStateOf(defaultAccount?.id) }
     var fromAccountId by remember(state.defaultAccountId, state.accounts) { mutableStateOf(defaultAccount?.id) }
     var toAccountId by remember(state.defaultAccountId, state.accounts) {
@@ -1245,7 +1306,7 @@ private fun AddTransactionSheet(
 
             if (mode == AddMoneyMode.Transfer && state.accounts.size < 2) {
                 Text(
-                    "Add at least two bank accounts in Settings before creating transfers.",
+                    "Add at least two accounts in Settings before creating transfers.",
                     color = WarningAmber,
                     style = MaterialTheme.typography.bodySmall
                 )
@@ -1315,7 +1376,7 @@ private fun AddTransactionSheet(
                             }
                         }
                         if (state.accounts.isNotEmpty()) {
-                            LabelText("BANK ACCOUNT")
+                            LabelText("ACCOUNT")
                             ChipRow {
                                 MoneyChip("None", selected = accountId == null, onClick = { accountId = null })
                                 state.accounts.forEach {
@@ -1511,6 +1572,13 @@ private fun TransactionDetailSheet(
     var showAllCategories by remember { mutableStateOf(false) }
     var showOriginalMessage by remember { mutableStateOf(false) }
     var description by remember(transaction.id) { mutableStateOf(transaction.description.orEmpty()) }
+    val editableTypes = remember(transaction.type) {
+        if (transaction.type == TransactionType.Transfer) {
+            listOf(TransactionType.Transfer)
+        } else {
+            listOf(TransactionType.Income, TransactionType.Expense)
+        }
+    }
     val categoryRanking = remember(state.transactions, state.categories) {
         state.transactions
             .groupingBy { it.categoryId }
@@ -1573,19 +1641,19 @@ private fun TransactionDetailSheet(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(22.dp),
                 colors = CardDefaults.cardColors(containerColor = if (type == TransactionType.Income) PrimaryBlue else Navy850),
-                border = BorderStroke(1.dp, if (type == TransactionType.Income) PrimaryBlue else LossRed.copy(alpha = 0.7f))
+                border = BorderStroke(1.dp, type.amountColor().copy(alpha = 0.7f))
             ) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             Text(
-                                if (type == TransactionType.Income) "Income" else "Expense",
+                                type.name,
                                 color = if (type == TransactionType.Income) incomeContent.copy(alpha = 0.68f) else TextDim,
                                 style = MaterialTheme.typography.labelMedium
                             )
                             Text(
                                 signedAmount(transaction.amount, type, state.currency),
-                                color = if (type == TransactionType.Income) incomeContent else LossRed,
+                                color = if (type == TransactionType.Income) incomeContent else type.amountColor(),
                                 style = MaterialTheme.typography.headlineLarge,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
@@ -1595,13 +1663,17 @@ private fun TransactionDetailSheet(
                             modifier = Modifier
                                 .size(46.dp)
                                 .clip(RoundedCornerShape(14.dp))
-                                .background(if (type == TransactionType.Income) incomeContent else LossRed.copy(alpha = 0.16f)),
+                                .background(if (type == TransactionType.Income) incomeContent else type.amountColor().copy(alpha = 0.16f)),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
-                                if (type == TransactionType.Income) Icons.AutoMirrored.Rounded.TrendingUp else Icons.Rounded.Wallet,
+                                when (type) {
+                                    TransactionType.Income -> Icons.AutoMirrored.Rounded.TrendingUp
+                                    TransactionType.Expense -> Icons.Rounded.Wallet
+                                    TransactionType.Transfer -> Icons.Rounded.AccountBalance
+                                },
                                 contentDescription = null,
-                                tint = if (type == TransactionType.Income) PrimaryBlue else LossRed
+                                tint = if (type == TransactionType.Income) PrimaryBlue else type.amountColor()
                             )
                         }
                     }
@@ -1643,7 +1715,7 @@ private fun TransactionDetailSheet(
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     Text("Transaction type", color = TextPrimary, style = MaterialTheme.typography.titleMedium)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        TransactionType.entries.forEach { option ->
+                        editableTypes.forEach { option ->
                             EditTransactionTypeTile(
                                 type = option,
                                 selected = type == option,
@@ -1777,7 +1849,7 @@ private fun EditTransactionTypeTile(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val accent = if (type == TransactionType.Income) MoneyGreen else LossRed
+    val accent = type.amountColor()
     Card(
         modifier = modifier
             .height(58.dp)
@@ -1792,7 +1864,11 @@ private fun EditTransactionTypeTile(
             horizontalArrangement = Arrangement.Center
         ) {
             Icon(
-                if (type == TransactionType.Income) Icons.AutoMirrored.Rounded.TrendingUp else Icons.Rounded.Wallet,
+                when (type) {
+                    TransactionType.Income -> Icons.AutoMirrored.Rounded.TrendingUp
+                    TransactionType.Expense -> Icons.Rounded.Wallet
+                    TransactionType.Transfer -> Icons.Rounded.AccountBalance
+                },
                 contentDescription = null,
                 tint = if (selected) accentContentColor() else accent,
                 modifier = Modifier.size(20.dp)
@@ -2961,22 +3037,24 @@ private fun AccountSettingsGroup(
     onDelete: (Long) -> Unit,
     onUpdateBalance: (Long, Double) -> Unit,
     onAddAccount: (String, Double) -> Unit,
+    onAddCreditCard: (String, Double) -> Unit,
     onDefaultAccountSelected: (Long?) -> Unit
 ) {
     var showAdd by remember { mutableStateOf(false) }
+    var newAccountType by remember { mutableStateOf(AccountType.Bank) }
     var newAccountName by remember { mutableStateOf("") }
     var newAccountLastDigits by remember { mutableStateOf("") }
     var newAccountBalance by remember { mutableStateOf("") }
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            LabelText("BANK ACCOUNTS")
+            LabelText("ACCOUNTS")
             Spacer(Modifier.weight(1f))
             TextButton(onClick = { showAdd = !showAdd }) {
-                Text(if (showAdd) "Cancel" else "Add bank", color = PrimarySoft)
+                Text(if (showAdd) "Cancel" else "Add account", color = PrimarySoft)
             }
         }
-        if (state.accounts.isNotEmpty()) {
-            val defaultAccount = state.accounts.firstOrNull { it.id == state.defaultAccountId }
+        if (state.bankAccounts.isNotEmpty()) {
+            val defaultAccount = state.bankAccounts.firstOrNull { it.id == state.defaultAccountId }
             ElevatedPanel {
                 Column(
                     Modifier.padding(16.dp),
@@ -2995,7 +3073,7 @@ private fun AccountSettingsGroup(
                         style = MaterialTheme.typography.labelMedium
                     )
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        state.accounts.forEach { account ->
+                        state.bankAccounts.forEach { account ->
                             DefaultAccountOption(
                                 account = account,
                                 selected = state.defaultAccountId == account.id,
@@ -3010,14 +3088,23 @@ private fun AccountSettingsGroup(
             Column {
                 if (showAdd) {
                     Column(
-                        Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
+                    Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                        ChipRow {
+                            AccountType.entries.forEach { type ->
+                                MoneyChip(
+                                    label = type.label,
+                                    selected = newAccountType == type,
+                                    onClick = { newAccountType = type }
+                                )
+                            }
+                        }
                         OutlinedTextField(
                             value = newAccountName,
                             onValueChange = { newAccountName = it },
                             modifier = Modifier.fillMaxWidth(),
-                            label = { Text("Bank name") },
+                            label = { Text(if (newAccountType == AccountType.Bank) "Bank name" else "Card name") },
                             singleLine = true,
                             colors = inputColors(),
                             shape = RoundedCornerShape(12.dp)
@@ -3026,7 +3113,7 @@ private fun AccountSettingsGroup(
                             value = newAccountLastDigits,
                             onValueChange = { newAccountLastDigits = it.filter(Char::isDigit).take(4) },
                             modifier = Modifier.fillMaxWidth(),
-                            label = { Text("Last 4 account digits") },
+                            label = { Text(if (newAccountType == AccountType.Bank) "Last 4 account digits" else "Last 4 card digits") },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                             singleLine = true,
                             colors = inputColors(),
@@ -3036,7 +3123,7 @@ private fun AccountSettingsGroup(
                             value = newAccountBalance,
                             onValueChange = { newAccountBalance = it },
                             modifier = Modifier.fillMaxWidth(),
-                            label = { Text("Current balance") },
+                            label = { Text(if (newAccountType == AccountType.Bank) "Current balance" else "Current outstanding") },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                             singleLine = true,
                             colors = inputColors(),
@@ -3047,10 +3134,15 @@ private fun AccountSettingsGroup(
                                 val displayName = listOf(newAccountName.trim(), newAccountLastDigits.trim())
                                     .filter { it.isNotBlank() }
                                     .joinToString(" ")
-                                onAddAccount(displayName, newAccountBalance.toDoubleOrNull() ?: -1.0)
+                                if (newAccountType == AccountType.Bank) {
+                                    onAddAccount(displayName, newAccountBalance.toDoubleOrNull() ?: -1.0)
+                                } else {
+                                    onAddCreditCard(displayName, newAccountBalance.toDoubleOrNull() ?: -1.0)
+                                }
                                 newAccountName = ""
                                 newAccountLastDigits = ""
                                 newAccountBalance = ""
+                                newAccountType = AccountType.Bank
                                 showAdd = false
                             },
                             enabled = newAccountName.isNotBlank() && (newAccountBalance.toDoubleOrNull() ?: -1.0) >= 0.0,
@@ -3058,7 +3150,10 @@ private fun AccountSettingsGroup(
                             shape = RoundedCornerShape(12.dp),
                             colors = primaryButtonColors()
                         ) {
-                            Text("Add bank account", fontWeight = FontWeight.Bold)
+                            Text(
+                                if (newAccountType == AccountType.Bank) "Add bank account" else "Add credit card",
+                                fontWeight = FontWeight.Bold
+                            )
                         }
                     }
                     if (state.accounts.isNotEmpty()) {
@@ -3081,7 +3176,11 @@ private fun AccountSettingsGroup(
                             ) {
                                 Column(Modifier.weight(1f)) {
                                     Text(account.name, color = TextPrimary, style = MaterialTheme.typography.titleMedium)
-                                    Text(state.money(account.balance), color = TextDim, style = MaterialTheme.typography.bodyMedium)
+                                    Text(
+                                        "${account.type.label} | ${if (account.type == AccountType.Bank) "Balance" else "Outstanding"} ${state.money(account.balance)}",
+                                        color = TextDim,
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
                                 }
                                 Text(if (expanded) "Hide" else "Edit", color = PrimarySoft, style = MaterialTheme.typography.labelMedium)
                             }
@@ -3094,7 +3193,7 @@ private fun AccountSettingsGroup(
                                         value = balanceText,
                                         onValueChange = { balanceText = it },
                                         modifier = Modifier.fillMaxWidth(),
-                                        label = { Text("Current balance anchor") },
+                                        label = { Text(if (account.type == AccountType.Bank) "Current balance anchor" else "Current outstanding") },
                                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                                         singleLine = true,
                                         colors = inputColors(),
@@ -3118,7 +3217,7 @@ private fun AccountSettingsGroup(
                                     }
                                     OutlinedButton(
                                         onClick = { onDefaultAccountSelected(account.id) },
-                                        enabled = state.defaultAccountId != account.id,
+                                        enabled = account.type == AccountType.Bank && state.defaultAccountId != account.id,
                                         modifier = Modifier.fillMaxWidth(),
                                         shape = RoundedCornerShape(12.dp),
                                         border = BorderStroke(
@@ -3130,12 +3229,20 @@ private fun AccountSettingsGroup(
                                         )
                                     ) {
                                         Text(
-                                            if (state.defaultAccountId == account.id) "Default bank" else "Set as default bank",
+                                            when {
+                                                account.type == AccountType.CreditCard -> "Credit cards cannot be default bank"
+                                                state.defaultAccountId == account.id -> "Default bank"
+                                                else -> "Set as default bank"
+                                            },
                                             fontWeight = FontWeight.Bold
                                         )
                                     }
                                     Text(
-                                        "This value is treated as the current bank balance. New transactions update it from here.",
+                                        if (account.type == AccountType.Bank) {
+                                            "This value is treated as the current bank balance. New bank transactions update it from here."
+                                        } else {
+                                            "This value is treated as current card outstanding. Card purchases increase it; bill payments decrease it."
+                                        },
                                         color = TextDim,
                                         style = MaterialTheme.typography.bodySmall
                                     )

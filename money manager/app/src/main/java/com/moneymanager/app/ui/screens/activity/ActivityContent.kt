@@ -43,7 +43,6 @@ import com.moneymanager.app.ui.theme.TextMuted
 import com.moneymanager.app.ui.theme.TextPrimary
 import java.time.LocalDate
 import java.time.ZoneId
-import kotlinx.coroutines.delay
 
 internal fun LazyListScope.activityContent(
     state: FinanceUiState,
@@ -100,24 +99,8 @@ private fun ActivityScanPanel(
     onScanNow: () -> Unit,
     onPopulateThreeMonths: () -> Unit
 ) {
-    var nowMillis by remember { mutableStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(state.isScanningMessages, state.scanStartedAtMillis) {
-        while (state.isScanningMessages) {
-            nowMillis = System.currentTimeMillis()
-            delay(1_000L)
-        }
-    }
-    val etaLabel = state.scanStartedAtMillis
-        ?.takeIf { state.isScanningMessages }
-        ?.let { startedAt ->
-            estimatedRemainingLabel(
-                elapsedMillis = nowMillis - startedAt,
-                processed = state.scanProcessedCount,
-                total = state.scanTotalCount
-            )
-        }
     val statusLabel = if (state.isScanningMessages) {
-        etaLabel ?: "Estimating..."
+        "Scanning"
     } else {
         "Ready"
     }
@@ -168,21 +151,6 @@ private fun ActivityScanPanel(
             }
         }
     }
-}
-
-private fun estimatedRemainingLabel(elapsedMillis: Long, processed: Int, total: Int): String? {
-    if (total <= 0) return null
-    if (processed <= 0) return "ETA --:--"
-    val remaining = (total - processed).coerceAtLeast(0)
-    val remainingMillis = (elapsedMillis.toDouble() / processed.toDouble() * remaining.toDouble()).toLong()
-    return "ETA ${formatDurationMillis(remainingMillis)}"
-}
-
-private fun formatDurationMillis(elapsedMillis: Long): String {
-    val totalSeconds = (elapsedMillis / 1_000L).coerceAtLeast(0L)
-    val minutes = totalSeconds / 60L
-    val seconds = totalSeconds % 60L
-    return "$minutes:${seconds.toString().padStart(2, '0')}"
 }
 
 @Composable

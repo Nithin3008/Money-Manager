@@ -1,6 +1,7 @@
 package com.moneymanager.app.data
 
 import com.google.gson.Gson
+import com.moneymanager.app.model.AccountType
 import com.moneymanager.app.model.AppBackupData
 import com.moneymanager.app.model.BankAccount
 import com.moneymanager.app.model.BudgetPlan
@@ -9,10 +10,16 @@ import com.moneymanager.app.model.DefaultCategories
 import com.moneymanager.app.model.DetectedTransactionDraft
 import com.moneymanager.app.model.FinanceUiState
 import com.moneymanager.app.model.LedgerTransaction
+import com.moneymanager.app.model.TransactionType
+import kotlin.math.abs
 
 class FinanceRepository(private val dao: FinanceDao) {
     suspend fun loadState(current: FinanceUiState = FinanceUiState()): FinanceUiState {
         seedDefaultCategories()
+        val categories = dao.getCategories().map { it.toModel() }
+        val transferCategoryId = categories.transferCategoryId()
+        consolidateLegacyBankTransferPairs(transferCategoryId)
+        normalizeTransferCategories(transferCategoryId)
         val settings = dao.getSettings()
         val base = settings?.applyTo(current) ?: current.copy(
             userName = "",
@@ -31,12 +38,18 @@ class FinanceRepository(private val dao: FinanceDao) {
         dao.saveSettings(state.toSettingsEntity())
     }
 
-    suspend fun addAccount(name: String, balance: Double, smsMatchKey: String? = null): Long {
+    suspend fun addAccount(
+        name: String,
+        balance: Double,
+        smsMatchKey: String? = null,
+        accountType: AccountType = AccountType.Bank
+    ): Long {
         return dao.saveAccount(
             AccountEntity(
                 name = name,
                 balance = balance,
-                smsMatchKey = smsMatchKey?.trim()?.takeIf { it.isNotEmpty() }
+                smsMatchKey = smsMatchKey?.trim()?.takeIf { it.isNotEmpty() },
+                accountType = accountType.name
             )
         )
     }
@@ -47,7 +60,8 @@ class FinanceRepository(private val dao: FinanceDao) {
                 id = account.id,
                 name = account.name,
                 balance = account.balance,
-                smsMatchKey = account.smsMatchKey?.trim()?.takeIf { it.isNotEmpty() }
+                smsMatchKey = account.smsMatchKey?.trim()?.takeIf { it.isNotEmpty() },
+                accountType = account.type.name
             )
         )
     }
@@ -57,6 +71,7 @@ class FinanceRepository(private val dao: FinanceDao) {
         if (accounts.isEmpty()) return
         for (entity in dao.getTransactions()) {
             val tx = entity.toModel()
+            if (tx.type == com.moneymanager.app.model.TransactionType.Transfer) continue
             val parsedLabel = tx.rawMessage
                 ?.let { TransactionMessageParser.parse(it, tx.timestampMillis)?.bankName }
             val label = parsedLabel ?: tx.smsBankLabel ?: continue
@@ -127,6 +142,81 @@ class FinanceRepository(private val dao: FinanceDao) {
         }
     }
 
+    private suspend fun consolidateLegacyBankTransferPairs(transferCategoryId: Long) {
+        val accounts = dao.getAccounts().map { it.toModel() }
+        val bankAccounts = accounts.filter { it.type == com.moneymanager.app.model.AccountType.Bank }
+        if (bankAccounts.size < 2) return
+
+        val transactions = dao.getTransactions()
+            .map { it.toModel() }
+            .sortedBy { it.timestampMillis }
+        val used = mutableSetOf<Long>()
+
+        for (debit in transactions) {
+            if (debit.id in used || !debit.isLegacyBankTransferDebitCandidate()) continue
+            val fromAccountId = debit.resolveBankAccountId(bankAccounts) ?: continue
+
+            val credit = transactions.firstOrNull { candidate ->
+                candidate.id !in used &&
+                    candidate.id != debit.id &&
+                    candidate.isLegacyBankTransferCreditCandidate() &&
+                    sameAmount(candidate.amount, debit.amount) &&
+                    abs(candidate.timestampMillis - debit.timestampMillis) <= TRANSFER_PAIR_WINDOW_MS &&
+                    candidate.resolveBankAccountId(bankAccounts)?.let { it != fromAccountId } == true &&
+                    looksLikeLegacyTransferPair(debit, candidate)
+            } ?: continue
+            val toAccountId = credit.resolveBankAccountId(bankAccounts) ?: continue
+            if (fromAccountId == toAccountId) continue
+
+            val from = bankAccounts.firstOrNull { it.id == fromAccountId } ?: continue
+            val to = bankAccounts.firstOrNull { it.id == toAccountId } ?: continue
+            val rawMessages = listOfNotNull(debit.rawMessage, credit.rawMessage)
+                .map { it.trim() }
+                .filter { it.isNotBlank() }
+            val smsLabel = listOfNotNull(debit.smsBankLabel, credit.smsBankLabel)
+                .distinct()
+                .joinToString(" -> ")
+                .ifBlank { null }
+            val transfer = LedgerTransaction(
+                id = 0,
+                name = "Transfer: ${from.name} to ${to.name}",
+                amount = debit.amount,
+                type = TransactionType.Transfer,
+                categoryId = transferCategoryId,
+                accountId = null,
+                timestampMillis = minOf(debit.timestampMillis, credit.timestampMillis),
+                isAutoDetected = debit.isAutoDetected || credit.isAutoDetected,
+                rawMessage = rawMessages.joinToString(PAIRED_TRANSFER_SMS_DELIMITER),
+                smsBankLabel = smsLabel,
+                excludeFromSummary = true,
+                isCreditCardTransaction = false,
+                fromAccountId = fromAccountId,
+                toAccountId = toAccountId
+            )
+
+            dao.deleteTransaction(debit.id)
+            dao.deleteTransaction(credit.id)
+            dao.saveTransaction(transfer.toEntity(id = 0))
+            used += debit.id
+            used += credit.id
+        }
+    }
+
+    private suspend fun normalizeTransferCategories(transferCategoryId: Long) {
+        dao.getTransactions().forEach { entity ->
+            val tx = entity.toModel()
+            if (tx.type == TransactionType.Transfer && tx.categoryId != transferCategoryId) {
+                dao.saveTransaction(tx.copy(categoryId = transferCategoryId, excludeFromSummary = true).toEntity(tx.id))
+            }
+        }
+        dao.getDrafts().forEach { entity ->
+            val draft = entity.toModel()
+            if (draft.type == TransactionType.Transfer && draft.suggestedCategoryId != transferCategoryId) {
+                dao.saveDraft(draft.copy(suggestedCategoryId = transferCategoryId).toEntity(draft.id))
+            }
+        }
+    }
+
     suspend fun exportData(): String {
         val data = AppBackupData(
             settings = dao.getSettings(),
@@ -159,6 +249,22 @@ class FinanceRepository(private val dao: FinanceDao) {
         DefaultCategories.items.forEach { category ->
             if (category.isInvestmentCategoryName()) {
                 consolidateInvestmentCategory(existing, category)
+                return@forEach
+            }
+
+            val existingDefault = existing.firstOrNull {
+                it.isDefault && it.matchesDefaultCategory(category)
+            }
+            if (existingDefault != null) {
+                val updated = existingDefault.copy(
+                    name = category.name,
+                    iconKey = category.iconKey,
+                    colorHex = category.colorHex
+                )
+                if (updated != existingDefault) {
+                    dao.saveCategory(updated)
+                    existing[existing.indexOf(existingDefault)] = updated
+                }
                 return@forEach
             }
 
@@ -223,8 +329,64 @@ class FinanceRepository(private val dao: FinanceDao) {
         return name == "investment" || name == "investments"
     }
 
+    private fun List<CategoryItem>.transferCategoryId(): Long {
+        return firstOrNull { category ->
+            category.name.equals("Transfer", ignoreCase = true) ||
+                category.iconKey.equals("transfer", ignoreCase = true)
+        }?.id ?: firstOrNull { it.name == "Uncategorized" }?.id ?: 0L
+    }
+
     private fun CategoryEntity.matchesDefaultCategory(category: CategoryItem): Boolean {
         return name.equals(category.name, ignoreCase = true) ||
             iconKey.equals(category.iconKey, ignoreCase = true)
+    }
+
+    private fun LedgerTransaction.isLegacyBankTransferDebitCandidate(): Boolean {
+        return type == TransactionType.Expense &&
+            amount > 0.0 &&
+            !isCreditCardTransaction &&
+            fromAccountId == null &&
+            toAccountId == null
+    }
+
+    private fun LedgerTransaction.isLegacyBankTransferCreditCandidate(): Boolean {
+        return type == TransactionType.Income &&
+            amount > 0.0 &&
+            !isCreditCardTransaction &&
+            fromAccountId == null &&
+            toAccountId == null
+    }
+
+    private fun LedgerTransaction.resolveBankAccountId(accounts: List<BankAccount>): Long? {
+        accountId?.let { existing ->
+            if (accounts.any { it.id == existing }) return existing
+        }
+        val parsedLabel = rawMessage?.let { TransactionMessageParser.parse(it, timestampMillis)?.bankName }
+        return SmsBankKeys.resolveAccountId(parsedLabel ?: smsBankLabel, accounts)
+    }
+
+    private fun looksLikeLegacyTransferPair(debit: LedgerTransaction, credit: LedgerTransaction): Boolean {
+        val combined = "${debit.rawMessage.orEmpty()} ${credit.rawMessage.orEmpty()}".lowercase()
+        return listOf(
+            "transfer",
+            "neft",
+            "rtgs",
+            "imps",
+            "upi",
+            "utr",
+            "own account",
+            "own a/c",
+            "self",
+            "credited to",
+            "debited from"
+        ).any { it in combined }
+    }
+
+    private fun sameAmount(a: Double, b: Double): Boolean = abs(a - b) <= AMOUNT_EPSILON
+
+    private companion object {
+        const val PAIRED_TRANSFER_SMS_DELIMITER = "\n--- paired transfer sms ---\n"
+        const val TRANSFER_PAIR_WINDOW_MS = 8 * 60 * 1000L
+        const val AMOUNT_EPSILON = 0.02
     }
 }

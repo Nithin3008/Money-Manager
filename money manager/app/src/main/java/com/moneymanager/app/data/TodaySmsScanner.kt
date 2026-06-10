@@ -24,6 +24,10 @@ data class SmsScanProgress(
 )
 
 class TodaySmsScanner(private val context: Context) {
+    private companion object {
+        const val MAX_LOCAL_LLM_MESSAGES_PER_SCAN = 30
+    }
+
     fun scanToday(
         categories: List<LocalLlmCategoryOption> = emptyList(),
         useLocalLlm: Boolean = false,
@@ -92,19 +96,25 @@ class TodaySmsScanner(private val context: Context) {
 
         val total = rows.size
         onProgress(SmsScanProgress(processed = 0, total = total))
+        var localLlmMessagesUsed = 0
         rows.forEachIndexed { index, row ->
+            val useLocalLlmForRow = useLocalLlm &&
+                TransactionMessageParser.localLlmInterpreter != null &&
+                localLlmMessagesUsed < MAX_LOCAL_LLM_MESSAGES_PER_SCAN &&
+                TransactionMessageParser.shouldUseLocalLlmForMessage(row.body)
+            if (useLocalLlmForRow) localLlmMessagesUsed += 1
             TransactionMessageParser.parse(
                 message = row.body,
                 transactionTimestampMillis = row.timestampMillis,
                 sender = row.sender,
                 categories = categories,
-                useLocalLlm = useLocalLlm
+                useLocalLlm = useLocalLlmForRow
             )?.let(messages::add)
             val processed = index + 1
             if (processed == total || processed % 2 == 0) {
                 onProgress(SmsScanProgress(processed = processed, total = total))
             }
-            if (useLocalLlm && TransactionMessageParser.localLlmInterpreter != null) {
+            if (useLocalLlmForRow) {
                 Thread.sleep(150L)
             } else if (processed % 4 == 0) {
                 Thread.yield()
@@ -259,6 +269,7 @@ class TodaySmsScanner(private val context: Context) {
             SmsTransactionNormalizer.isCreditCardStatementArtifact(message) -> "credit_card_statement"
             SmsTransactionNormalizer.isCreditCardDueReminder(message) -> "credit_card_due_reminder"
             SmsTransactionNormalizer.isCreditCardSettlementArtifact(message) -> "credit_card_settlement"
+            SmsTransactionNormalizer.isFailedTransactionArtifact(message) -> "failed_transaction"
             parsedType != null && SmsTransactionNormalizer.isCreditCardRepaymentArtifact(message, parsedType) -> "credit_card_repayment"
             else -> ""
         }

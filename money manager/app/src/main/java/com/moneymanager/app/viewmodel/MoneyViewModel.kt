@@ -19,6 +19,7 @@ import com.moneymanager.app.data.SmsScanProgress
 import com.moneymanager.app.data.SmsTransactionNormalizer
 import com.moneymanager.app.data.TodaySmsScanner
 import com.moneymanager.app.data.TransactionMessageParser
+import com.moneymanager.app.model.AccountType
 import com.moneymanager.app.model.BankAccount
 import com.moneymanager.app.model.BudgetPlan
 import com.moneymanager.app.model.MessageScanRange
@@ -30,6 +31,7 @@ import com.moneymanager.app.model.ActivityDateFilter
 import com.moneymanager.app.model.FinanceUiState
 import com.moneymanager.app.model.LedgerTransaction
 import com.moneymanager.app.model.MoneyIcons
+import com.moneymanager.app.model.RegistrationAccountInput
 import com.moneymanager.app.model.ScreenTab
 import com.moneymanager.app.model.ThemeMode
 import com.moneymanager.app.model.TransactionType
@@ -47,7 +49,8 @@ import java.time.YearMonth
 
 class MoneyViewModel(application: Application) : AndroidViewModel(application) {
     private companion object {
-        const val OFFLINE_LLM_RUNTIME_ENABLED = false
+        const val OFFLINE_LLM_RUNTIME_ENABLED = true
+        const val PAIRED_TRANSFER_SMS_DELIMITER = "\n--- paired transfer sms ---\n"
     }
 
     private val repository = FinanceRepository(FinanceDatabase.get(application).dao())
@@ -68,24 +71,38 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
 
     fun completeRegistration(
         name: String,
-        accounts: List<Pair<String, Double>>,
+        accounts: List<RegistrationAccountInput>,
         defaultAccountIndex: Int,
         offlineLlmParsingOptIn: Boolean
     ) {
         viewModelScope.launch {
-            val accountIds = accounts
-                .filter { it.first.isNotBlank() && it.second >= 0.0 }
-                .map { repository.addAccount(it.first.trim(), it.second) }
-            val defaultId = accountIds.getOrNull(defaultAccountIndex.coerceIn(0, (accountIds.size - 1).coerceAtLeast(0)))
-                ?: accountIds.firstOrNull()
+            val accountIdsWithIndexAndType = accounts
+                .mapIndexedNotNull { index, account ->
+                    if (account.name.isBlank() || account.balance < 0.0) return@mapIndexedNotNull null
+                    val id = repository.addAccount(
+                        name = account.name.trim(),
+                        balance = account.balance,
+                        accountType = account.type
+                    )
+                    Triple(index, id, account.type)
+                }
+            val bankAccountIdsWithIndex = accountIdsWithIndexAndType
+                .filter { it.third == AccountType.Bank }
+                .map { it.first to it.second }
+            val defaultId = bankAccountIdsWithIndex.firstOrNull { it.first == defaultAccountIndex }?.second
+                ?: bankAccountIdsWithIndex.firstOrNull()?.second
             repository.persistUserSettings(
                 _uiState.value.copy(
                     userName = name.trim(),
                     bankSmsSetupCompleted = true,
                     offlineLlmParsingEnabled = offlineLlmParsingOptIn && OFFLINE_LLM_RUNTIME_ENABLED,
                     offlineLlmModelDownloaded = false,
-                    offlineLlmStatusMessage = if (offlineLlmParsingOptIn && !OFFLINE_LLM_RUNTIME_ENABLED) {
-                        "Offline LLM runtime is disabled in this build to prevent crashes. Rule parsing stays active."
+                    offlineLlmStatusMessage = if (offlineLlmParsingOptIn) {
+                        if (OFFLINE_LLM_RUNTIME_ENABLED) {
+                            "AI assist is enabled. Import or download the offline model to use it during manual scans."
+                        } else {
+                            "Offline LLM runtime is disabled in this build. Rule parsing stays active."
+                        }
                     } else {
                         _uiState.value.offlineLlmStatusMessage
                     },
@@ -234,10 +251,10 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
                 offlineLlmParsingEnabled = runtimeEnabled,
                 offlineLlmModelDownloaded = modelReady,
                 offlineLlmStatusMessage = when {
-                    enabled && !OFFLINE_LLM_RUNTIME_ENABLED -> "Offline LLM runtime is disabled in this build to prevent crashes. Rule parsing stays active."
-                    runtimeEnabled && modelReady -> "Offline LLM model is ready."
-                    runtimeEnabled -> "Download the offline model to turn LLM parsing on."
-                    else -> "Offline LLM parsing is off. Rule parsing stays active."
+                    enabled && !OFFLINE_LLM_RUNTIME_ENABLED -> "Offline LLM runtime is disabled in this build. Rule parsing stays active."
+                    runtimeEnabled && modelReady -> "AI assist is ready for manual scans."
+                    runtimeEnabled -> "AI assist is enabled. Import or download the offline model to use it during manual scans."
+                    else -> "AI assist is off. Rule parsing stays active."
                 }
             )
             repository.persistUserSettings(next)
@@ -264,9 +281,9 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
                     offlineLlmModelDownloaded = true,
                     isOfflineLlmModelDownloading = false,
                     offlineLlmStatusMessage = if (OFFLINE_LLM_RUNTIME_ENABLED) {
-                        "Offline model ready (${result.bytes / (1024 * 1024)} MB)."
+                        "Offline model ready (${result.bytes / (1024 * 1024)} MB). AI assist will run only for credit cards and possible transfers."
                     } else {
-                        "Offline model saved (${result.bytes / (1024 * 1024)} MB). LLM runtime is disabled in this build to prevent crashes."
+                        "Offline model saved (${result.bytes / (1024 * 1024)} MB). LLM runtime is disabled in this build."
                     }
                 )
                 repository.persistUserSettings(next)
@@ -304,9 +321,9 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
                     offlineLlmModelDownloaded = true,
                     isOfflineLlmModelDownloading = false,
                     offlineLlmStatusMessage = if (OFFLINE_LLM_RUNTIME_ENABLED) {
-                        "Offline model imported (${result.bytes / (1024 * 1024)} MB)."
+                        "Offline model imported (${result.bytes / (1024 * 1024)} MB). AI assist will run only for credit cards and possible transfers."
                     } else {
-                        "Offline model imported (${result.bytes / (1024 * 1024)} MB). LLM runtime is disabled in this build to prevent crashes."
+                        "Offline model imported (${result.bytes / (1024 * 1024)} MB). LLM runtime is disabled in this build."
                     }
                 )
                 repository.persistUserSettings(next)
@@ -359,7 +376,9 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setDefaultAccount(accountId: Long?) {
         viewModelScope.launch {
-            val validId = accountId?.takeIf { id -> _uiState.value.accounts.any { it.id == id } }
+            val validId = accountId?.takeIf { id ->
+                _uiState.value.accounts.any { it.id == id && it.type == AccountType.Bank }
+            }
             val next = _uiState.value.copy(
                 defaultAccountId = validId,
                 summarySelectedAccountIds = emptySet()
@@ -413,12 +432,24 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
     fun addBankAccount(name: String, balance: Double) {
         if (name.isBlank() || balance < 0.0) return
         viewModelScope.launch {
-            val id = repository.addAccount(name.trim(), balance)
+            val id = repository.addAccount(name.trim(), balance, accountType = AccountType.Bank)
             val hasDefault = _uiState.value.defaultAccountId != null
             if (!hasDefault) {
                 val next = _uiState.value.copy(defaultAccountId = id)
                 repository.persistUserSettings(next)
             }
+            reloadState()
+        }
+    }
+
+    fun addCreditCardAccount(name: String, outstanding: Double) {
+        if (name.isBlank() || outstanding < 0.0) return
+        viewModelScope.launch {
+            repository.addAccount(
+                name = name.trim(),
+                balance = outstanding,
+                accountType = AccountType.CreditCard
+            )
             reloadState()
         }
     }
@@ -535,38 +566,25 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
             val state = _uiState.value
             val from = state.accounts.firstOrNull { it.id == fromAccountId } ?: return@launch
             val to = state.accounts.firstOrNull { it.id == toAccountId } ?: return@launch
-            val uncategorizedId = state.categories.firstOrNull { it.name == "Uncategorized" }?.id
-                ?: state.categories.first().id
+            val transferCategoryId = state.transferCategoryId()
             val timestamp = System.currentTimeMillis()
             val label = name.trim().ifBlank { "Transfer" }
-            val expenseTransfer = LedgerTransaction(
-                    id = 0,
-                    name = "$label to ${to.name}",
-                    amount = amount,
-                    type = TransactionType.Expense,
-                    categoryId = uncategorizedId,
-                    accountId = from.id,
-                    timestampMillis = timestamp,
-                    rawMessage = "Manual transfer from ${from.name} to ${to.name}",
-                    excludeFromSummary = true,
-                    isCreditCardTransaction = false
-            )
-            val incomeTransfer = LedgerTransaction(
+            val transfer = LedgerTransaction(
                 id = 0,
-                name = "$label from ${from.name}",
+                name = "$label: ${from.name} to ${to.name}",
                 amount = amount,
-                type = TransactionType.Income,
-                categoryId = uncategorizedId,
-                accountId = to.id,
-                timestampMillis = timestamp + 1,
+                type = TransactionType.Transfer,
+                categoryId = transferCategoryId,
+                accountId = null,
+                timestampMillis = timestamp,
                 rawMessage = "Manual transfer from ${from.name} to ${to.name}",
                 excludeFromSummary = true,
-                isCreditCardTransaction = false
+                isCreditCardTransaction = false,
+                fromAccountId = from.id,
+                toAccountId = to.id
             )
-            repository.addTransaction(expenseTransfer)
-            repository.addTransaction(incomeTransfer)
-            applyTransactionBalanceMovement(expenseTransfer)
-            applyTransactionBalanceMovement(incomeTransfer)
+            repository.addTransaction(transfer)
+            applyTransactionBalanceMovement(transfer)
             reloadState { it.copy(showTransactionSheet = false) }
         }
     }
@@ -657,7 +675,7 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
             val state = _uiState.value
             if (state.defaultAccountId == id || id in state.summarySelectedAccountIds) {
                 val nextDefault = if (state.defaultAccountId == id) {
-                    state.accounts.firstOrNull { it.id != id }?.id
+                    state.bankAccounts.firstOrNull { it.id != id }?.id
                 } else {
                     state.defaultAccountId
                 }
@@ -693,7 +711,7 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
 
     fun scanCurrentActivityPeriod() {
         val state = _uiState.value
-        scanMessages(MessageScanRange.Custom, state.activityStartDate, state.activityEndDate, useLocalLlm = false)
+        scanMessages(MessageScanRange.Custom, state.activityStartDate, state.activityEndDate, useLocalLlm = true)
     }
 
     fun exportPreviousMonthSmsDebug() {
@@ -735,21 +753,27 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
         if (_uiState.value.isScanningMessages) return
 
         viewModelScope.launch {
-            val effectiveUseLocalLlm = useLocalLlm && OFFLINE_LLM_RUNTIME_ENABLED
-            if (!effectiveUseLocalLlm) closeOfflineLlmInterpreter()
+            val scanStartState = _uiState.value
+            val requestedLocalLlm = useLocalLlm && scanStartState.offlineLlmParsingEnabled
+            val modelReady = offlineLlmModelManager.isModelReady()
+            val canUseLocalLlm = requestedLocalLlm && OFFLINE_LLM_RUNTIME_ENABLED && modelReady
+            if (!canUseLocalLlm) closeOfflineLlmInterpreter()
             _uiState.update {
                 it.copy(
                     isScanningMessages = true,
                     scanStartedAtMillis = System.currentTimeMillis(),
                     scanProcessedCount = 0,
                     scanTotalCount = 0,
-                    scanStatusMessage = if (effectiveUseLocalLlm) {
-                        "Scanning messages with offline LLM..."
-                    } else {
-                        "Scanning messages..."
+                    scanStatusMessage = when {
+                        canUseLocalLlm -> "Scanning messages. AI assist is limited to credit cards and possible transfers."
+                        requestedLocalLlm && !modelReady -> "Scanning messages with rules. Import the offline model to enable AI assist."
+                        requestedLocalLlm && !OFFLINE_LLM_RUNTIME_ENABLED -> "Scanning messages with rules. AI runtime is unavailable in this build."
+                        else -> "Scanning messages..."
                     }
                 )
             }
+            if (canUseLocalLlm) configureOfflineLlmInterpreter(_uiState.value)
+            val effectiveUseLocalLlm = canUseLocalLlm && TransactionMessageParser.localLlmInterpreter != null
             val hasPermission = hasSmsPermission()
             val parsedMessages = if (hasPermission) {
                 val categoryOptions = localLlmCategoryOptions()
@@ -797,27 +821,66 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             val normalizedExisting = buildSet {
-                addAll(_uiState.value.transactions.mapNotNull { normalizedSmsRaw(it.rawMessage) })
-                addAll(_uiState.value.detectedDrafts.map { normalizedSmsRaw(it.rawMessage) })
+                addAll(_uiState.value.transactions.flatMap { normalizedSmsKeys(it.rawMessage) })
+                addAll(_uiState.value.detectedDrafts.flatMap { normalizedSmsKeys(it.rawMessage) })
             }.toMutableSet()
             val filteredParsed = SmsTransactionNormalizer.filterImportBatch(parsedMessages)
             val accountsSnapshot = _uiState.value.accounts.associateBy { it.id }.toMutableMap()
+            val plannedImports = SmsImportPlanner.plan(filteredParsed, accountsSnapshot.values.toList())
+            val uncategorizedId = _uiState.value.categories.firstOrNull { category ->
+                category.name == "Uncategorized"
+            }?.id ?: 0L
+            val transferCategoryId = _uiState.value.transferCategoryId()
             repository.cleanupCreditCardRepaymentArtifacts()
             var importedCount = 0
             var reviewCount = 0
             var autoMappedCount = 0
-            filteredParsed.forEach { msg ->
+            var transferCount = 0
+            plannedImports.forEach { planned ->
+                when (planned) {
+                    is PlannedSmsImport.Transfer -> {
+                        val rawKeys = planned.rawMessages.flatMap { normalizedSmsKeys(it) }
+                        if (rawKeys.isEmpty() || rawKeys.any { it in normalizedExisting }) return@forEach
+                        normalizedExisting.addAll(rawKeys)
+                        val transfer = detectedTransferTransaction(planned, transferCategoryId, accountsSnapshot)
+                        repository.addTransaction(transfer)
+                        applyTransactionBalanceMovement(transfer, accountsSnapshot)
+                        importedCount += 1
+                        transferCount += 1
+                        autoMappedCount += 2
+                        return@forEach
+                    }
+                    is PlannedSmsImport.TransferReview -> {
+                        val rawKeys = planned.rawMessages.flatMap { normalizedSmsKeys(it) }
+                        if (rawKeys.isEmpty() || rawKeys.any { it in normalizedExisting }) return@forEach
+                        normalizedExisting.addAll(rawKeys)
+                        repository.saveDraft(detectedTransferDraft(planned, transferCategoryId))
+                        reviewCount += 1
+                        autoMappedCount += listOfNotNull(planned.fromAccountId, planned.toAccountId).distinct().size
+                        return@forEach
+                    }
+                    is PlannedSmsImport.Message -> Unit
+                }
+
+                val msg = (planned as PlannedSmsImport.Message).message
                 if (msg.amount <= 0.0) return@forEach
-                val normRaw = normalizedSmsRaw(msg.rawMessage)
-                if (normRaw.isBlank() || normRaw in normalizedExisting) return@forEach
-                normalizedExisting.add(normRaw)
+                val rawKeys = normalizedSmsKeys(msg.rawMessage)
+                if (rawKeys.isEmpty() || rawKeys.any { it in normalizedExisting }) return@forEach
+                normalizedExisting.addAll(rawKeys)
                 val learnedCategoryId = inferCategoryId(msg)
-                val categoryId = msg.suggestedCategoryId ?: learnedCategoryId ?: _uiState.value.categories.firstOrNull { category ->
-                    category.name == "Uncategorized"
-                }?.id ?: 0L
+                val categoryId = if (msg.isCreditCardTransaction) {
+                    learnedCategoryId ?: msg.suggestedCategoryId ?: uncategorizedId
+                } else {
+                    msg.suggestedCategoryId ?: learnedCategoryId ?: uncategorizedId
+                }
                 val availableAccounts = accountsSnapshot.values.toList()
-                val accountId = SmsBankKeys.resolveAccountId(msg.bankName, availableAccounts)
-                    ?: availableAccounts.singleOrNull()?.id
+                val accountCandidates = if (msg.isCreditCardTransaction) {
+                    availableAccounts.filter { it.type == AccountType.CreditCard }
+                } else {
+                    availableAccounts.filter { it.type == AccountType.Bank }
+                }
+                val accountId = SmsBankKeys.resolveAccountId(msg.bankName, accountCandidates)
+                    ?: if (msg.isCreditCardTransaction) null else accountCandidates.singleOrNull()?.id
                 if (accountId != null) autoMappedCount += 1
                 if (msg.requiresUserReview || msg.categoryRequiresUserReview) {
                     repository.saveDraft(
@@ -848,7 +911,7 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
                     isAutoDetected = true,
                     rawMessage = msg.rawMessage,
                     smsBankLabel = msg.bankName,
-                    excludeFromSummary = msg.excludeFromSummary || msg.isCreditCardTransaction,
+                    excludeFromSummary = msg.excludeFromSummary,
                     isCreditCardTransaction = msg.isCreditCardTransaction
                 )
                 val transaction = normalizeInvestmentTransaction(draftTransaction)
@@ -860,11 +923,14 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
             val status = when {
                 parsedMessages.isEmpty() -> "No transaction messages found for this period."
                 filteredParsed.isEmpty() -> "Found ${parsedMessages.size} transaction-like SMS, but all were filtered as duplicates, reminders, or internal transfers."
-                importedCount == 0 && reviewCount == 0 -> "Found ${filteredParsed.size} transaction SMS, but no new transactions were imported."
+                plannedImports.isEmpty() -> "Found ${filteredParsed.size} transaction SMS, but no new transactions were imported."
+                importedCount == 0 && reviewCount == 0 -> "Found ${plannedImports.size} transaction SMS, but no new transactions were imported."
                 importedCount == 0 -> "Found $reviewCount transaction SMS that need your review."
-                reviewCount > 0 -> "Imported $importedCount transactions and sent $reviewCount for review. Auto-mapped $autoMappedCount to bank accounts."
-                importedCount == 1 -> "Imported 1 transaction. Auto-mapped $autoMappedCount to bank accounts."
-                else -> "Imported $importedCount transactions. Auto-mapped $autoMappedCount to bank accounts."
+                reviewCount > 0 && transferCount > 0 -> "Imported $importedCount transactions, including $transferCount transfers, and sent $reviewCount for review. Auto-mapped $autoMappedCount account links."
+                reviewCount > 0 -> "Imported $importedCount transactions and sent $reviewCount for review. Auto-mapped $autoMappedCount account links."
+                transferCount > 0 -> "Imported $importedCount transactions, including $transferCount transfers. Auto-mapped $autoMappedCount account links."
+                importedCount == 1 -> "Imported 1 transaction. Auto-mapped $autoMappedCount account links."
+                else -> "Imported $importedCount transactions. Auto-mapped $autoMappedCount account links."
             }
             val newestMonth = parsedMessages.maxByOrNull { it.transactionTimestampMillis }
                 ?.let {
@@ -888,7 +954,13 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun acceptDetectedTransaction(draftId: Long, categoryId: Long, type: TransactionType) {
+    fun acceptDetectedTransaction(
+        draftId: Long,
+        categoryId: Long,
+        type: TransactionType,
+        fromAccountId: Long? = null,
+        toAccountId: Long? = null
+    ) {
         viewModelScope.launch {
             val draft = _uiState.value.detectedDrafts.firstOrNull { it.id == draftId } ?: return@launch
             if (draft.amount <= 0.0) {
@@ -896,21 +968,56 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
                 reloadState()
                 return@launch
             }
+            if (type == TransactionType.Transfer) {
+                val resolvedFrom = fromAccountId ?: draft.fromAccountId
+                val resolvedTo = toAccountId ?: draft.toAccountId
+                if (resolvedFrom == null || resolvedTo == null || resolvedFrom == resolvedTo) return@launch
+                val accountsById = _uiState.value.accounts.associateBy { it.id }.toMutableMap()
+                val from = accountsById[resolvedFrom] ?: return@launch
+                val to = accountsById[resolvedTo] ?: return@launch
+                val transfer = LedgerTransaction(
+                    id = 0,
+                    name = "${draft.name}: ${from.name} to ${to.name}",
+                    amount = draft.amount,
+                    type = TransactionType.Transfer,
+                    categoryId = _uiState.value.transferCategoryId(),
+                    accountId = null,
+                    timestampMillis = draft.transactionTimestampMillis,
+                    isAutoDetected = true,
+                    rawMessage = draft.rawMessage,
+                    smsBankLabel = draft.bankName,
+                    excludeFromSummary = true,
+                    isCreditCardTransaction = false,
+                    fromAccountId = from.id,
+                    toAccountId = to.id
+                )
+                repository.addTransaction(transfer)
+                applyTransactionBalanceMovement(transfer, accountsById)
+                repository.deleteDraft(draftId)
+                reloadState()
+                return@launch
+            }
             val accountsSnapshot = _uiState.value.accounts
             val isCreditCardTransaction = SmsTransactionNormalizer.isCreditCardSpend(draft.rawMessage)
+            val isCreditCardBillPayment = SmsTransactionNormalizer.isCreditCardBillPaymentDebit(draft.rawMessage)
+            val accountCandidates = if (isCreditCardTransaction) {
+                accountsSnapshot.filter { it.type == AccountType.CreditCard }
+            } else {
+                accountsSnapshot.filter { it.type == AccountType.Bank }
+            }
             val draftTransaction = LedgerTransaction(
                 id = 0,
                 name = draft.counterparty,
                 amount = draft.amount,
                 type = type,
                 categoryId = categoryId,
-                accountId = SmsBankKeys.resolveAccountId(draft.bankName, accountsSnapshot)
-                    ?: accountsSnapshot.singleOrNull()?.id,
+                accountId = SmsBankKeys.resolveAccountId(draft.bankName, accountCandidates)
+                    ?: if (isCreditCardTransaction) null else accountCandidates.singleOrNull()?.id,
                 timestampMillis = draft.transactionTimestampMillis,
                 isAutoDetected = true,
                 rawMessage = draft.rawMessage,
                 smsBankLabel = draft.bankName,
-                excludeFromSummary = isCreditCardTransaction,
+                excludeFromSummary = isCreditCardBillPayment,
                 isCreditCardTransaction = isCreditCardTransaction
             )
             val transaction = normalizeInvestmentTransaction(draftTransaction)
@@ -972,23 +1079,11 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
         newTransaction: LedgerTransaction,
         accountsById: MutableMap<Long, BankAccount>? = null
     ) {
-        val oldAccountId = oldTransaction.accountId
-        val newAccountId = newTransaction.accountId
-        if (oldAccountId == null && newAccountId == null) return
-
-        if (oldAccountId != null && oldAccountId == newAccountId) {
-            val delta = storedBalanceMovement(newTransaction) - storedBalanceMovement(oldTransaction)
-            if (delta != 0.0) {
-                updateAccountBalance(oldAccountId, delta, accountsById)
-            }
-            return
+        balanceMovementsForTransaction(oldTransaction, accountsById).forEach { (accountId, delta) ->
+            updateAccountBalance(accountId, -delta, accountsById)
         }
-
-        oldAccountId?.let { accountId ->
-            updateAccountBalance(accountId, -storedBalanceMovement(oldTransaction), accountsById)
-        }
-        newAccountId?.let { accountId ->
-            updateAccountBalance(accountId, storedBalanceMovement(newTransaction), accountsById)
+        balanceMovementsForTransaction(newTransaction, accountsById).forEach { (accountId, delta) ->
+            updateAccountBalance(accountId, delta, accountsById)
         }
     }
 
@@ -1011,23 +1106,75 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
         reverse: Boolean,
         accountsById: MutableMap<Long, BankAccount>? = null
     ) {
-        val accountId = transaction.accountId ?: return
-        val movement = storedBalanceMovement(transaction)
-        if (movement == 0.0) return
-        val account = accountsById?.get(accountId)
-            ?: _uiState.value.accounts.firstOrNull { it.id == accountId }
-            ?: return
-        val delta = if (reverse) -movement else movement
-        val updated = account.copy(balance = account.balance + delta)
-        repository.updateAccount(updated)
-        accountsById?.put(accountId, updated)
+        balanceMovementsForTransaction(transaction, accountsById).forEach { (accountId, movement) ->
+            updateAccountBalance(accountId, if (reverse) -movement else movement, accountsById)
+        }
     }
 
-    private fun storedBalanceMovement(transaction: LedgerTransaction): Double {
-        return if (transaction.type == TransactionType.Income) {
-            transaction.amount
-        } else {
-            -transaction.amount
+    private fun balanceMovementsForTransaction(
+        transaction: LedgerTransaction,
+        accountsById: MutableMap<Long, BankAccount>? = null
+    ): List<Pair<Long, Double>> {
+        if (transaction.amount <= 0.0) return emptyList()
+        if (transaction.type == TransactionType.Transfer) {
+            return listOfNotNull(
+                transaction.fromAccountId?.let { id ->
+                    accountForBalanceMovement(id, accountsById)?.let { account ->
+                        id to outgoingBalanceMovement(account, transaction.amount)
+                    }
+                },
+                transaction.toAccountId?.let { id ->
+                    accountForBalanceMovement(id, accountsById)?.let { account ->
+                        id to incomingBalanceMovement(account, transaction.amount)
+                    }
+                }
+            )
+        }
+
+        val accountId = transaction.accountId ?: return emptyList()
+        val account = accountForBalanceMovement(accountId, accountsById) ?: return emptyList()
+        return listOf(accountId to singleAccountBalanceMovement(transaction, account))
+            .filter { it.second != 0.0 }
+    }
+
+    private fun accountForBalanceMovement(
+        accountId: Long,
+        accountsById: MutableMap<Long, BankAccount>?
+    ): BankAccount? {
+        return accountsById?.get(accountId)
+            ?: _uiState.value.accounts.firstOrNull { it.id == accountId }
+    }
+
+    private fun singleAccountBalanceMovement(
+        transaction: LedgerTransaction,
+        account: BankAccount
+    ): Double {
+        if (transaction.isCreditCardTransaction && account.type == AccountType.Bank) return 0.0
+        return when (account.type) {
+            AccountType.Bank -> if (transaction.type == TransactionType.Income) {
+                transaction.amount
+            } else {
+                -transaction.amount
+            }
+            AccountType.CreditCard -> if (transaction.type == TransactionType.Income) {
+                -transaction.amount
+            } else {
+                transaction.amount
+            }
+        }
+    }
+
+    private fun outgoingBalanceMovement(account: BankAccount, amount: Double): Double {
+        return when (account.type) {
+            AccountType.Bank -> -amount
+            AccountType.CreditCard -> amount
+        }
+    }
+
+    private fun incomingBalanceMovement(account: BankAccount, amount: Double): Double {
+        return when (account.type) {
+            AccountType.Bank -> amount
+            AccountType.CreditCard -> -amount
         }
     }
 
@@ -1046,7 +1193,6 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
 
         val wasInvestment = originalTransaction?.let { state.isInvestmentTransaction(it) } == true
         if (!wasInvestment) return transaction
-        if (transaction.isCreditCardTransaction) return transaction.copy(excludeFromSummary = true)
         return transaction.copy(excludeFromSummary = false)
     }
 
@@ -1097,7 +1243,7 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
             _uiState.update {
                 it.copy(
                     offlineLlmParsingEnabled = false,
-                    offlineLlmStatusMessage = "Offline LLM runtime is disabled in this build to prevent crashes. Rule parsing stays active."
+                    offlineLlmStatusMessage = "Offline LLM runtime is disabled in this build. Rule parsing stays active."
                 )
             }
             return
@@ -1121,7 +1267,7 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
             _uiState.update {
                 it.copy(
                     offlineLlmModelDownloaded = true,
-                    offlineLlmStatusMessage = "Offline LLM parsing is ready."
+                    offlineLlmStatusMessage = "AI assist is ready. It will only run for credit cards and possible transfers."
                 )
             }
         }.onFailure { error ->
@@ -1183,6 +1329,89 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
             categories = _uiState.value.categories,
             transactions = _uiState.value.transactions
         )
+    }
+
+    private fun detectedTransferTransaction(
+        plan: PlannedSmsImport.Transfer,
+        categoryId: Long,
+        accountsById: Map<Long, BankAccount>
+    ): LedgerTransaction {
+        val fromName = accountsById[plan.fromAccountId]?.name ?: "Account"
+        val toName = accountsById[plan.toAccountId]?.name ?: "Account"
+        val name = when (plan.source) {
+            SmsTransferSource.BankTransfer -> "Transfer: $fromName to $toName"
+            SmsTransferSource.CreditCardPayment -> "Credit card payment: $fromName to $toName"
+        }
+        val smsLabel = listOfNotNull(plan.debit.bankName, plan.credit?.bankName)
+            .distinct()
+            .joinToString(" -> ")
+            .ifBlank { null }
+        return LedgerTransaction(
+            id = 0,
+            name = name,
+            amount = plan.debit.amount,
+            type = TransactionType.Transfer,
+            categoryId = categoryId,
+            accountId = null,
+            timestampMillis = plan.timestampMillis,
+            isAutoDetected = true,
+            rawMessage = pairedTransferRawMessage(plan.rawMessages),
+            smsBankLabel = smsLabel,
+            excludeFromSummary = true,
+            isCreditCardTransaction = false,
+            fromAccountId = plan.fromAccountId,
+            toAccountId = plan.toAccountId
+        )
+    }
+
+    private fun detectedTransferDraft(
+        plan: PlannedSmsImport.TransferReview,
+        categoryId: Long
+    ): DetectedTransactionDraft {
+        val title = when (plan.source) {
+            SmsTransferSource.BankTransfer -> "Review bank transfer"
+            SmsTransferSource.CreditCardPayment -> "Review credit card payment"
+        }
+        val smsLabel = listOfNotNull(plan.debit.bankName, plan.credit?.bankName)
+            .distinct()
+            .joinToString(" -> ")
+            .ifBlank { "Transfer" }
+        return DetectedTransactionDraft(
+            id = 0,
+            bankName = smsLabel,
+            name = title,
+            amount = plan.debit.amount,
+            type = TransactionType.Transfer,
+            counterparty = title,
+            rawMessage = pairedTransferRawMessage(plan.rawMessages),
+            suggestedCategoryId = categoryId,
+            detectedAtMillis = System.currentTimeMillis(),
+            transactionTimestampMillis = plan.timestampMillis,
+            fromAccountId = plan.fromAccountId,
+            toAccountId = plan.toAccountId
+        )
+    }
+
+    private fun pairedTransferRawMessage(rawMessages: List<String>): String {
+        return rawMessages
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .joinToString(PAIRED_TRANSFER_SMS_DELIMITER)
+    }
+
+    private fun normalizedSmsKeys(rawMessage: String?): List<String> {
+        val raw = rawMessage.orEmpty()
+        if (raw.isBlank()) return emptyList()
+        return raw.split(PAIRED_TRANSFER_SMS_DELIMITER)
+            .map(::normalizedSmsRaw)
+            .filter { it.isNotBlank() }
+    }
+
+    private fun FinanceUiState.transferCategoryId(): Long {
+        return categories.firstOrNull { category ->
+            category.name.equals("Transfer", ignoreCase = true) ||
+                category.iconKey.equals("transfer", ignoreCase = true)
+        }?.id ?: categories.firstOrNull { it.name == "Uncategorized" }?.id ?: categories.first().id
     }
 
     private fun localLlmCategoryOptions(): List<LocalLlmCategoryOption> {

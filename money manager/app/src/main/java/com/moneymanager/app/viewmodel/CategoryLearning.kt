@@ -23,7 +23,7 @@ internal object CategoryLearning {
                     listOf("credit card", "bank card", "card xx", "card ").any { it in rawLower }
                 )
         ) {
-            categories.firstOrNull { it.name.equals("Credit Card", ignoreCase = true) }?.id?.let {
+            categories.firstOrNull { it.isCreditCardCategory() }?.id?.let {
                 return it
             }
         }
@@ -135,5 +135,13 @@ internal object CategoryLearning {
         if (tokens.isEmpty()) return ""
         if (tokens.size == 1 && tokens.first() in setOf("hdfc", "icici", "axis", "kotak", "indian", "sbi")) return ""
         return tokens.joinToString(" ")
+    }
+
+    private fun CategoryItem.isCreditCardCategory(): Boolean {
+        val normalizedName = name.trim().lowercase()
+        return normalizedName == "cc" ||
+            normalizedName == "credit card" ||
+            normalizedName == "credit cards" ||
+            iconKey.equals("credit_card", ignoreCase = true)
     }
 }

@@ -46,15 +46,54 @@ object SmsTransactionNormalizer {
     }
 
     fun isNonLedgerTransactionArtifact(rawMessage: String?, type: TransactionType): Boolean {
-        return isCreditCardRepaymentArtifact(rawMessage, type) ||
+        if (type == TransactionType.Transfer) return false
+        return isFailedTransactionArtifact(rawMessage) ||
+            isCreditCardRepaymentArtifact(rawMessage, type) ||
             isCreditCardSettlementArtifact(rawMessage) ||
             isCreditCardStatementArtifact(rawMessage) ||
             isCreditCardDueReminder(rawMessage)
     }
 
+    fun isFailedTransactionArtifact(rawMessage: String?): Boolean {
+        val raw = rawMessage?.lowercase().orEmpty()
+        if (raw.isBlank()) return false
+        val hasFailure = listOf(
+            "transaction failed",
+            "txn failed",
+            "payment failed",
+            "transfer failed",
+            "declined",
+            "unsuccessful",
+            "not successful",
+            "could not be completed",
+            "couldn't be completed",
+            "has failed",
+            "was failed"
+        ).any { it in raw }
+        val hasTransactionContext = listOf(
+            "transaction",
+            "txn",
+            "payment",
+            "transfer",
+            "upi",
+            "card",
+            "a/c",
+            "account"
+        ).any { it in raw }
+        return hasFailure && hasTransactionContext
+    }
+
     fun isCreditCardRepaymentArtifact(rawMessage: String?, type: TransactionType): Boolean {
         if (type != TransactionType.Income) return false
         return isCreditCardSettlementArtifact(rawMessage)
+    }
+
+    fun isCreditCardBillPaymentDebit(rawMessage: String?): Boolean {
+        val raw = rawMessage?.lowercase().orEmpty()
+        if (raw.isBlank()) return false
+        val hasDebit = listOf("debited", "debit", "paid", "payment made").any { it in raw }
+        val hasBankAccount = listOf("a/c", "account", "acct", "acc ").any { it in raw }
+        return hasDebit && hasBankAccount && hasCreditCardPaymentContext(raw)
     }
 
     fun isCreditCardSettlementArtifact(rawMessage: String?): Boolean {

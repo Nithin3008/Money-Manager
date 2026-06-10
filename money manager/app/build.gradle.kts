@@ -15,10 +15,26 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "1.0"
+        manifestPlaceholders["appLabel"] = "Money Manager"
+        manifestPlaceholders["transactionDetectionLabel"] = "Money Manager Transaction Detection"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
             useSupportLibrary = true
+        }
+    }
+
+    flavorDimensions += "environment"
+    productFlavors {
+        create("prod") {
+            dimension = "environment"
+        }
+        create("dev") {
+            dimension = "environment"
+            applicationIdSuffix = ".dev"
+            versionNameSuffix = "-dev"
+            manifestPlaceholders["appLabel"] = "Money Manager Dev"
+            manifestPlaceholders["transactionDetectionLabel"] = "Money Manager Dev Transaction Detection"
         }
     }
 

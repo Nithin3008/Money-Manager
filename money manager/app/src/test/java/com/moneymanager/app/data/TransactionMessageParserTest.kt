@@ -69,7 +69,7 @@ class TransactionMessageParserTest {
 
         try {
             val parsed = TransactionMessageParser.parse(
-                message = "HDFC Bank A/c xx1234 balance Rs.24,000 after Rs.250 debited at Neighborhood Store",
+                message = "HDFC credit card ending 1234 available limit Rs.24,000 after Rs.250 spent at Neighborhood Store",
                 transactionTimestampMillis = millis("2026-04-11"),
                 sender = "HDFCBK",
                 useLocalLlm = true
@@ -80,7 +80,8 @@ class TransactionMessageParserTest {
             assertEquals(250.0, parsed.amount, 0.001)
             assertEquals(TransactionType.Expense, parsed.type)
             assertEquals("Neighborhood Store", parsed.counterparty)
-            assertEquals("HDFC A/C 1234", parsed.bankName)
+            assertEquals("HDFC CARD 1234", parsed.bankName)
+            assertTrue(parsed.requiresUserReview)
         } finally {
             TransactionMessageParser.localLlmInterpreter = null
         }
@@ -102,7 +103,7 @@ class TransactionMessageParserTest {
 
         try {
             val parsed = TransactionMessageParser.parse(
-                message = "Rs.820 debited from HDFC A/c xx1234 at Apollo Pharmacy",
+                message = "Rs.820 spent using HDFC credit card ending 1234 at Apollo Pharmacy",
                 transactionTimestampMillis = millis("2026-04-11"),
                 sender = "HDFCBK",
                 categories = listOf(
@@ -116,6 +117,7 @@ class TransactionMessageParserTest {
             requireNotNull(parsed)
             assertEquals(9L, parsed.suggestedCategoryId)
             assertTrue(parsed.categoryRequiresUserReview)
+            assertTrue(parsed.requiresUserReview)
         } finally {
             TransactionMessageParser.localLlmInterpreter = null
         }

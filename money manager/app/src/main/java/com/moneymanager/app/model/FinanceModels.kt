@@ -40,7 +40,13 @@ private const val TRANSACTIONS_PER_PAGE = 10
 
 enum class TransactionType {
     Income,
-    Expense
+    Expense,
+    Transfer
+}
+
+enum class AccountType(val label: String) {
+    Bank("Bank"),
+    CreditCard("Credit Card")
 }
 
 enum class MessageScanRange(val label: String) {
@@ -126,7 +132,14 @@ data class BankAccount(
     val id: Long,
     val name: String,
     val balance: Double,
-    val smsMatchKey: String? = null
+    val smsMatchKey: String? = null,
+    val type: AccountType = AccountType.Bank
+)
+
+data class RegistrationAccountInput(
+    val name: String,
+    val balance: Double,
+    val type: AccountType
 )
 
 @Immutable
@@ -153,7 +166,9 @@ data class LedgerTransaction(
     val smsBankLabel: String? = null,
     val excludeFromSummary: Boolean = false,
     val isCreditCardTransaction: Boolean = false,
-    val description: String? = null
+    val description: String? = null,
+    val fromAccountId: Long? = null,
+    val toAccountId: Long? = null
 )
 
 @Immutable
@@ -176,7 +191,9 @@ data class DetectedTransactionDraft(
     val rawMessage: String,
     val suggestedCategoryId: Long?,
     val detectedAtMillis: Long,
-    val transactionTimestampMillis: Long
+    val transactionTimestampMillis: Long,
+    val fromAccountId: Long? = null,
+    val toAccountId: Long? = null
 )
 
 @Immutable
@@ -244,6 +261,18 @@ data class FinanceUiState(
 ) {
     val hasCompletedRegistration: Boolean = userName.isNotBlank()
 
+    val bankAccounts: List<BankAccount> by lazy(LazyThreadSafetyMode.NONE) {
+        accounts.filter { it.type == AccountType.Bank }
+    }
+
+    val creditCardAccounts: List<BankAccount> by lazy(LazyThreadSafetyMode.NONE) {
+        accounts.filter { it.type == AccountType.CreditCard }
+    }
+
+    val creditCardOutstanding: Double by lazy(LazyThreadSafetyMode.NONE) {
+        creditCardAccounts.sumOf { it.balance }
+    }
+
     val categoriesById: Map<Long, CategoryItem> by lazy(LazyThreadSafetyMode.NONE) {
         categories.associateBy { it.id }
     }
@@ -258,7 +287,7 @@ data class FinanceUiState(
     }
 
     val monthExpenseTransactions: List<LedgerTransaction> by lazy(LazyThreadSafetyMode.NONE) {
-        monthTransactions.filter { it.type == TransactionType.Expense }
+        monthTransactions.filter { it.type == TransactionType.Expense && !it.isCreditCardTransaction }
     }
 
     val monthIncomeTransactions: List<LedgerTransaction> by lazy(LazyThreadSafetyMode.NONE) {
@@ -322,6 +351,21 @@ data class FinanceUiState(
         investmentTotalFor(selectedMonth)
     }
 
+    fun creditCardSpendTotalFor(month: YearMonth): Double {
+        return transactions
+            .filter {
+                it.isCreditCardTransaction &&
+                    !it.excludeFromSummary &&
+                    it.type == TransactionType.Expense &&
+                    it.month() == month
+            }
+            .sumOf { it.amount }
+    }
+
+    val monthCreditCardSpend: Double by lazy(LazyThreadSafetyMode.NONE) {
+        creditCardSpendTotalFor(selectedMonth)
+    }
+
     /** Actual credits dated inside [selectedMonth] (calendar), for comparison when payroll shift moves income. */
     val calendarMonthIncomeTotal: Double by lazy(LazyThreadSafetyMode.NONE) {
         SummaryCalculations.calendarMonthIncomeTotal(this)
@@ -361,7 +405,7 @@ data class FinanceUiState(
     }
 
     val trackedBalance: Double by lazy(LazyThreadSafetyMode.NONE) {
-        accounts.sumOf { it.balance }
+        bankAccounts.sumOf { it.balance }
     }
 
     val activeBudgets: List<BudgetPlan> by lazy(LazyThreadSafetyMode.NONE) {
@@ -421,7 +465,9 @@ data class FinanceUiState(
 
 private fun CategoryItem.isInvestmentCategoryName(): Boolean {
     val normalized = name.trim().lowercase()
-    return normalized == "investment" || normalized == "investments"
+    return normalized == "investment" ||
+        normalized == "investments" ||
+        iconKey.equals("investment", ignoreCase = true)
 }
 
 object DefaultCategories {
@@ -432,7 +478,9 @@ object DefaultCategories {
         CategoryItem(3, "Shopping", "shopping", Icons.Rounded.ShoppingBag, true, "#FF4FB8"),
         CategoryItem(4, "Fuel", "fuel", Icons.Rounded.LocalGasStation, true, "#FF8A3D"),
         CategoryItem(5, "Rent", "rent", Icons.Rounded.Home, true, "#FF6B7A"),
-        CategoryItem(6, "Investment", "investment", Icons.AutoMirrored.Rounded.TrendingUp, true, "#8B5CF6")
+        CategoryItem(6, "Investment", "investment", Icons.AutoMirrored.Rounded.TrendingUp, true, "#8B5CF6"),
+        CategoryItem(7, "CC", "credit_card", Icons.Rounded.Payments, true, "#35D6E7"),
+        CategoryItem(8, "Transfer", "transfer", Icons.Rounded.AccountBalance, true, "#5BC0FF")
     )
 }
 
@@ -460,6 +508,8 @@ object MoneyIcons {
         CategoryIconOption("travel", "Travel", Icons.Rounded.Flight),
         CategoryIconOption("world", "International", Icons.Rounded.Public),
         CategoryIconOption("investment", "Investment", Icons.AutoMirrored.Rounded.TrendingUp),
+        CategoryIconOption("credit_card", "Credit Card", Icons.Rounded.Payments),
+        CategoryIconOption("transfer", "Transfer", Icons.Rounded.AccountBalance),
         CategoryIconOption("bills", "Bills", Icons.Rounded.Payments),
         CategoryIconOption("utilities", "Utilities", Icons.Rounded.ElectricBolt),
         CategoryIconOption("games", "Games", Icons.Rounded.SportsEsports),

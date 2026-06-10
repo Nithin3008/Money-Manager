@@ -103,19 +103,22 @@ object TransactionMessageParser {
         useLocalLlm: Boolean = false
     ): ParsedTransactionMessage? {
         val normalized = message.replace('\n', ' ').trim()
+        if (SmsTransactionNormalizer.isFailedTransactionArtifact(normalized)) return null
         if (SmsTransactionNormalizer.isCreditCardDueReminder(normalized)) return null
         if (SmsTransactionNormalizer.isCreditCardSettlementArtifact(normalized)) return null
         if (SmsTransactionNormalizer.isCreditCardStatementArtifact(normalized)) return null
         if (!looksLikeBankTransaction(normalized)) return null
 
         val amountCandidates = extractAmounts(normalized)
-        val llmInterpretation = if (useLocalLlm) {
+        val allowLocalLlm = useLocalLlm && shouldUseLocalLlmForMessage(normalized)
+        val llmInterpretation = if (allowLocalLlm) {
             localLlmInterpreter
                 ?.interpret(normalized, sender, categories)
                 ?.takeIf { it.confidence >= MIN_LOCAL_LLM_CONFIDENCE }
         } else {
             null
         }
+        val usedLocalLlm = llmInterpretation != null
         val suggestedCategoryId = llmInterpretation
             ?.suggestedCategoryId
             ?.takeIf { suggested -> categories.any { it.id == suggested } }
@@ -126,27 +129,34 @@ object TransactionMessageParser {
             ?: amountCandidates.firstOrNull()
             ?: return null
 
-        val detectedType = llmInterpretation?.type ?: detectTransactionType(normalized)
-        val requiresUserReview = detectedType == null
+        val ruleDetectedType = detectTransactionType(normalized)
+        val modelDetectedType = llmInterpretation?.type?.takeIf { it != TransactionType.Transfer }
+        val detectedType = ruleDetectedType ?: modelDetectedType
+        val requiresUserReview = detectedType == null || usedLocalLlm
         val type = detectedType ?: TransactionType.Expense
         val isCreditCardTransaction = llmInterpretation?.isCreditCardTransaction
             ?: SmsTransactionNormalizer.isCreditCardSpend(normalized)
+        val isCreditCardBillPayment = SmsTransactionNormalizer.isCreditCardBillPaymentDebit(normalized)
         val isInternalTransfer = llmInterpretation?.isInternalTransfer
-            ?: looksLikeInternalTransferMessage(normalized)
+            ?: (isCreditCardBillPayment || looksLikeInternalTransferMessage(normalized))
 
         val senderLabel = sender?.let(::bankNameFromSender)
         val baseBankName = llmInterpretation?.bankName?.cleanModelField(maxLength = 32)?.uppercase()
-            ?: bankRegex.find(normalized)
-            ?.value?.trim()?.uppercase()
             ?: senderLabel
+            ?: bankRegex.find(normalized)
+                ?.value?.trim()?.uppercase()
             ?: "Bank"
-        val accountHint = if (looksLikeCreditCard(normalized)) {
-            null
+        val isCardSpendAccount = isCreditCardTransaction && !isCreditCardBillPayment
+        val accountHint = if (isCardSpendAccount) {
+            llmInterpretation?.accountHint?.filter(Char::isDigit)?.takeLast(6)?.takeIf { it.length >= 3 }
+                ?: extractAccountHint(normalized)
         } else {
             llmInterpretation?.accountHint?.filter(Char::isDigit)?.takeLast(6)?.takeIf { it.length >= 3 }
                 ?: extractAccountHint(normalized)
         }
-        val bankName = accountHint?.let { "$baseBankName A/C $it" } ?: baseBankName
+        val bankName = accountHint?.let {
+            if (isCardSpendAccount) "$baseBankName CARD $it" else "$baseBankName A/C $it"
+        } ?: baseBankName
 
         val modelCounterparty = llmInterpretation?.counterparty
             ?.cleanModelField(maxLength = 40)
@@ -156,6 +166,7 @@ object TransactionMessageParser {
         // Try the semicolon pattern first, then fall back to to/at/for.
         var counterparty = (
             modelCounterparty
+                ?: if (isCreditCardBillPayment) "Credit Card Payment" else null
                 ?: iciciCounterparty
                 ?: cardSpentOnMerchantRegex.find(normalized)?.groupValues?.getOrNull(1)
                 ?: cardSpentAtMerchantRegex.find(normalized)?.groupValues?.getOrNull(1)
@@ -192,6 +203,17 @@ object TransactionMessageParser {
             suggestedCategoryId = suggestedCategoryId,
             categoryRequiresUserReview = suggestedCategoryId != null
         )
+    }
+
+    fun shouldUseLocalLlmForMessage(message: String): Boolean {
+        val normalized = message.replace('\n', ' ').trim()
+        if (normalized.isBlank()) return false
+        if (SmsTransactionNormalizer.isCreditCardDueReminder(normalized)) return false
+        if (SmsTransactionNormalizer.isCreditCardSettlementArtifact(normalized)) return false
+        if (SmsTransactionNormalizer.isCreditCardStatementArtifact(normalized)) return false
+        return SmsTransactionNormalizer.isCreditCardSpend(normalized) ||
+            SmsTransactionNormalizer.isCreditCardBillPaymentDebit(normalized) ||
+            looksLikePossibleOwnTransferForAi(normalized)
     }
 
     private val debitActionRegexes = listOf(
@@ -297,6 +319,18 @@ object TransactionMessageParser {
             .map { it.takeLast(4) }
             .distinct()
         return distinctAccountHints.size >= 2 && listOf("own", "self", "my account", "your account").any { it in lower }
+    }
+
+    private fun looksLikePossibleOwnTransferForAi(message: String): Boolean {
+        val lower = message.lowercase()
+        val hasTransferRail = listOf("transfer", "neft", "rtgs", "imps", "upi", "utr").any { it in lower }
+        if (!hasTransferRail) return false
+        if (looksLikeInternalTransferMessage(message)) return true
+        val distinctAccountHints = accountHintRegexes
+            .flatMap { regex -> regex.findAll(message).mapNotNull { it.groupValues.getOrNull(1) } }
+            .map { it.takeLast(4) }
+            .distinct()
+        return distinctAccountHints.size >= 1 && listOf("from", "to", "credited", "debited").any { it in lower }
     }
 
     private fun isIciciCreditCardBillDebit(message: String): Boolean {

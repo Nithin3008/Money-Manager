@@ -75,7 +75,11 @@ internal fun CategoryChoiceChip(
 
 @Composable
 internal fun TransactionTypeChip(type: TransactionType, selected: Boolean, onClick: () -> Unit) {
-    val accent = if (type == TransactionType.Income) MoneyGreen else com.moneymanager.app.ui.theme.LossRed
+    val accent = when (type) {
+        TransactionType.Income -> MoneyGreen
+        TransactionType.Expense -> com.moneymanager.app.ui.theme.LossRed
+        TransactionType.Transfer -> TextMuted
+    }
     val scale by animateFloatAsState(
         targetValue = if (selected) 1.03f else 1f,
         animationSpec = tween(220, easing = FastOutSlowInEasing),
@@ -168,16 +172,31 @@ internal fun TransactionRow(
     onSelect: (Long) -> Unit
 ) {
     val category = state.categoriesById[transaction.categoryId]
-    val color = categoryColor(category, transaction.type)
+    val isTransfer = transaction.type == TransactionType.Transfer
+    val isCardSpend = transaction.isCreditCardTransaction
+    val color = when {
+        isCardSpend -> OtherIncomeGold
+        isTransfer -> categoryColor(category, transaction.type)
+        else -> categoryColor(category, transaction.type)
+    }
+    val rowIcon = when {
+        isTransfer -> MoneyIcons.Account
+        isCardSpend -> MoneyIcons.resolveCategoryIcon("credit_card")
+        else -> category?.icon ?: MoneyIcons.Category
+    }
     val cardColor = if (isAmoledTheme()) Color(0xFF1A1A1A) else Color.White
     val neutralBorder = if (isAmoledTheme()) Color(0xFF323232) else Color(0xFFD8E5CC)
-    val borderColor = if (category?.name == "Uncategorized") {
+    val borderColor = if (!isTransfer && !isCardSpend && category?.name == "Uncategorized") {
         neutralBorder
     } else {
         color.copy(alpha = if (isAmoledTheme()) 0.52f else 0.34f)
     }
     val dateLabel = transaction.transactionDate().mediumDateLabel()
-    val categoryLabel = category?.name ?: "Set category"
+    val categoryLabel = when {
+        isTransfer -> "Transfer"
+        isCardSpend -> "CC"
+        else -> category?.name ?: "Set category"
+    }
 
     Card(
         modifier = Modifier
@@ -196,7 +215,7 @@ internal fun TransactionRow(
                 contentAlignment = Alignment.Center
             ) {
                 androidx.compose.material3.Icon(
-                    imageVector = category?.icon ?: MoneyIcons.Category,
+                    imageVector = rowIcon,
                     contentDescription = null,
                     tint = color,
                     modifier = Modifier.size(23.dp)
@@ -230,7 +249,7 @@ internal fun TransactionRow(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    if (transaction.isCreditCardTransaction) {
+                    if (transaction.isCreditCardTransaction && categoryLabel != "CC") {
                         Spacer(Modifier.width(6.dp))
                         Text(
                             "CC",

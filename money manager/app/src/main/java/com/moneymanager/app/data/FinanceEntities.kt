@@ -27,7 +27,8 @@ data class AccountEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val name: String,
     val balance: Double,
-    val smsMatchKey: String? = null
+    val smsMatchKey: String? = null,
+    val accountType: String = "Bank"
 )
 
 @Entity(tableName = "categories")
@@ -53,7 +54,9 @@ data class TransactionEntity(
     val smsBankLabel: String? = null,
     val excludeFromSummary: Boolean = false,
     val isCreditCardTransaction: Boolean = false,
-    val description: String? = null
+    val description: String? = null,
+    val fromAccountId: Long? = null,
+    val toAccountId: Long? = null
 )
 
 @Entity(tableName = "budgets")
@@ -76,5 +79,7 @@ data class DetectedDraftEntity(
     val rawMessage: String,
     val suggestedCategoryId: Long?,
     val detectedAtMillis: Long,
-    val transactionTimestampMillis: Long
+    val transactionTimestampMillis: Long,
+    val fromAccountId: Long? = null,
+    val toAccountId: Long? = null
 )

@@ -16,7 +16,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         BudgetEntity::class,
         DetectedDraftEntity::class
     ],
-    version = 13
+    version = 15
 )
 abstract class FinanceDatabase : RoomDatabase() {
     abstract fun dao(): FinanceDao
@@ -43,7 +43,9 @@ abstract class FinanceDatabase : RoomDatabase() {
                         Migration9To10,
                         Migration10To11,
                         Migration11To12,
-                        Migration12To13
+                        Migration12To13,
+                        Migration13To14,
+                        Migration14To15
                     )
                     .build()
                     .also { instance = it }
@@ -161,6 +163,28 @@ abstract class FinanceDatabase : RoomDatabase() {
                 db.execSQL(
                     "ALTER TABLE user_settings ADD COLUMN offlineLlmModelDownloaded INTEGER NOT NULL DEFAULT 0"
                 )
+            }
+        }
+
+        private val Migration13To14 = object : Migration(13, 14) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE accounts ADD COLUMN accountType TEXT NOT NULL DEFAULT 'Bank'")
+                db.execSQL("ALTER TABLE transactions ADD COLUMN fromAccountId INTEGER")
+                db.execSQL("ALTER TABLE transactions ADD COLUMN toAccountId INTEGER")
+                db.execSQL(
+                    """
+                    UPDATE transactions
+                    SET excludeFromSummary = 0
+                    WHERE isCreditCardTransaction = 1
+                    """.trimIndent()
+                )
+            }
+        }
+
+        private val Migration14To15 = object : Migration(14, 15) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE detected_drafts ADD COLUMN fromAccountId INTEGER")
+                db.execSQL("ALTER TABLE detected_drafts ADD COLUMN toAccountId INTEGER")
             }
         }
     }

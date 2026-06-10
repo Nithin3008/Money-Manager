@@ -5,7 +5,12 @@ internal object TransactionListCalculations {
         val activeIds = SummaryCalculations.activeAccountIds(state)
         return state.transactions.filter {
             it.transactionDate() == java.time.LocalDate.now() &&
-                (activeIds.isEmpty() || it.accountId in activeIds)
+                (
+                    activeIds.isEmpty() ||
+                        it.accountId in activeIds ||
+                        it.fromAccountId in activeIds ||
+                        it.toAccountId in activeIds
+                    )
         }
     }
 

@@ -27,6 +27,7 @@ import androidx.compose.material.icons.rounded.AccountBalance
 import androidx.compose.material.icons.rounded.Category
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Payments
 import androidx.compose.material.icons.rounded.PieChart
 import androidx.compose.material.icons.rounded.Sms
 import androidx.compose.material.icons.rounded.Wallet
@@ -71,7 +72,7 @@ import java.time.YearMonth
 
 internal fun LazyListScope.dashboardContent(
     state: FinanceUiState,
-    onAcceptDraft: (Long, Long, TransactionType) -> Unit,
+    onAcceptDraft: (Long, Long, TransactionType, Long?, Long?) -> Unit,
     onIgnoreDraft: (Long) -> Unit,
     onDeleteTransaction: (Long) -> Unit,
     onEditTransaction: (Long) -> Unit,
@@ -88,7 +89,8 @@ internal fun LazyListScope.dashboardContent(
             categories = state.categories.size,
             budgets = state.activeBudgets.size,
             transactions = state.transactions.size,
-            investment = state.money(state.investmentTotalFor(currentMonth))
+            investment = state.money(state.investmentTotalFor(currentMonth)),
+            creditCard = state.money(state.creditCardSpendTotalFor(currentMonth))
         )
     }
     if (state.todayDetectedDrafts.isNotEmpty()) {
@@ -144,8 +146,8 @@ internal fun LazyListScope.dashboardContent(
 @Composable
 private fun FintrackBalanceHero(state: FinanceUiState) {
     val currentMonth = YearMonth.now()
-    val currentAccount = state.accounts.firstOrNull { it.id == state.defaultAccountId }
-        ?: state.accounts.firstOrNull()
+    val currentAccount = state.bankAccounts.firstOrNull { it.id == state.defaultAccountId }
+        ?: state.bankAccounts.firstOrNull()
     val currentBalance = currentAccount?.balance ?: 0.0
     val balanceSource = currentAccount?.name ?: "No bank selected"
     val monthExpense = remember(state.transactions, state.categories, currentMonth) {
@@ -154,6 +156,7 @@ private fun FintrackBalanceHero(state: FinanceUiState) {
             .filter {
                 !state.isInvestmentTransaction(it) &&
                     !it.excludeFromSummary &&
+                    !it.isCreditCardTransaction &&
                     it.type == TransactionType.Expense &&
                     YearMonth.from(it.transactionDate()) == currentMonth
             }
@@ -198,7 +201,7 @@ private fun FintrackBalanceHero(state: FinanceUiState) {
             MiniFlowChart()
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 FintrackHeroPill("Bank balance", state.money(currentBalance), Modifier.weight(1f))
-                FintrackHeroPill("Monthly spend", state.money(monthExpense), Modifier.weight(1f))
+                FintrackHeroPill("Cash spend", state.money(monthExpense), Modifier.weight(1f))
             }
         }
     }
@@ -248,7 +251,8 @@ private fun FintrackQuickActions(
     categories: Int,
     budgets: Int,
     transactions: Int,
-    investment: String
+    investment: String,
+    creditCard: String
 ) {
     ElevatedPanel {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -259,9 +263,12 @@ private fun FintrackQuickActions(
             }
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 ActionTile(Icons.AutoMirrored.Rounded.TrendingUp, "Investment", investment, Modifier.weight(1f))
-                ActionTile(Icons.Rounded.PieChart, "Budgets", budgets.toString(), Modifier.weight(1f))
+                ActionTile(Icons.Rounded.Payments, "CC", creditCard, Modifier.weight(1f))
             }
-            ActionTile(Icons.Rounded.Category, "Categories", categories.toString(), Modifier.fillMaxWidth())
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                ActionTile(Icons.Rounded.PieChart, "Budgets", budgets.toString(), Modifier.weight(1f))
+                ActionTile(Icons.Rounded.Category, "Categories", categories.toString(), Modifier.weight(1f))
+            }
         }
     }
 }
@@ -287,6 +294,7 @@ private fun FintrackTodaySegments(state: FinanceUiState) {
             val transactions = state.todayTransactions.filter {
                 it.categoryId == category.id &&
                     !state.isInvestmentTransaction(it) &&
+                    !it.isCreditCardTransaction &&
                     !it.excludeFromSummary
             }
             MonthlyCategoryTotal(
@@ -299,7 +307,7 @@ private fun FintrackTodaySegments(state: FinanceUiState) {
 
     ElevatedPanel {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            SectionHeader("Spend categories", LocalDate.now().monthDayLabel())
+            SectionHeader("Cash categories", LocalDate.now().monthDayLabel())
             if (totals.isEmpty()) {
                 Text("No categorized movement yet.", color = TextDim, style = MaterialTheme.typography.bodyMedium)
             } else {
@@ -322,16 +330,21 @@ private fun FintrackTodaySegments(state: FinanceUiState) {
 private fun DetectedDraftRow(
     state: FinanceUiState,
     draft: DetectedTransactionDraft,
-    onAccept: (Long, Long, TransactionType) -> Unit,
+    onAccept: (Long, Long, TransactionType, Long?, Long?) -> Unit,
     onIgnore: (Long) -> Unit
 ) {
     var categoryId by remember { mutableStateOf(draft.suggestedCategoryId ?: state.categories.first().id) }
     var type by remember { mutableStateOf(draft.type) }
+    var fromAccountId by remember(draft.id, draft.fromAccountId) { mutableStateOf(draft.fromAccountId) }
+    var toAccountId by remember(draft.id, draft.toAccountId) { mutableStateOf(draft.toAccountId) }
     val dateLabel = draft.transactionDate().mediumDateLabel()
+    val isTransferReview = draft.type == TransactionType.Transfer
+    val canAccept = !isTransferReview ||
+        (fromAccountId != null && toAccountId != null && fromAccountId != toAccountId)
     ElevatedPanel {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                IconTile(Icons.Rounded.Sms, PrimaryBlue)
+                IconTile(if (isTransferReview) Icons.Rounded.AccountBalance else Icons.Rounded.Sms, PrimaryBlue)
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     Text(draft.bankName, color = TextPrimary, style = MaterialTheme.typography.titleMedium)
@@ -347,24 +360,70 @@ private fun DetectedDraftRow(
             Text(draft.counterparty, color = TextPrimary, style = MaterialTheme.typography.titleLarge)
             LabelText("TYPE")
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TransactionType.entries.forEach {
+                val typeChoices = if (isTransferReview) {
+                    listOf(TransactionType.Transfer)
+                } else {
+                    listOf(TransactionType.Income, TransactionType.Expense)
+                }
+                typeChoices.forEach {
                     TransactionTypeChip(it, selected = type == it, onClick = { type = it })
                 }
             }
-            LabelText("CATEGORY")
-            ChipRow {
-                state.categories.forEach { category ->
-                    CategoryChoiceChip(
-                        category = category,
-                        type = type,
-                        selected = categoryId == category.id,
-                        onClick = { categoryId = category.id }
+            if (isTransferReview) {
+                LabelText("FROM ACCOUNT")
+                ChipRow {
+                    state.accounts.forEach { account ->
+                        MoneyChip(
+                            label = account.name,
+                            selected = fromAccountId == account.id,
+                            onClick = {
+                                fromAccountId = account.id
+                                if (toAccountId == account.id) {
+                                    toAccountId = state.accounts.firstOrNull { it.id != account.id }?.id
+                                }
+                            }
+                        )
+                    }
+                }
+                LabelText("TO ACCOUNT")
+                ChipRow {
+                    state.accounts.forEach { account ->
+                        MoneyChip(
+                            label = account.name,
+                            selected = toAccountId == account.id,
+                            onClick = {
+                                toAccountId = account.id
+                                if (fromAccountId == account.id) {
+                                    fromAccountId = state.accounts.firstOrNull { it.id != account.id }?.id
+                                }
+                            }
+                        )
+                    }
+                }
+                if (!canAccept) {
+                    Text(
+                        "Choose two different accounts to approve this transfer.",
+                        color = TextDim,
+                        style = MaterialTheme.typography.bodySmall
                     )
+                }
+            } else {
+                LabelText("CATEGORY")
+                ChipRow {
+                    state.categories.forEach { category ->
+                        CategoryChoiceChip(
+                            category = category,
+                            type = type,
+                            selected = categoryId == category.id,
+                            onClick = { categoryId = category.id }
+                        )
+                    }
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Button(
-                    onClick = { onAccept(draft.id, categoryId, type) },
+                    onClick = { onAccept(draft.id, categoryId, type, fromAccountId, toAccountId) },
+                    enabled = canAccept,
                     modifier = Modifier.weight(1f).height(50.dp),
                     colors = primaryButtonColors(),
                     shape = RoundedCornerShape(12.dp)
