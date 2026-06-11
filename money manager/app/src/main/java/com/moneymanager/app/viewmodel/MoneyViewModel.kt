@@ -998,7 +998,8 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
                 return@launch
             }
             val accountsSnapshot = _uiState.value.accounts
-            val isCreditCardTransaction = SmsTransactionNormalizer.isCreditCardSpend(draft.rawMessage)
+            val isCreditCardTransaction = SmsTransactionNormalizer.isCreditCardSpend(draft.rawMessage) ||
+                SmsTransactionNormalizer.isCreditCardRefund(draft.rawMessage)
             val isCreditCardBillPayment = SmsTransactionNormalizer.isCreditCardBillPaymentDebit(draft.rawMessage)
             val accountCandidates = if (isCreditCardTransaction) {
                 accountsSnapshot.filter { it.type == AccountType.CreditCard }

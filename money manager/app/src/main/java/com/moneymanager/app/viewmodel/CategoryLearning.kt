@@ -14,15 +14,13 @@ internal object CategoryLearning {
     ): Long? {
         val uncategorizedId = categories.firstOrNull { it.name == "Uncategorized" }?.id ?: 0L
         val rawLower = msg.rawMessage.lowercase()
-        if (
-            msg.type == TransactionType.Expense &&
+        val looksLikeCreditCardExpense = msg.type == TransactionType.Expense &&
             (
-                msg.isCreditCardTransaction ||
-                    "infobil*inft" in rawLower ||
+                "infobil*inft" in rawLower ||
                     "info bil*inft" in rawLower ||
                     listOf("credit card", "bank card", "card xx", "card ").any { it in rawLower }
                 )
-        ) {
+        if (msg.isCreditCardTransaction || looksLikeCreditCardExpense) {
             categories.firstOrNull { it.isCreditCardCategory() }?.id?.let {
                 return it
             }

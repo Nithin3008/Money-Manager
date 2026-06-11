@@ -101,6 +101,11 @@ class LiteRtLmTransactionInterpreter(
             Use null when a field is not present. Never invent an amount.
             Pick the transaction amount, not the available balance.
             Type must be exactly Income or Expense.
+            Credit card refunds, reversals, chargebacks, and cashback are Income with isCreditCardTransaction true.
+            Credit card purchases/spends are Expense with isCreditCardTransaction true.
+            Credit card UPI messages like "Credit Card XX1234 debited ... for UPI-123-MERCHANT" are credit card spends; extract the merchant after the UPI reference.
+            Credit card bill payments from a bank account are not card spend; mark isInternalTransfer true.
+            For credit card purchases or refunds, choose the CC/Credit Card category id if it is in the allowed list.
             Internal transfers are own-account or self transfers between the user's bank accounts.
             If categories are provided, suggest exactly one category id from the allowed list.
             Do not invent categories. If Indian shop or merchant name is unclear, choose Uncategorized if present.

@@ -135,7 +135,10 @@ object TransactionMessageParser {
         val requiresUserReview = detectedType == null || usedLocalLlm
         val type = detectedType ?: TransactionType.Expense
         val isCreditCardTransaction = llmInterpretation?.isCreditCardTransaction
-            ?: SmsTransactionNormalizer.isCreditCardSpend(normalized)
+            ?: (
+                SmsTransactionNormalizer.isCreditCardSpend(normalized) ||
+                    SmsTransactionNormalizer.isCreditCardRefund(normalized)
+                )
         val isCreditCardBillPayment = SmsTransactionNormalizer.isCreditCardBillPaymentDebit(normalized)
         val isInternalTransfer = llmInterpretation?.isInternalTransfer
             ?: (isCreditCardBillPayment || looksLikeInternalTransferMessage(normalized))
@@ -180,12 +183,7 @@ object TransactionMessageParser {
                 ?: if (type == TransactionType.Income) "Bank Credit" else "Bank Transaction"
             ).trim()
 
-        // Avoid taking the amount as counterparty
-        if (counterparty.lowercase().startsWith("rs")) {
-             counterparty = if (type == TransactionType.Income) "Bank Credit" else "Bank Transaction"
-        }
-
-        counterparty = counterparty.take(28)
+        counterparty = cleanCounterparty(counterparty, type)
 
         return ParsedTransactionMessage(
             bankName = bankName,
@@ -209,6 +207,7 @@ object TransactionMessageParser {
         val normalized = message.replace('\n', ' ').trim()
         if (normalized.isBlank()) return false
         if (SmsTransactionNormalizer.isCreditCardDueReminder(normalized)) return false
+        if (SmsTransactionNormalizer.isCreditCardRefund(normalized)) return true
         if (SmsTransactionNormalizer.isCreditCardSettlementArtifact(normalized)) return false
         if (SmsTransactionNormalizer.isCreditCardStatementArtifact(normalized)) return false
         return SmsTransactionNormalizer.isCreditCardSpend(normalized) ||
@@ -253,7 +252,7 @@ object TransactionMessageParser {
                 listOf("received", "deposit", "inward").any { it in lower } -> TransactionType.Income
             listOf("neft", "rtgs", "imps").any { it in lower } &&
                 listOf("sent", "outward", "transfer to").any { it in lower } -> TransactionType.Expense
-            "refund" in lower || "cashback" in lower -> TransactionType.Income
+            listOf("refund", "refunded", "reversal", "reversed", "cashback", "cash back").any { it in lower } -> TransactionType.Income
             else -> null
         }
     }
@@ -359,6 +358,21 @@ object TransactionMessageParser {
             .replace(Regex("\\s+"), " ")
             .trim()
             .take(maxLength)
+    }
+
+    private fun cleanCounterparty(counterparty: String, type: TransactionType): String {
+        val cleaned = counterparty
+            .replace(Regex("""(?i)\s+(?:to\s+dispute|dispute)\b.*$"""), "")
+            .replace(Regex("""(?i)\s*/\s*sms\b.*$"""), "")
+            .replace(Regex("""(?i)\s+sms\s+block\b.*$"""), "")
+            .replace(Regex("""(?i)\s+call\s+\d{5,}.*$"""), "")
+            .replace(Regex("""(?i)\s+\b(?:ref|using)\b.*$"""), "")
+            .trim(' ', '.', ',', '-', '_', ';', ':')
+
+        if (cleaned.isBlank() || cleaned.lowercase().startsWith("rs")) {
+            return if (type == TransactionType.Income) "Bank Credit" else "Bank Transaction"
+        }
+        return cleaned.take(28)
     }
 
     private fun sameAmount(a: Double, b: Double): Boolean {

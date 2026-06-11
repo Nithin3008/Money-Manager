@@ -291,7 +291,7 @@ data class FinanceUiState(
     }
 
     val monthIncomeTransactions: List<LedgerTransaction> by lazy(LazyThreadSafetyMode.NONE) {
-        monthTransactions.filter { it.type == TransactionType.Income }
+        monthTransactions.filter { it.type == TransactionType.Income && !it.isCreditCardTransaction }
     }
 
     val monthSalaryIncome: Double by lazy(LazyThreadSafetyMode.NONE) {
@@ -352,7 +352,7 @@ data class FinanceUiState(
     }
 
     fun creditCardSpendTotalFor(month: YearMonth): Double {
-        return transactions
+        val spends = transactions
             .filter {
                 it.isCreditCardTransaction &&
                     !it.excludeFromSummary &&
@@ -360,6 +360,15 @@ data class FinanceUiState(
                     it.month() == month
             }
             .sumOf { it.amount }
+        val refunds = transactions
+            .filter {
+                it.isCreditCardTransaction &&
+                    !it.excludeFromSummary &&
+                    it.type == TransactionType.Income &&
+                    it.month() == month
+            }
+            .sumOf { it.amount }
+        return spends - refunds
     }
 
     val monthCreditCardSpend: Double by lazy(LazyThreadSafetyMode.NONE) {

@@ -224,6 +224,24 @@ class FinanceUiStateSummaryTest {
     }
 
     @Test
+    fun creditCardRefundNetsAgainstCardSpendAndStaysOutOfCashIncome() {
+        val state = state(
+            defaultAccountId = bankA.id,
+            accounts = listOf(bankA.copy(balance = 50_000.0), creditCard),
+            transactions = listOf(
+                tx(1, 4_000.0, TransactionType.Expense, "2026-04-10", creditCard.id, creditCard = true),
+                tx(2, 1_500.0, TransactionType.Income, "2026-04-11", creditCard.id, creditCard = true),
+                tx(3, 5_000.0, TransactionType.Income, "2026-04-12", bankA.id)
+            )
+        )
+
+        assertEquals(5_000.0, state.monthIncome, 0.001)
+        assertEquals(0.0, state.monthExpense, 0.001)
+        assertEquals(2_500.0, state.monthCreditCardSpend, 0.001)
+        assertEquals(5_000.0, state.calendarMonthNet, 0.001)
+    }
+
+    @Test
     fun creditCardBillPaymentTransferReducesCashMovementOnlyForBankSide() {
         val state = state(
             defaultAccountId = bankA.id,

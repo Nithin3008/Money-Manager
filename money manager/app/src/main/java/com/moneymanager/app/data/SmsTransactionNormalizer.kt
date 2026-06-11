@@ -98,6 +98,7 @@ object SmsTransactionNormalizer {
 
     fun isCreditCardSettlementArtifact(rawMessage: String?): Boolean {
         val raw = rawMessage?.lowercase().orEmpty()
+        if (isCreditCardRefund(raw)) return false
         if (isCreditCardSpend(raw)) return false
         val hasCard = listOf(
             "credit card",
@@ -128,6 +129,30 @@ object SmsTransactionNormalizer {
             "outstanding"
         ).any { it in raw }
         return hasCard && hasPayment
+    }
+
+    fun isCreditCardRefund(rawMessage: String?): Boolean {
+        val raw = rawMessage?.lowercase().orEmpty()
+        if (raw.isBlank()) return false
+        val hasCard = listOf(
+            "credit card",
+            "cardmember",
+            "card ending",
+            "card no",
+            "your card ending",
+            "cc "
+        ).any { it in raw } || Regex("""(?i)\b(?:card|cc)\s*(?:no\.?|number|ending|x+|[*]+)?\s*(?:x+|[*]+)?\d{3,6}\b""")
+            .containsMatchIn(raw)
+        val hasRefund = listOf(
+            "refund",
+            "refunded",
+            "reversal",
+            "reversed",
+            "chargeback",
+            "cashback",
+            "cash back"
+        ).any { it in raw }
+        return hasCard && hasRefund
     }
 
     fun isCreditCardStatementArtifact(rawMessage: String?): Boolean {
