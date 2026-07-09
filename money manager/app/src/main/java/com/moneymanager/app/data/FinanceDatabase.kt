@@ -16,7 +16,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         BudgetEntity::class,
         DetectedDraftEntity::class
     ],
-    version = 14
+    version = 15
 )
 abstract class FinanceDatabase : RoomDatabase() {
     abstract fun dao(): FinanceDao
@@ -44,7 +44,8 @@ abstract class FinanceDatabase : RoomDatabase() {
                         Migration10To11,
                         Migration11To12,
                         Migration12To13,
-                        Migration13To14
+                        Migration13To14,
+                        Migration14To15
                     )
                     .build()
                     .also { instance = it }
@@ -184,6 +185,12 @@ abstract class FinanceDatabase : RoomDatabase() {
 
                 db.addColumnIfMissing("detected_drafts", "transactionTimestampMillis", "INTEGER NOT NULL DEFAULT 0")
                 db.execSQL("UPDATE detected_drafts SET transactionTimestampMillis = detectedAtMillis WHERE transactionTimestampMillis = 0")
+            }
+        }
+
+        private val Migration14To15 = object : Migration(14, 15) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.addColumnIfMissing("user_settings", "onboardedAtMillis", "INTEGER NOT NULL DEFAULT 0")
             }
         }
 

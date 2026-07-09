@@ -25,6 +25,7 @@ internal fun FinanceUiState.toSettingsEntity(): UserSettingsEntity = UserSetting
     salaryCategoryId = salaryCategoryId,
     salaryKeywordsForUncategorized = salaryKeywordsForUncategorized,
     bankSmsSetupCompleted = bankSmsSetupCompleted,
+    onboardedAtMillis = onboardedAtMillis,
     defaultAccountId = defaultAccountId,
     summaryAccountFilterIdsCsv = summarySelectedAccountIds.joinToString(",")
 )
@@ -49,6 +50,7 @@ internal fun UserSettingsEntity.applyTo(current: FinanceUiState): FinanceUiState
         salaryCategoryId = salaryCategoryId,
         salaryKeywordsForUncategorized = salaryKeywordsForUncategorized,
         bankSmsSetupCompleted = bankSmsSetupCompleted,
+        onboardedAtMillis = onboardedAtMillis,
         defaultAccountId = defaultAccountId,
         summarySelectedAccountIds = summaryAccountFilterIdsCsv
             .split(",")

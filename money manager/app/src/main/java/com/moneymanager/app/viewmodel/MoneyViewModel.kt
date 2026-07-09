@@ -56,6 +56,7 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
                 _uiState.value.copy(
                     userName = name.trim(),
                     bankSmsSetupCompleted = true,
+                    onboardedAtMillis = System.currentTimeMillis(),
                     defaultAccountId = defaultId
                 )
             )
@@ -825,6 +826,9 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun storedBalanceMovement(transaction: LedgerTransaction): Double {
+        // Account balances were entered as-of onboarding, so transactions dated before that
+        // moment are already reflected in them and must not move the balance again.
+        if (transaction.timestampMillis < _uiState.value.onboardedAtMillis) return 0.0
         return if (transaction.type == TransactionType.Income) {
             transaction.amount
         } else {

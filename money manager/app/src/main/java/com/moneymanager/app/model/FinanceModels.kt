@@ -229,6 +229,8 @@ data class FinanceUiState(
     val salaryCategoryId: Long? = null,
     val salaryKeywordsForUncategorized: Boolean = true,
     val bankSmsSetupCompleted: Boolean = false,
+    /** When the user completed registration; transactions dated before this never move account balances. */
+    val onboardedAtMillis: Long = 0L,
     val defaultAccountId: Long? = null,
     /** Empty = all accounts on Summary; otherwise filter to these account ids. */
     val summarySelectedAccountIds: Set<Long> = emptySet(),

@@ -143,22 +143,10 @@ internal fun LazyListScope.dashboardContent(
 
 @Composable
 private fun FintrackBalanceHero(state: FinanceUiState) {
-    val currentMonth = YearMonth.now()
     val currentAccount = state.accounts.firstOrNull { it.id == state.defaultAccountId }
         ?: state.accounts.firstOrNull()
     val currentBalance = currentAccount?.balance ?: 0.0
     val balanceSource = currentAccount?.name ?: "No bank selected"
-    val monthExpense = remember(state.transactions, state.categories, currentMonth) {
-        state.transactions
-            .asSequence()
-            .filter {
-                !state.isInvestmentTransaction(it) &&
-                    !it.excludeFromSummary &&
-                    it.type == TransactionType.Expense &&
-                    YearMonth.from(it.transactionDate()) == currentMonth
-            }
-            .sumOf { it.amount }
-    }
     val onPrimary = primaryContentColor()
 
     Card(
@@ -196,24 +184,7 @@ private fun FintrackBalanceHero(state: FinanceUiState) {
                 }
             }
             MiniFlowChart()
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                FintrackHeroPill("Bank balance", state.money(currentBalance), Modifier.weight(1f))
-                FintrackHeroPill("Monthly spend", state.money(monthExpense), Modifier.weight(1f))
-            }
         }
-    }
-}
-
-@Composable
-private fun FintrackHeroPill(label: String, value: String, modifier: Modifier) {
-    val onPrimary = primaryContentColor()
-    Column(
-        modifier = modifier
-            .background(onPrimary.copy(alpha = 0.12f), RoundedCornerShape(12.dp))
-            .padding(12.dp)
-    ) {
-        Text(label, color = onPrimary.copy(alpha = 0.62f), style = MaterialTheme.typography.labelSmall)
-        Text(value, color = onPrimary, style = MaterialTheme.typography.titleMedium, maxLines = 1)
     }
 }
 
