@@ -3,6 +3,7 @@ package com.moneymanager.app.viewmodel
 import com.moneymanager.app.data.ParsedTransactionMessage
 import com.moneymanager.app.data.SmsBankKeys
 import com.moneymanager.app.data.SmsTransactionNormalizer
+import com.moneymanager.app.data.TransactionMessageParser
 import com.moneymanager.app.model.AccountType
 import com.moneymanager.app.model.BankAccount
 import com.moneymanager.app.model.TransactionType
@@ -57,6 +58,7 @@ internal enum class SmsTransferSource {
 
 internal object SmsImportPlanner {
     private const val PAIR_WINDOW_MS = 8 * 60 * 1000L
+    internal const val EXTENDED_PAIR_WINDOW_MS = 24 * 60 * 60 * 1000L
     private const val AMOUNT_EPSILON = 0.02
 
     fun plan(
@@ -85,8 +87,9 @@ internal object SmsImportPlanner {
             for (j in i + 1 until sorted.size) {
                 if (j in used) continue
                 val second = sorted[j]
-                if (second.transactionTimestampMillis - first.transactionTimestampMillis > PAIR_WINDOW_MS) break
-                val transfer = bankTransfer(first, second, bankAccounts) ?: continue
+                val gap = second.transactionTimestampMillis - first.transactionTimestampMillis
+                if (gap > EXTENDED_PAIR_WINDOW_MS) break
+                val transfer = bankTransfer(first, second, bankAccounts, gap) ?: continue
                 used += i
                 used += j
                 plannedTransfers += transfer
@@ -156,7 +159,8 @@ internal object SmsImportPlanner {
     private fun bankTransfer(
         first: ParsedTransactionMessage,
         second: ParsedTransactionMessage,
-        bankAccounts: List<BankAccount>
+        bankAccounts: List<BankAccount>,
+        gapMillis: Long
     ): PlannedSmsImport? {
         if (!sameAmount(first.amount, second.amount)) return null
         if (first.type == second.type) return null
@@ -166,11 +170,46 @@ internal object SmsImportPlanner {
         val credit = if (first.type == TransactionType.Income) first else second
         if (SmsTransactionNormalizer.isCreditCardBillPaymentDebit(debit.rawMessage)) return null
 
+        // Opposite legs on the same account are two unrelated transactions that happen
+        // to share an amount, never a transfer between the user's own accounts.
+        if (debit.accountHint != null &&
+            debit.accountHint == credit.accountHint &&
+            SmsBankKeys.bankRoot(debit.bankName) == SmsBankKeys.bankRoot(credit.bankName)
+        ) {
+            return null
+        }
+        // A self-marked leg must not consume a leg that names a real external party
+        // (e.g. income from a friend seconds before a same-amount transfer to the
+        // user's own other account).
+        if (debit.isInternalTransfer && !credit.isInternalTransfer &&
+            SmsTransactionNormalizer.namesExternalParty(credit)
+        ) {
+            return null
+        }
+        if (credit.isInternalTransfer && !debit.isInternalTransfer &&
+            SmsTransactionNormalizer.namesExternalParty(debit)
+        ) {
+            return null
+        }
+
         val fromAccountId = resolveKnownAccountId(debit.bankName, bankAccounts)
         val toAccountId = resolveKnownAccountId(credit.bankName, bankAccounts)
         val resolvesToTwoUserAccounts = fromAccountId != null &&
             toAccountId != null &&
             fromAccountId != toAccountId
+
+        // Bank SMS delivery can lag by minutes or hours between the two legs of a self
+        // transfer. Beyond the tight window, only pair when the legs are trustworthy:
+        // either a leg is positively self-marked (self-name UPI, RD/FD, self wording),
+        // or the debit and credit land on two different registered accounts and neither
+        // leg names an outside party. Anything else stays two individual transactions.
+        if (gapMillis > PAIR_WINDOW_MS) {
+            val identityMarked = debit.isInternalTransfer || credit.isInternalTransfer
+            val ownAccountsUnnamedLegs = resolvesToTwoUserAccounts &&
+                !SmsTransactionNormalizer.namesExternalParty(debit) &&
+                !SmsTransactionNormalizer.namesExternalParty(credit)
+            if (!identityMarked && !ownAccountsUnnamedLegs) return null
+        }
         if (!resolvesToTwoUserAccounts && !looksLikeOwnBankTransfer(debit, credit)) return null
 
         val transferDebit = debit.copy(isInternalTransfer = true, excludeFromSummary = true)
@@ -197,7 +236,7 @@ internal object SmsImportPlanner {
     private fun singleLegBankTransferReview(
         message: ParsedTransactionMessage,
         bankAccounts: List<BankAccount>
-    ): PlannedSmsImport.TransferReview? {
+    ): PlannedSmsImport? {
         if (message.amount <= 0.0) return null
         if (message.isCreditCardTransaction) return null
         if (SmsTransactionNormalizer.isCreditCardBillPaymentDebit(message.rawMessage)) return null
@@ -208,21 +247,53 @@ internal object SmsImportPlanner {
             isInternalTransfer = true,
             excludeFromSummary = true
         )
+        // A UPI leg naming the user's own registered name is certainly a self transfer.
+        // When only one other bank account exists the destination is unambiguous, so the
+        // transfer can complete even though the second bank's SMS never arrived (or is
+        // late — a later credit leg is absorbed into this row instead of re-imported).
+        val counterpartAccountId = if (
+            accountId != null &&
+            TransactionMessageParser.isSelfCounterparty(message.counterparty)
+        ) {
+            bankAccounts.filter { it.id != accountId }.singleOrNull()?.id
+        } else {
+            null
+        }
         return when (message.type) {
-            TransactionType.Expense -> PlannedSmsImport.TransferReview(
-                debit = transferMessage,
-                credit = null,
-                fromAccountId = accountId,
-                toAccountId = null,
-                source = SmsTransferSource.BankTransfer
-            )
-            TransactionType.Income -> PlannedSmsImport.TransferReview(
-                debit = transferMessage,
-                credit = null,
-                fromAccountId = null,
-                toAccountId = accountId,
-                source = SmsTransferSource.BankTransfer
-            )
+            TransactionType.Expense -> if (accountId != null && counterpartAccountId != null) {
+                PlannedSmsImport.Transfer(
+                    debit = transferMessage,
+                    credit = null,
+                    fromAccountId = accountId,
+                    toAccountId = counterpartAccountId,
+                    source = SmsTransferSource.BankTransfer
+                )
+            } else {
+                PlannedSmsImport.TransferReview(
+                    debit = transferMessage,
+                    credit = null,
+                    fromAccountId = accountId,
+                    toAccountId = null,
+                    source = SmsTransferSource.BankTransfer
+                )
+            }
+            TransactionType.Income -> if (accountId != null && counterpartAccountId != null) {
+                PlannedSmsImport.Transfer(
+                    debit = transferMessage,
+                    credit = null,
+                    fromAccountId = counterpartAccountId,
+                    toAccountId = accountId,
+                    source = SmsTransferSource.BankTransfer
+                )
+            } else {
+                PlannedSmsImport.TransferReview(
+                    debit = transferMessage,
+                    credit = null,
+                    fromAccountId = null,
+                    toAccountId = accountId,
+                    source = SmsTransferSource.BankTransfer
+                )
+            }
             TransactionType.Transfer -> null
         }
     }

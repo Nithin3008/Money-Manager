@@ -58,6 +58,13 @@ object TransactionMessageParser {
     @Volatile
     var localLlmInterpreter: LocalLlmTransactionInterpreter? = null
 
+    /**
+     * The user's bank-registered name (from the profile). UPI legs whose counterparty
+     * matches it are money moving between the user's own accounts, not income/expense.
+     */
+    @Volatile
+    var selfName: String? = null
+
     private val amountRegex = Regex(
         """(?i)(?:rs\.?|r\.|inr|rupees?|₹)\s*([\d,]+(?:\.\d{1,2})?)"""
     )
@@ -95,6 +102,21 @@ object TransactionMessageParser {
         """(?i)\bcredit card\b.+?\bfor\s+upi-[0-9]+-([a-z0-9 .&*_-]{2,40})"""
     )
 
+    // ICICI credit format: "Acct XX317 is credited with Rs 25.00 on 12-Jun-26 from DEVATHI N NITHI. UPI:..."
+    private val creditedFromRegex = Regex(
+        """(?i)\bcredited\s+with\s+(?:rs\.?|inr)\s*[\d,]+(?:\.\d{1,2})?\s+on\s+\S+\s+from\s+([a-z0-9 &_-][a-z0-9 .&_-]{1,39})"""
+    )
+
+    // Auto-debit into the user's own deposit: "... debited Rs. 6,000.00 ... InfoTo RD Ac no 7 ..."
+    private val ownDepositAutoDebitRegex = Regex(
+        """(?i)info\s*to\s+(?:rd|fd)\s+ac"""
+    )
+
+    // Outward forex remittance: "... debited Rs. 19,999.68 ... InfoNRS*USD206.72 ..."
+    private val foreignRemittanceRegex = Regex(
+        """(?i)info\s*nrs\*"""
+    )
+
     fun parse(
         message: String,
         transactionTimestampMillis: Long = System.currentTimeMillis(),
@@ -107,6 +129,7 @@ object TransactionMessageParser {
         if (SmsTransactionNormalizer.isCreditCardDueReminder(normalized)) return null
         if (SmsTransactionNormalizer.isCreditCardSettlementArtifact(normalized)) return null
         if (SmsTransactionNormalizer.isCreditCardStatementArtifact(normalized)) return null
+        if (SmsTransactionNormalizer.isPaymentAppCardConfirmation(normalized)) return null
         if (!looksLikeBankTransaction(normalized)) return null
 
         val amountCandidates = extractAmounts(normalized)
@@ -132,7 +155,8 @@ object TransactionMessageParser {
         val ruleDetectedType = detectTransactionType(normalized)
         val modelDetectedType = llmInterpretation?.type?.takeIf { it != TransactionType.Transfer }
         val detectedType = ruleDetectedType ?: modelDetectedType
-        val requiresUserReview = detectedType == null || usedLocalLlm
+        val isForeignRemittance = foreignRemittanceRegex.containsMatchIn(normalized)
+        val requiresUserReview = detectedType == null || usedLocalLlm || isForeignRemittance
         val type = detectedType ?: TransactionType.Expense
         val isCreditCardTransaction = llmInterpretation?.isCreditCardTransaction
             ?: (
@@ -140,8 +164,9 @@ object TransactionMessageParser {
                     SmsTransactionNormalizer.isCreditCardRefund(normalized)
                 )
         val isCreditCardBillPayment = SmsTransactionNormalizer.isCreditCardBillPaymentDebit(normalized)
-        val isInternalTransfer = llmInterpretation?.isInternalTransfer
-            ?: (isCreditCardBillPayment || looksLikeInternalTransferMessage(normalized))
+        val isOwnDepositDebit = ownDepositAutoDebitRegex.containsMatchIn(normalized)
+        val baseInternalTransfer = llmInterpretation?.isInternalTransfer
+            ?: (isCreditCardBillPayment || isOwnDepositDebit || looksLikeInternalTransferMessage(normalized))
 
         val senderLabel = sender?.let(::bankNameFromSender)
         val baseBankName = llmInterpretation?.bankName?.cleanModelField(maxLength = 32)?.uppercase()
@@ -171,19 +196,29 @@ object TransactionMessageParser {
             modelCounterparty
                 ?: if (isCreditCardBillPayment) "Credit Card Payment" else null
                 ?: iciciCounterparty
+                ?: if (isOwnDepositDebit) "RD/FD Deposit" else null
+                ?: if (isForeignRemittance) "Foreign Remittance" else null
                 ?: cardSpentOnMerchantRegex.find(normalized)?.groupValues?.getOrNull(1)
                 ?: cardSpentAtMerchantRegex.find(normalized)?.groupValues?.getOrNull(1)
                 ?: cardUpiMerchantRegex.find(normalized)?.groupValues?.getOrNull(1)
                 ?: merchantSemicolonRegex.find(normalized)?.groupValues?.getOrNull(1)
+                ?: creditedFromRegex.find(normalized)?.groupValues?.getOrNull(1)
+                    ?.substringBefore(".")
                 ?: merchantToRegex.find(normalized)?.groupValues?.getOrNull(1)
                     ?.substringBefore(" on ")
                     ?.substringBefore(" ref")
                     ?.substringBefore(" using")
-                ?: if (isInternalTransfer) "Internal Transfer" else null
+                ?: if (baseInternalTransfer) "Internal Transfer" else null
                 ?: if (type == TransactionType.Income) "Bank Credit" else "Bank Transaction"
             ).trim()
 
         counterparty = cleanCounterparty(counterparty, type)
+
+        val isSelfUpiLeg = !isCreditCardTransaction &&
+            !isCreditCardBillPayment &&
+            "upi" in normalized.lowercase() &&
+            isSelfCounterparty(counterparty)
+        val isInternalTransfer = baseInternalTransfer || isSelfUpiLeg
 
         return ParsedTransactionMessage(
             bankName = bankName,
@@ -207,6 +242,7 @@ object TransactionMessageParser {
         val normalized = message.replace('\n', ' ').trim()
         if (normalized.isBlank()) return false
         if (SmsTransactionNormalizer.isCreditCardDueReminder(normalized)) return false
+        if (SmsTransactionNormalizer.isPaymentAppCardConfirmation(normalized)) return false
         if (SmsTransactionNormalizer.isCreditCardRefund(normalized)) return true
         if (SmsTransactionNormalizer.isCreditCardSettlementArtifact(normalized)) return false
         if (SmsTransactionNormalizer.isCreditCardStatementArtifact(normalized)) return false
@@ -330,6 +366,73 @@ object TransactionMessageParser {
             .map { it.takeLast(4) }
             .distinct()
         return distinctAccountHints.size >= 1 && listOf("from", "to", "credited", "debited").any { it in lower }
+    }
+
+    /**
+     * Matches a UPI counterparty against [selfName], tolerating bank-side truncation
+     * ("NITHI" for "Nithin", "DEVATHI N NI" for "Devathi N Nithin") and one-character
+     * typo/OCR noise ("NIKHI" vs "NITHI").
+     */
+    fun isSelfCounterparty(counterparty: String?): Boolean {
+        val self = selfName?.trim().orEmpty()
+        if (self.length < 4 || counterparty.isNullOrBlank()) return false
+        val selfTokens = nameTokens(self)
+        val otherTokens = nameTokens(counterparty)
+        val anyTokenMatches = selfTokens.any { selfToken ->
+            otherTokens.any { nearlySameNameToken(it, selfToken) }
+        }
+        return anyTokenMatches || truncatedNameSequenceMatches(
+            smsTokens = nameTokens(counterparty, minLength = 1),
+            selfTokens = nameTokens(self, minLength = 1)
+        )
+    }
+
+    /**
+     * Banks cut the receiver name at an arbitrary length, so the last SMS token can be
+     * any prefix of the profile-name token ("NI" for "Nithin") as long as the earlier
+     * tokens line up and enough characters survived to be unambiguous.
+     */
+    private fun truncatedNameSequenceMatches(smsTokens: List<String>, selfTokens: List<String>): Boolean {
+        if (smsTokens.isEmpty() || smsTokens.size > selfTokens.size) return false
+        var matchedChars = 0
+        smsTokens.forEachIndexed { index, token ->
+            val selfToken = selfTokens[index]
+            val matches = if (index == smsTokens.lastIndex) {
+                selfToken.startsWith(token)
+            } else {
+                token == selfToken || (token.length >= 4 && nearlySameNameToken(token, selfToken))
+            }
+            if (!matches) return false
+            matchedChars += token.length
+        }
+        return matchedChars >= 6
+    }
+
+    private fun nameTokens(value: String, minLength: Int = 4): List<String> =
+        value.lowercase().split(Regex("[^a-z]+")).filter { it.length >= minLength }
+
+    private fun nearlySameNameToken(a: String, b: String): Boolean {
+        if (a == b) return true
+        val length = minOf(a.length, b.length)
+        val maxEdits = if (length >= 5) 1 else 0
+        return editDistanceAtMost(a, b, maxEdits) ||
+            editDistanceAtMost(a.take(length), b.take(length), maxEdits)
+    }
+
+    private fun editDistanceAtMost(a: String, b: String, maxEdits: Int): Boolean {
+        if (kotlin.math.abs(a.length - b.length) > maxEdits) return false
+        var previous = IntArray(b.length + 1) { it }
+        for (i in 1..a.length) {
+            val current = IntArray(b.length + 1)
+            current[0] = i
+            for (j in 1..b.length) {
+                val substitution = previous[j - 1] + if (a[i - 1] == b[j - 1]) 0 else 1
+                current[j] = minOf(previous[j] + 1, current[j - 1] + 1, substitution)
+            }
+            if (current.min() > maxEdits) return false
+            previous = current
+        }
+        return previous[b.length] <= maxEdits
     }
 
     private fun isIciciCreditCardBillDebit(message: String): Boolean {

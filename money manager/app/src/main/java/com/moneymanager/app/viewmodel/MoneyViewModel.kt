@@ -820,13 +820,34 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
                 return@launch
             }
 
+            val existingTransactions = _uiState.value.transactions
+            val existingDrafts = _uiState.value.detectedDrafts
             val normalizedExisting = buildSet {
-                addAll(_uiState.value.transactions.flatMap { normalizedSmsKeys(it.rawMessage) })
-                addAll(_uiState.value.detectedDrafts.flatMap { normalizedSmsKeys(it.rawMessage) })
+                addAll(existingTransactions.flatMap { normalizedSmsKeys(it.rawMessage) })
+                addAll(existingDrafts.flatMap { normalizedSmsKeys(it.rawMessage) })
             }.toMutableSet()
             val filteredParsed = SmsTransactionNormalizer.filterImportBatch(parsedMessages)
             val accountsSnapshot = _uiState.value.accounts.associateBy { it.id }.toMutableMap()
-            val plannedImports = SmsImportPlanner.plan(filteredParsed, accountsSnapshot.values.toList())
+            // Raw keys already locked into a Transfer row: never re-plan those legs.
+            val transferRawKeys = existingTransactions
+                .filter { it.type == TransactionType.Transfer }
+                .flatMap { normalizedSmsKeys(it.rawMessage) }
+                .toHashSet()
+            // Previously imported lone legs (and pending drafts) that a newly scanned
+            // opposite leg may complete into a transfer.
+            val mergeableTransactionByKey = existingTransactions
+                .filter { it.type != TransactionType.Transfer && it.isAutoDetected && !it.isCreditCardTransaction }
+                .flatMap { tx -> normalizedSmsKeys(tx.rawMessage).map { key -> key to tx } }
+                .toMap()
+            val draftByKey = existingDrafts
+                .flatMap { draft -> normalizedSmsKeys(draft.rawMessage).map { key -> key to draft } }
+                .toMap()
+            val plannerInput = filteredParsed + existingTransferLegCandidates(
+                batch = filteredParsed,
+                transactions = existingTransactions,
+                drafts = existingDrafts
+            )
+            val plannedImports = SmsImportPlanner.plan(plannerInput, accountsSnapshot.values.toList())
             val uncategorizedId = _uiState.value.categories.firstOrNull { category ->
                 category.name == "Uncategorized"
             }?.id ?: 0L
@@ -840,7 +861,24 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
                 when (planned) {
                     is PlannedSmsImport.Transfer -> {
                         val rawKeys = planned.rawMessages.flatMap { normalizedSmsKeys(it) }
-                        if (rawKeys.isEmpty() || rawKeys.any { it in normalizedExisting }) return@forEach
+                        if (rawKeys.isEmpty() || rawKeys.any { it in transferRawKeys }) return@forEach
+                        val legsToMerge = rawKeys.mapNotNull { mergeableTransactionByKey[it] }.distinctBy { it.id }
+                        val draftsToClear = rawKeys.mapNotNull { draftByKey[it] }.distinctBy { it.id }
+                        val alreadyKnownKeys = rawKeys.filter { it in normalizedExisting }
+                        val mergeCoveredKeys = buildSet {
+                            legsToMerge.forEach { addAll(normalizedSmsKeys(it.rawMessage)) }
+                            draftsToClear.forEach { addAll(normalizedSmsKeys(it.rawMessage)) }
+                        }
+                        // A leg that exists on a row we cannot merge (manual entry, edited row)
+                        // keeps the old skip behavior instead of being consumed.
+                        if (alreadyKnownKeys.any { it !in mergeCoveredKeys }) return@forEach
+                        val addsNewLeg = rawKeys.any { it !in normalizedExisting }
+                        if (!addsNewLeg && legsToMerge.isEmpty() && draftsToClear.isEmpty()) return@forEach
+                        legsToMerge.forEach { leg ->
+                            moveAccountBalanceForTransaction(leg, reverse = true, accountsById = accountsSnapshot)
+                            repository.deleteTransaction(leg.id)
+                        }
+                        draftsToClear.forEach { repository.deleteDraft(it.id) }
                         normalizedExisting.addAll(rawKeys)
                         val transfer = detectedTransferTransaction(planned, transferCategoryId, accountsSnapshot)
                         repository.addTransaction(transfer)
@@ -852,7 +890,19 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
                     }
                     is PlannedSmsImport.TransferReview -> {
                         val rawKeys = planned.rawMessages.flatMap { normalizedSmsKeys(it) }
-                        if (rawKeys.isEmpty() || rawKeys.any { it in normalizedExisting }) return@forEach
+                        if (rawKeys.isEmpty() || rawKeys.any { it in transferRawKeys }) return@forEach
+                        // Allow a newly arrived leg to upgrade a pending single-leg transfer
+                        // draft into a two-leg review; otherwise keep the old dedupe rules.
+                        val addsNewLeg = rawKeys.any { it !in normalizedExisting }
+                        if (!addsNewLeg) return@forEach
+                        val draftsToReplace = rawKeys.mapNotNull { draftByKey[it] }
+                            .distinctBy { it.id }
+                            .filter { it.type == TransactionType.Transfer }
+                        val replacedKeys = draftsToReplace
+                            .flatMap { normalizedSmsKeys(it.rawMessage) }
+                            .toSet()
+                        if (rawKeys.any { it in normalizedExisting && it !in replacedKeys }) return@forEach
+                        draftsToReplace.forEach { repository.deleteDraft(it.id) }
                         normalizedExisting.addAll(rawKeys)
                         repository.saveDraft(detectedTransferDraft(planned, transferCategoryId))
                         reviewCount += 1
@@ -866,6 +916,10 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
                 if (msg.amount <= 0.0) return@forEach
                 val rawKeys = normalizedSmsKeys(msg.rawMessage)
                 if (rawKeys.isEmpty() || rawKeys.any { it in normalizedExisting }) return@forEach
+                if (absorbLegIntoExistingTransfer(msg, existingTransactions)) {
+                    normalizedExisting.addAll(rawKeys)
+                    return@forEach
+                }
                 normalizedExisting.addAll(rawKeys)
                 val learnedCategoryId = inferCategoryId(msg)
                 val categoryId = if (msg.isCreditCardTransaction) {
@@ -941,6 +995,8 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 }
             repository.remapTransactionAccountsFromSmsLabels()
+            reloadState()
+            mergeExistingCrossAccountTransferPairs()
             reloadState {
                 it.copy(
                     isScanningMessages = false,
@@ -991,6 +1047,22 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
                     fromAccountId = from.id,
                     toAccountId = to.id
                 )
+                // Remove lone legs of this transfer that were already imported as
+                // individual income/expense rows, so accepting the draft cannot
+                // leave the amount double-counted.
+                val draftKeys = normalizedSmsKeys(draft.rawMessage).toSet()
+                if (draftKeys.isNotEmpty()) {
+                    _uiState.value.transactions
+                        .filter { it.type != TransactionType.Transfer && it.isAutoDetected && !it.isCreditCardTransaction }
+                        .filter { tx ->
+                            val keys = normalizedSmsKeys(tx.rawMessage)
+                            keys.isNotEmpty() && keys.all { it in draftKeys }
+                        }
+                        .forEach { leg ->
+                            moveAccountBalanceForTransaction(leg, reverse = true, accountsById = accountsById)
+                            repository.deleteTransaction(leg.id)
+                        }
+                }
                 repository.addTransaction(transfer)
                 applyTransactionBalanceMovement(transfer, accountsById)
                 repository.deleteDraft(draftId)
@@ -1041,12 +1113,220 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
             runCatching {
                 repository.cleanupCreditCardRepaymentArtifacts()
                 reloadState()
+                if (mergeExistingCrossAccountTransferPairs() > 0) {
+                    reloadState()
+                }
                 refreshDiscoveredSmsBanks()
             }
                 .onFailure {
                     _uiState.update { state -> state.copy(isAppInitializing = false) }
                 }
         }
+    }
+
+    /**
+     * Repairs cross-account transfers that were imported as two individual rows (an income
+     * and an expense) before pairing logic could catch them. Re-plans the raw SMSes of all
+     * auto-detected lone legs and collapses resolved pairs into a single Transfer row,
+     * reversing the old balance movements. Runs at startup and after scans; idempotent
+     * because merged raw SMS keys become part of a Transfer row and are skipped afterwards.
+     */
+    private suspend fun mergeExistingCrossAccountTransferPairs(): Int {
+        val state = _uiState.value
+        if (state.accounts.isEmpty()) return 0
+        val accountsSnapshot = state.accounts.associateBy { it.id }.toMutableMap()
+        val transferRawKeys = state.transactions
+            .filter { it.type == TransactionType.Transfer }
+            .flatMap { normalizedSmsKeys(it.rawMessage) }
+            .toHashSet()
+        var mergedCount = 0
+
+        // Rows that duplicate an SMS — or share its bank reference number — already
+        // recorded on a Transfer row are leftovers from before the transfer was
+        // recognized. The transfer accounts for both sides, so drop them.
+        state.transactions
+            .filter { tx ->
+                tx.type != TransactionType.Transfer &&
+                    tx.isAutoDetected &&
+                    !tx.isCreditCardTransaction &&
+                    normalizedSmsKeys(tx.rawMessage).any { it in transferRawKeys }
+            }
+            .forEach { duplicate ->
+                moveAccountBalanceForTransaction(duplicate, reverse = true, accountsById = accountsSnapshot)
+                repository.deleteTransaction(duplicate.id)
+                mergedCount += 1
+            }
+        state.detectedDrafts
+            .filter { draft -> normalizedSmsKeys(draft.rawMessage).any { it in transferRawKeys } }
+            .forEach { repository.deleteDraft(it.id) }
+
+        val mergeableRows = state.transactions.filter { tx ->
+            tx.type != TransactionType.Transfer &&
+                tx.isAutoDetected &&
+                !tx.isCreditCardTransaction &&
+                !tx.rawMessage.isNullOrBlank() &&
+                PAIRED_TRANSFER_SMS_DELIMITER !in tx.rawMessage.orEmpty() &&
+                normalizedSmsKeys(tx.rawMessage).none { it in transferRawKeys }
+        }
+        if (mergeableRows.isEmpty()) return mergedCount
+        val rowByKey = mergeableRows
+            .flatMap { tx -> normalizedSmsKeys(tx.rawMessage).map { key -> key to tx } }
+            .toMap()
+        val reparsed = mergeableRows.mapNotNull { tx ->
+            TransactionMessageParser.parse(tx.rawMessage.orEmpty(), tx.timestampMillis)
+        }
+        if (reparsed.isEmpty()) return mergedCount
+        val planned = SmsImportPlanner.plan(reparsed, accountsSnapshot.values.toList())
+        val transferCategoryId = state.transferCategoryId()
+        val consumedRowIds = mutableSetOf<Long>()
+
+        planned.forEach { plan ->
+            val (creditMsg, plannedFrom, plannedTo, source) = when (plan) {
+                is PlannedSmsImport.Transfer ->
+                    MergeCandidate(plan.credit, plan.fromAccountId, plan.toAccountId, plan.source)
+                is PlannedSmsImport.TransferReview ->
+                    MergeCandidate(plan.credit, plan.fromAccountId, plan.toAccountId, plan.source)
+                is PlannedSmsImport.Message -> return@forEach
+            }
+            val debitMsg = when (plan) {
+                is PlannedSmsImport.Transfer -> plan.debit
+                is PlannedSmsImport.TransferReview -> plan.debit
+                is PlannedSmsImport.Message -> return@forEach
+            }
+            val rawKeys = plan.rawMessages.flatMap { normalizedSmsKeys(it) }
+            val legs = rawKeys.mapNotNull { rowByKey[it] }.distinctBy { it.id }
+            // Every SMS in the plan must correspond to an existing imported row.
+            if (legs.isEmpty() || legs.size != plan.rawMessages.size) return@forEach
+            if (legs.any { it.id in consumedRowIds }) return@forEach
+            val debitRow = legs.firstOrNull { it.type == TransactionType.Expense }
+            val creditRow = legs.firstOrNull { it.type == TransactionType.Income }
+            // Single-leg plans (cc bill payments, self transfers whose second SMS never
+            // arrived) carry one row; paired plans must map to both rows.
+            val isSingleLegPlan = creditMsg == null
+            if (!isSingleLegPlan && (debitRow == null || creditRow == null)) return@forEach
+            // When SMS labels do not resolve to registered accounts, fall back to the
+            // accounts already assigned on the imported rows themselves.
+            val fromAccountId = plannedFrom ?: debitRow?.accountId
+            val toAccountId = plannedTo ?: creditRow?.accountId
+            if (fromAccountId == null || toAccountId == null || fromAccountId == toAccountId) return@forEach
+
+            legs.forEach { leg ->
+                moveAccountBalanceForTransaction(leg, reverse = true, accountsById = accountsSnapshot)
+                repository.deleteTransaction(leg.id)
+                consumedRowIds += leg.id
+            }
+            val transfer = detectedTransferTransaction(
+                plan = PlannedSmsImport.Transfer(
+                    debit = debitMsg,
+                    credit = creditMsg,
+                    fromAccountId = fromAccountId,
+                    toAccountId = toAccountId,
+                    source = source
+                ),
+                categoryId = transferCategoryId,
+                accountsById = accountsSnapshot
+            )
+            repository.addTransaction(transfer)
+            applyTransactionBalanceMovement(transfer, accountsSnapshot)
+            mergedCount += 1
+        }
+
+        // Absorb rows that are really the second leg of a Transfer created from a single
+        // SMS: the transfer already moved both balances, so the lone row double-counts
+        // its side. Remove the row and record its SMS on the transfer.
+        val transferRows = state.transactions.filter { it.type == TransactionType.Transfer }
+        val usedTransferIds = mutableSetOf<Long>()
+        mergeableRows.filter { it.id !in consumedRowIds }.forEach { row ->
+            val parsedRow = TransactionMessageParser.parse(row.rawMessage.orEmpty(), row.timestampMillis)
+                ?: return@forEach
+            val qualifies = parsedRow.isInternalTransfer ||
+                SmsTransactionNormalizer.isNamelessOwnAccountCredit(row.rawMessage)
+            if (!qualifies) return@forEach
+            val transfer = findSingleLegTransferForLeg(
+                amount = row.amount,
+                timestampMillis = row.timestampMillis,
+                legType = row.type,
+                legAccountId = row.accountId,
+                transfers = transferRows.filter { it.id !in usedTransferIds }
+            ) ?: return@forEach
+            usedTransferIds += transfer.id
+            moveAccountBalanceForTransaction(row, reverse = true, accountsById = accountsSnapshot)
+            repository.deleteTransaction(row.id)
+            consumedRowIds += row.id
+            repository.updateTransaction(
+                transfer.copy(
+                    rawMessage = pairedTransferRawMessage(
+                        listOf(transfer.rawMessage.orEmpty(), row.rawMessage.orEmpty())
+                    )
+                )
+            )
+            mergedCount += 1
+        }
+        return mergedCount
+    }
+
+    private data class MergeCandidate(
+        val credit: com.moneymanager.app.data.ParsedTransactionMessage?,
+        val fromAccountId: Long?,
+        val toAccountId: Long?,
+        val source: SmsTransferSource
+    )
+
+    /**
+     * Finds a Transfer row created from a single SMS leg that the given opposite leg
+     * belongs to (same amount, within the delivery-gap window, matching side account).
+     */
+    private fun findSingleLegTransferForLeg(
+        amount: Double,
+        timestampMillis: Long,
+        legType: TransactionType,
+        legAccountId: Long?,
+        transfers: List<LedgerTransaction>
+    ): LedgerTransaction? {
+        return transfers.firstOrNull { transfer ->
+            transfer.type == TransactionType.Transfer &&
+                !transfer.rawMessage.isNullOrBlank() &&
+                PAIRED_TRANSFER_SMS_DELIMITER !in transfer.rawMessage.orEmpty() &&
+                kotlin.math.abs(transfer.amount - amount) <= 0.02 &&
+                kotlin.math.abs(transfer.timestampMillis - timestampMillis) <= SmsImportPlanner.EXTENDED_PAIR_WINDOW_MS &&
+                when (legType) {
+                    TransactionType.Income -> legAccountId == null || transfer.toAccountId == legAccountId
+                    TransactionType.Expense -> legAccountId == null || transfer.fromAccountId == legAccountId
+                    TransactionType.Transfer -> false
+                }
+        }
+    }
+
+    /**
+     * A late-arriving second leg of a self transfer whose Transfer row already exists
+     * (created from the first leg alone) is recorded on that row instead of being
+     * imported as a separate income/expense.
+     */
+    private suspend fun absorbLegIntoExistingTransfer(
+        msg: com.moneymanager.app.data.ParsedTransactionMessage,
+        existingTransactions: List<LedgerTransaction>
+    ): Boolean {
+        if (msg.type == TransactionType.Transfer) return false
+        val qualifies = msg.isInternalTransfer ||
+            SmsTransactionNormalizer.isNamelessOwnAccountCredit(msg.rawMessage)
+        if (!qualifies) return false
+        val bankAccounts = _uiState.value.accounts.filter { it.type == AccountType.Bank }
+        val legAccountId = SmsBankKeys.resolveAccountId(msg.bankName, bankAccounts)
+        val transfer = findSingleLegTransferForLeg(
+            amount = msg.amount,
+            timestampMillis = msg.transactionTimestampMillis,
+            legType = msg.type,
+            legAccountId = legAccountId,
+            transfers = existingTransactions
+        ) ?: return false
+        repository.updateTransaction(
+            transfer.copy(
+                rawMessage = pairedTransferRawMessage(
+                    listOf(transfer.rawMessage.orEmpty(), msg.rawMessage)
+                )
+            )
+        )
+        return true
     }
 
     suspend fun getExportData(): String {
@@ -1229,6 +1509,7 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
             offlineLlmModelDownloaded = offlineLlmModelManager.isModelReady()
         )
         _uiState.value = transform(loaded)
+        TransactionMessageParser.selfName = _uiState.value.userName.takeIf { it.isNotBlank() }
     }
 
     private fun hasSmsPermission(): Boolean {
@@ -1259,7 +1540,8 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
             withContext(Dispatchers.Default) {
                 LiteRtLmTransactionInterpreter(
                     context = getApplication(),
-                    modelPath = offlineLlmModelManager.modelFile.absolutePath
+                    modelPath = offlineLlmModelManager.modelFile.absolutePath,
+                    selfName = state.userName.takeIf { it.isNotBlank() }
                 ).also { it.initialize() }
             }
         }.onSuccess { interpreter ->
@@ -1330,6 +1612,41 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
             categories = _uiState.value.categories,
             transactions = _uiState.value.transactions
         )
+    }
+
+    /**
+     * Re-parses previously imported lone legs (and pending drafts) near the scanned batch so the
+     * planner can pair them with a counterpart SMS that arrived after a delivery gap — the two
+     * legs of a cross-bank UPI self transfer often land minutes or hours apart, or in different
+     * scans entirely.
+     */
+    private fun existingTransferLegCandidates(
+        batch: List<com.moneymanager.app.data.ParsedTransactionMessage>,
+        transactions: List<LedgerTransaction>,
+        drafts: List<DetectedTransactionDraft>
+    ): List<com.moneymanager.app.data.ParsedTransactionMessage> {
+        if (batch.isEmpty()) return emptyList()
+        val batchKeys = batch.flatMap { normalizedSmsKeys(it.rawMessage) }.toHashSet()
+        val earliest = batch.minOf { it.transactionTimestampMillis } - SmsImportPlanner.EXTENDED_PAIR_WINDOW_MS
+        val latest = batch.maxOf { it.transactionTimestampMillis } + SmsImportPlanner.EXTENDED_PAIR_WINDOW_MS
+
+        fun reparse(rawMessage: String?, timestampMillis: Long): com.moneymanager.app.data.ParsedTransactionMessage? {
+            val raw = rawMessage.orEmpty()
+            if (raw.isBlank() || PAIRED_TRANSFER_SMS_DELIMITER in raw) return null
+            if (normalizedSmsKeys(raw).any { it in batchKeys }) return null
+            return TransactionMessageParser.parse(raw, timestampMillis)
+        }
+
+        val fromTransactions = transactions.asSequence()
+            .filter { it.type != TransactionType.Transfer && it.isAutoDetected && !it.isCreditCardTransaction }
+            .filter { it.timestampMillis in earliest..latest }
+            .mapNotNull { reparse(it.rawMessage, it.timestampMillis) }
+        val fromDrafts = drafts.asSequence()
+            .filter { it.transactionTimestampMillis in earliest..latest }
+            .mapNotNull { reparse(it.rawMessage, it.transactionTimestampMillis) }
+        return (fromTransactions + fromDrafts)
+            .distinctBy { normalizedSmsKeys(it.rawMessage) }
+            .toList()
     }
 
     private fun detectedTransferTransaction(
@@ -1404,8 +1721,17 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
         val raw = rawMessage.orEmpty()
         if (raw.isBlank()) return emptyList()
         return raw.split(PAIRED_TRANSFER_SMS_DELIMITER)
-            .map(::normalizedSmsRaw)
-            .filter { it.isNotBlank() }
+            .flatMap { part ->
+                val text = normalizedSmsRaw(part)
+                if (text.isBlank()) return@flatMap emptyList<String>()
+                // The bank reference number identifies the transaction across differently
+                // worded SMSes (and across both legs of a transfer), so it dedupes what
+                // exact-text matching cannot.
+                listOfNotNull(
+                    text,
+                    SmsTransactionNormalizer.transactionReference(part)?.let { "upiref:$it" }
+                )
+            }
     }
 
     private fun FinanceUiState.transferCategoryId(): Long {

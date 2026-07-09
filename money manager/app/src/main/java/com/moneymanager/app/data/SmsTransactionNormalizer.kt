@@ -9,6 +9,7 @@ import kotlin.math.abs
 object SmsTransactionNormalizer {
 
     private const val PAIR_WINDOW_MS = 8 * 60 * 1000L
+    private const val EXTENDED_PAIR_WINDOW_MS = 24 * 60 * 60 * 1000L
     private const val AMOUNT_EPSILON = 0.02
 
     fun filterImportBatch(messages: List<ParsedTransactionMessage>): List<ParsedTransactionMessage> {
@@ -24,14 +25,19 @@ object SmsTransactionNormalizer {
             for (j in i + 1 until sorted.size) {
                 if (j in droppedIndices) continue
                 val b = normalized[j]
-                if (b.transactionTimestampMillis - a.transactionTimestampMillis > PAIR_WINDOW_MS) break
+                val gap = b.transactionTimestampMillis - a.transactionTimestampMillis
+                if (gap > EXTENDED_PAIR_WINDOW_MS) break
+                // Self-marked legs may pair across the extended window (SMS delivery can lag
+                // between banks); everything else keeps the tight window.
+                val withinBaseWindow = gap <= PAIR_WINDOW_MS
+                val withinSelfWindow = withinBaseWindow || a.isInternalTransfer || b.isInternalTransfer
                 if (sameAmount(a.amount, b.amount) && a.type != b.type) {
                     when {
-                        looksLikeCreditCardBillPair(a, b) -> {
+                        withinBaseWindow && looksLikeCreditCardBillPair(a, b) -> {
                             val dropIncomeIdx = if (a.type == TransactionType.Income) i else j
                             droppedIndices.add(dropIncomeIdx)
                         }
-                        looksLikeInternalTransfer(a, b) -> {
+                        withinSelfWindow && looksLikeInternalTransfer(a, b) -> {
                             normalized[i] = a.asInternalTransfer()
                             normalized[j] = b.asInternalTransfer()
                         }
@@ -51,7 +57,57 @@ object SmsTransactionNormalizer {
             isCreditCardRepaymentArtifact(rawMessage, type) ||
             isCreditCardSettlementArtifact(rawMessage) ||
             isCreditCardStatementArtifact(rawMessage) ||
-            isCreditCardDueReminder(rawMessage)
+            isCreditCardDueReminder(rawMessage) ||
+            isPaymentAppCardConfirmation(rawMessage)
+    }
+
+    /**
+     * Payment-app receipts like "Paid Rs. 5000 to MERCHANT ... using ICICI Bank Credit Card"
+     * (Paytm/PhonePe/GPay) duplicate the bank's own card alert, which always carries a masked
+     * card number. Counting both double-counts the purchase.
+     */
+    fun isPaymentAppCardConfirmation(rawMessage: String?): Boolean {
+        val raw = rawMessage?.lowercase().orEmpty()
+        if (raw.isBlank()) return false
+        val paidUsingCard = Regex("""\bpaid\b.+\busing\b.+\b(?:credit|debit)\s+card\b""").containsMatchIn(raw)
+        if (!paidUsingCard) return false
+        val hasMaskedCardNumber = Regex("""\b(?:card|cc)\s*(?:no\.?|number|ending)?\s*(?:x+|[*]+)\s*\d{3,6}\b""")
+            .containsMatchIn(raw)
+        return !hasMaskedCardNumber
+    }
+
+    private val transactionReferenceRegexes = listOf(
+        Regex("""(?i)\bupi[:\s-]+(\d{10,14})\b"""),
+        Regex("""(?i)\bref(?:erence)?\.?\s*(?:no\.?)?\s*[:.]?\s*(\d{10,14})\b""")
+    )
+
+    /**
+     * The UPI/IMPS reference number both banks stamp on the same transaction
+     * ("UPI:616319308338", "Ref 618758297125", "IMPS Ref. no. 615384166398").
+     * Two messages carrying the same reference describe the same money movement,
+     * even when the wording differs.
+     */
+    fun transactionReference(rawMessage: String?): String? {
+        val raw = rawMessage.orEmpty()
+        if (raw.isBlank()) return null
+        return transactionReferenceRegexes.firstNotNullOfOrNull { regex ->
+            regex.find(raw)?.groupValues?.getOrNull(1)
+        }
+    }
+
+    /**
+     * The receiving-bank leg of a self transfer often names no sender at all
+     * ("Rs.X credited to your A/c XX6170 ... -Federal Bank"). Such a credit may be
+     * the other side of a same-amount debit to the user's own name.
+     */
+    fun isNamelessOwnAccountCredit(rawMessage: String?): Boolean {
+        val raw = rawMessage?.lowercase().orEmpty()
+        if (raw.isBlank()) return false
+        val creditedToOwnAccount = listOf("credited to your a/c", "credited to your account")
+            .any { it in raw }
+        if (!creditedToOwnAccount) return false
+        if ("interest" in raw) return false
+        return !Regex("""\b(?:from|by)\s+[a-z]{3,}""").containsMatchIn(raw)
     }
 
     fun isFailedTransactionArtifact(rawMessage: String?): Boolean {
@@ -92,8 +148,12 @@ object SmsTransactionNormalizer {
         val raw = rawMessage?.lowercase().orEmpty()
         if (raw.isBlank()) return false
         val hasDebit = listOf("debited", "debit", "paid", "payment made").any { it in raw }
+        if (!hasDebit) return false
+        // ICICI tags card-bill payments from the bank account with an InfoBIL*INFT* code
+        // and no other card wording; the spend was already counted purchase by purchase.
+        if ("infobil*inft" in raw || "info bil*inft" in raw) return true
         val hasBankAccount = listOf("a/c", "account", "acct", "acc ").any { it in raw }
-        return hasDebit && hasBankAccount && hasCreditCardPaymentContext(raw)
+        return hasBankAccount && hasCreditCardPaymentContext(raw)
     }
 
     fun isCreditCardSettlementArtifact(rawMessage: String?): Boolean {
@@ -297,8 +357,25 @@ object SmsTransactionNormalizer {
         ).any { it in raw }
     }
 
+    /**
+     * True when a leg clearly names a third party (a person or merchant), so it must not be
+     * absorbed as the opposite side of a self transfer that coincidentally shares the amount.
+     */
+    fun namesExternalParty(message: ParsedTransactionMessage): Boolean {
+        if (message.isInternalTransfer) return false
+        if (isNamelessOwnAccountCredit(message.rawMessage)) return false
+        val party = message.counterparty.lowercase()
+        if (party.isBlank()) return false
+        val genericHints = listOf("bank", "transfer", "self", "credit", "account", "a/c")
+        return genericHints.none { it in party }
+    }
+
     private fun looksLikeInternalTransfer(a: ParsedTransactionMessage, b: ParsedTransactionMessage): Boolean {
-        if (a.isInternalTransfer || b.isInternalTransfer) return true
+        if (a.isInternalTransfer && b.isInternalTransfer) return true
+        if (a.isInternalTransfer || b.isInternalTransfer) {
+            val other = if (a.isInternalTransfer) b else a
+            return !namesExternalParty(other)
+        }
 
         val combined = a.rawMessage.lowercase() + " " + b.rawMessage.lowercase()
         val transferHints = listOf(

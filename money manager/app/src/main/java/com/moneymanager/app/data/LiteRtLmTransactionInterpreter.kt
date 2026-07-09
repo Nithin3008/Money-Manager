@@ -10,7 +10,8 @@ import java.util.Collections
 
 class LiteRtLmTransactionInterpreter(
     context: Context,
-    private val modelPath: String
+    private val modelPath: String,
+    private val selfName: String? = null
 ) : LocalLlmTransactionInterpreter, AutoCloseable {
     private val gson = Gson()
     private val lock = Any()
@@ -95,6 +96,12 @@ class LiteRtLmTransactionInterpreter(
         } else {
             categories.joinToString("\n") { "${it.id}: ${it.name}" }
         }
+        val selfNameRule = selfName
+            ?.takeIf { it.isNotBlank() }
+            ?.let {
+                "The user's own bank-registered name is \"$it\". UPI debits or credits whose counterparty is this name or a close spelling variant (truncation or one-letter typo) are the user's own money moving between accounts: set isInternalTransfer true."
+            }
+            .orEmpty()
         return """
             You parse Indian bank SMS alerts for a personal finance app.
             Return only one JSON object. Do not add markdown or explanation.
@@ -107,6 +114,9 @@ class LiteRtLmTransactionInterpreter(
             Credit card bill payments from a bank account are not card spend; mark isInternalTransfer true.
             For credit card purchases or refunds, choose the CC/Credit Card category id if it is in the allowed list.
             Internal transfers are own-account or self transfers between the user's bank accounts.
+            $selfNameRule
+            Payment-app receipts like "Paid Rs X to MERCHANT using ... Credit Card" duplicate the bank's own card alert; set confidence 0 for them.
+            Auto-debits into the user's own RD or FD deposit ("Info To RD Ac") are internal transfers, not expenses.
             If categories are provided, suggest exactly one category id from the allowed list.
             Do not invent categories. If Indian shop or merchant name is unclear, choose Uncategorized if present.
 
