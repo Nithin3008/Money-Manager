@@ -2,25 +2,28 @@ package com.moneymanager.app.ui
 
 import android.app.DatePickerDialog
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyListScope
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CalendarMonth
+import androidx.compose.material.icons.rounded.ExpandMore
+import androidx.compose.material.icons.rounded.SearchOff
 import androidx.compose.material.icons.rounded.Sms
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material.icons.rounded.Sync
+import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -31,18 +34,34 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.moneymanager.app.model.ActivityDateFilter
 import com.moneymanager.app.model.FinanceUiState
+import com.moneymanager.app.model.LedgerTransaction
+import com.moneymanager.app.model.TransactionType
+import com.moneymanager.app.model.transactionDate
+import com.moneymanager.app.ui.theme.LineColor
+import com.moneymanager.app.ui.theme.LossRed
+import com.moneymanager.app.ui.theme.MoneyGreen
+import com.moneymanager.app.ui.theme.Navy800
+import com.moneymanager.app.ui.theme.Navy850
+import com.moneymanager.app.ui.theme.OnAccent
 import com.moneymanager.app.ui.theme.PrimaryBlue
 import com.moneymanager.app.ui.theme.TextDim
 import com.moneymanager.app.ui.theme.TextMuted
 import com.moneymanager.app.ui.theme.TextPrimary
 import java.time.LocalDate
 import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+
+private val activityDayFormatter = DateTimeFormatter.ofPattern("d MMM")
 
 internal fun LazyListScope.activityContent(
     state: FinanceUiState,
@@ -54,39 +73,61 @@ internal fun LazyListScope.activityContent(
     onLoadMore: () -> Unit
 ) {
     item {
-        LargeTitle("Transactions", "Track every payment, bank message, and manual entry.")
+        ActivityHeader(state, onScanNow, onPopulateThreeMonths)
     }
     item {
-        ActivityDateFilterPanel(
-            state = state,
-            onDateFilterSelected = onDateFilterSelected
-        )
+        ActivityDateFilterRow(state, onDateFilterSelected)
+    }
+    if (state.scanStatusMessage.isNotBlank() || state.isScanningMessages) {
+        item {
+            Text(
+                if (state.isScanningMessages) "Scanning messages..." else state.scanStatusMessage,
+                color = TextDim,
+                fontSize = 12.sp,
+                lineHeight = 17.sp
+            )
+        }
     }
     item {
-        ActivityScanPanel(
-            state = state,
-            onScanNow = onScanNow,
-            onPopulateThreeMonths = onPopulateThreeMonths
-        )
+        ActivitySummaryStrip(state)
     }
     if (state.activityTransactions.isEmpty()) {
-        item { EmptyPanel("No transactions in this period.") }
+        item {
+            ActivityEmptyState(onScanNow)
+        }
     } else {
-        itemsIndexed(
-            items = state.pagedTransactions,
-            key = { _, transaction -> transaction.id }
-        ) { _, transaction ->
-            TransactionRow(transaction = transaction, state = state, onSelect = onEditTransaction)
+        val groups = state.pagedTransactions.groupBy { it.transactionDate() }
+        groups.forEach { (day, transactions) ->
+            item(key = "day_header_$day") {
+                ActivityDayHeader(day = day, transactions = transactions, state = state)
+            }
+            transactions.forEach { transaction ->
+                item(key = "activity_txn_${transaction.id}") {
+                    TransactionRow(transaction = transaction, state = state, onSelect = onEditTransaction)
+                }
+            }
         }
         if (state.hasMoreTransactions) {
             item {
-                Button(
-                    onClick = onLoadMore,
-                    modifier = Modifier.fillMaxWidth().height(54.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = primaryButtonColors()
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(44.dp)
+                        .clip(RoundedCornerShape(999.dp))
+                        .drawBehind {
+                            drawRoundRect(
+                                color = LineColor,
+                                cornerRadius = androidx.compose.ui.geometry.CornerRadius(size.height / 2),
+                                style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.dp.toPx())
+                            )
+                        }
+                        .clickable(onClick = onLoadMore),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
                 ) {
-                    Text("Load more", fontWeight = FontWeight.Bold)
+                    Icon(Icons.Rounded.ExpandMore, contentDescription = null, tint = TextMuted, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Load more", color = TextMuted, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                 }
             }
         }
@@ -94,61 +135,55 @@ internal fun LazyListScope.activityContent(
 }
 
 @Composable
-private fun ActivityScanPanel(
+private fun ActivityHeader(
     state: FinanceUiState,
     onScanNow: () -> Unit,
     onPopulateThreeMonths: () -> Unit
 ) {
-    ElevatedPanel {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                IconTile(Icons.Rounded.Sms, PrimaryBlue)
-                Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)) {
-                    Text("Message import", color = TextPrimary, style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        if (state.scanStatusMessage.isBlank()) "Scan SMS and convert alerts into transactions." else state.scanStatusMessage,
-                        color = TextDim,
-                        style = MaterialTheme.typography.bodyMedium,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-                Text(if (state.isScanningMessages) "Scanning" else "Ready", color = PrimaryBlue, style = MaterialTheme.typography.labelMedium)
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Button(
-                    onClick = onScanNow,
-                    enabled = !state.isScanningMessages,
-                    modifier = Modifier.weight(1f).height(50.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    contentPadding = PaddingValues(horizontal = 10.dp),
-                    colors = primaryButtonColors()
-                ) {
-                    Icon(Icons.Rounded.Sms, contentDescription = null)
-                    Spacer(Modifier.width(6.dp))
-                    Text("Scan", fontWeight = FontWeight.Bold, maxLines = 1)
-                }
-                OutlinedButton(
-                    onClick = onPopulateThreeMonths,
-                    enabled = !state.isScanningMessages,
-                    modifier = Modifier.weight(1f).height(50.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    contentPadding = PaddingValues(horizontal = 10.dp),
-                    border = BorderStroke(1.dp, PrimaryBlue),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = PrimaryBlue)
-                ) {
-                    Icon(Icons.Rounded.CalendarMonth, contentDescription = null)
-                    Spacer(Modifier.width(6.dp))
-                    Text("3 Months", fontWeight = FontWeight.Bold, maxLines = 1)
-                }
-            }
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            "Transactions",
+            color = TextPrimary,
+            fontSize = 22.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = (-0.3).sp,
+            modifier = Modifier.weight(1f)
+        )
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(Navy850)
+                .clickable(enabled = !state.isScanningMessages, onClick = onPopulateThreeMonths),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                Icons.Rounded.CalendarMonth,
+                contentDescription = "Backfill 3 months",
+                tint = TextMuted,
+                modifier = Modifier.size(21.dp)
+            )
+        }
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(Navy850)
+                .clickable(enabled = !state.isScanningMessages, onClick = onScanNow),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                Icons.Rounded.Sync,
+                contentDescription = "Scan SMS",
+                tint = TextMuted,
+                modifier = Modifier.size(21.dp)
+            )
         }
     }
 }
 
 @Composable
-private fun ActivityDateFilterPanel(
+private fun ActivityDateFilterRow(
     state: FinanceUiState,
     onDateFilterSelected: (ActivityDateFilter, LocalDate?, LocalDate?) -> Unit
 ) {
@@ -157,48 +192,56 @@ private fun ActivityDateFilterPanel(
     var endDate by remember(state.activityEndDate) { mutableStateOf(state.activityEndDate) }
     var showStartPicker by remember { mutableStateOf(false) }
     var showEndPicker by remember { mutableStateOf(false) }
-    val dateRangeLabel = remember(state.activityStartDate, state.activityEndDate) {
-        "${state.activityStartDate.mediumDateLabel()} - ${state.activityEndDate.mediumDateLabel()}"
-    }
 
-    ElevatedPanel {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(
-                dateRangeLabel,
-                color = TextMuted,
-                style = MaterialTheme.typography.bodyMedium
-            )
-            ChipRow {
-                ActivityDateFilter.entries.forEach { filter ->
-                    MoneyChip(
-                        label = filter.label,
-                        selected = state.activityDateFilter == filter,
-                        onClick = { onDateFilterSelected(filter, startDate, endDate) }
-                    )
-                }
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            DateRangePill("Today", state.activityDateFilter == ActivityDateFilter.Today) {
+                onDateFilterSelected(ActivityDateFilter.Today, startDate, endDate)
             }
-            if (state.activityDateFilter == ActivityDateFilter.Custom) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(
-                        onClick = { showStartPicker = true },
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(12.dp),
-                        border = BorderStroke(1.dp, appBorderColor())
-                    ) {
-                        Icon(Icons.Rounded.CalendarMonth, contentDescription = null)
-                        Spacer(Modifier.width(6.dp))
-                        Text(startDate.mediumDateLabel(), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    }
-                    OutlinedButton(
-                        onClick = { showEndPicker = true },
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(12.dp),
-                        border = BorderStroke(1.dp, appBorderColor())
-                    ) {
-                        Icon(Icons.Rounded.CalendarMonth, contentDescription = null)
-                        Spacer(Modifier.width(6.dp))
-                        Text(endDate.mediumDateLabel(), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    }
+            DateRangePill("7 days", state.activityDateFilter == ActivityDateFilter.Week) {
+                onDateFilterSelected(ActivityDateFilter.Week, startDate, endDate)
+            }
+            DateRangePill("Month", state.activityDateFilter == ActivityDateFilter.Month) {
+                onDateFilterSelected(ActivityDateFilter.Month, startDate, endDate)
+            }
+            val customSelected = state.activityDateFilter == ActivityDateFilter.Custom
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(if (customSelected) PrimaryBlue else Navy800)
+                    .clickable { onDateFilterSelected(ActivityDateFilter.Custom, startDate, endDate) },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    Icons.Rounded.Tune,
+                    contentDescription = "Custom range",
+                    tint = if (customSelected) OnAccent else TextMuted,
+                    modifier = Modifier.size(19.dp)
+                )
+            }
+        }
+        if (state.activityDateFilter == ActivityDateFilter.Custom) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    onClick = { showStartPicker = true },
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(999.dp),
+                    border = BorderStroke(1.dp, LineColor)
+                ) {
+                    Icon(Icons.Rounded.CalendarMonth, contentDescription = null, tint = TextMuted, modifier = Modifier.size(17.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(startDate.mediumDateLabel(), color = TextMuted, fontSize = 12.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                OutlinedButton(
+                    onClick = { showEndPicker = true },
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(999.dp),
+                    border = BorderStroke(1.dp, LineColor)
+                ) {
+                    Icon(Icons.Rounded.CalendarMonth, contentDescription = null, tint = TextMuted, modifier = Modifier.size(17.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(endDate.mediumDateLabel(), color = TextMuted, fontSize = 12.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
         }
@@ -243,6 +286,162 @@ private fun ActivityDateFilterPanel(
                 datePicker.maxDate = today.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
                 show()
             }
+        }
+    }
+}
+
+@Composable
+private fun DateRangePill(label: String, selected: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .height(36.dp)
+            .clip(RoundedCornerShape(999.dp))
+            .background(if (selected) PrimaryBlue else Navy800)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            label,
+            color = if (selected) OnAccent else TextMuted,
+            fontSize = 12.5.sp,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold
+        )
+    }
+}
+
+@Composable
+private fun ActivitySummaryStrip(state: FinanceUiState) {
+    val moneyIn = remember(state.activityTransactions) {
+        state.activityTransactions.filter { it.type == TransactionType.Income }.sumOf { it.amount }
+    }
+    val moneyOut = remember(state.activityTransactions) {
+        state.activityTransactions.filter { it.type == TransactionType.Expense }.sumOf { it.amount }
+    }
+    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .clip(RoundedCornerShape(18.dp))
+                .background(Navy850)
+                .padding(14.dp)
+        ) {
+            Text("Money in", color = TextDim, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+            Text(
+                "+${state.money(moneyIn)}",
+                color = MoneyGreen,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(top = 4.dp)
+            )
+        }
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .clip(RoundedCornerShape(18.dp))
+                .background(Navy850)
+                .padding(14.dp)
+        ) {
+            Text("Money out", color = TextDim, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+            Text(
+                "-${state.money(moneyOut)}",
+                color = LossRed,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(top = 4.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun ActivityDayHeader(
+    day: LocalDate,
+    transactions: List<LedgerTransaction>,
+    state: FinanceUiState
+) {
+    val today = LocalDate.now()
+    val dayLabel = when (day) {
+        today -> "Today · ${day.format(activityDayFormatter)}"
+        today.minusDays(1) -> "Yesterday · ${day.format(activityDayFormatter)}"
+        else -> day.format(activityDayFormatter)
+    }
+    val net = transactions.sumOf { if (it.type == TransactionType.Income) it.amount else -it.amount }
+    val netLabel = if (net >= 0) "+${state.money(net)}" else "-${state.money(-net)}"
+
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text(dayLabel, color = TextMuted, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        Box(
+            Modifier
+                .weight(1f)
+                .height(1.dp)
+                .background(LineColor)
+        )
+        Text(netLabel, color = TextDim, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+@Composable
+private fun ActivityEmptyState(onScanNow: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(22.dp))
+            .drawBehind {
+                drawRoundRect(
+                    color = LineColor,
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(22.dp.toPx()),
+                    style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.dp.toPx())
+                )
+            }
+            .padding(horizontal = 20.dp, vertical = 44.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box(
+            modifier = Modifier
+                .size(56.dp)
+                .clip(RoundedCornerShape(18.dp))
+                .background(Navy850),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(Icons.Rounded.SearchOff, contentDescription = null, tint = TextDim, modifier = Modifier.size(28.dp))
+        }
+        Text(
+            "Nothing in this range",
+            color = TextPrimary,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(top = 14.dp)
+        )
+        Text(
+            "Try a wider date filter or scan your\nSMS inbox for missed alerts.",
+            color = TextDim,
+            fontSize = 12.5.sp,
+            lineHeight = 19.sp,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(top = 5.dp)
+        )
+        Row(
+            modifier = Modifier
+                .padding(top = 16.dp)
+                .height(40.dp)
+                .clip(RoundedCornerShape(999.dp))
+                .background(PrimaryBlue)
+                .clickable(onClick = onScanNow)
+                .padding(horizontal = 18.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Icon(Icons.Rounded.Sms, contentDescription = null, tint = OnAccent, modifier = Modifier.size(18.dp))
+            Text("Scan SMS", color = OnAccent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
         }
     }
 }

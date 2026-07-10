@@ -1,61 +1,69 @@
 package com.moneymanager.app.ui
 
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyListScope
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.CalendarMonth
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import com.moneymanager.app.model.CategoryItem
+import androidx.compose.ui.unit.sp
 import com.moneymanager.app.model.FinanceUiState
 import com.moneymanager.app.model.MonthlyCategoryTotal
 import com.moneymanager.app.model.TransactionType
 import com.moneymanager.app.model.month
 import com.moneymanager.app.model.shortLabel
-import com.moneymanager.app.model.transactionDate
+import com.moneymanager.app.ui.theme.LineColor
 import com.moneymanager.app.ui.theme.LossRed
+import com.moneymanager.app.ui.theme.MoneyGreen
+import com.moneymanager.app.ui.theme.Navy800
+import com.moneymanager.app.ui.theme.Navy850
+import com.moneymanager.app.ui.theme.Navy900
+import com.moneymanager.app.ui.theme.OnAccent
 import com.moneymanager.app.ui.theme.PrimaryBlue
 import com.moneymanager.app.ui.theme.TextDim
 import com.moneymanager.app.ui.theme.TextMuted
 import com.moneymanager.app.ui.theme.TextPrimary
 import com.moneymanager.app.ui.theme.WarningAmber
-import java.time.LocalDate
 import java.time.YearMonth
+import java.time.format.TextStyle
+import java.util.Locale
 
 internal fun LazyListScope.summaryContent(
     state: FinanceUiState,
@@ -63,14 +71,8 @@ internal fun LazyListScope.summaryContent(
     onToggleSummaryAccount: (Long) -> Unit,
     onClearSummaryAccountFilter: () -> Unit
 ) {
-    item { LargeTitle("Reports", state.selectedMonth.shortLabel()) }
     item {
-        val months = remember(state.transactions) { availableMonths(state) }
-        MonthSelector(
-            months = months,
-            selected = state.selectedMonth,
-            onSelected = onMonthSelected
-        )
+        ReportsHeader(state, onMonthSelected)
     }
     if (state.accounts.isNotEmpty()) {
         item {
@@ -81,44 +83,58 @@ internal fun LazyListScope.summaryContent(
             )
         }
     }
+    item { MetricGrid(state = state) }
+    item { CashFlowCard(state) }
     item {
         val totals = remember(state.monthTransactions, state.categories) { categoryTotals(state) }
-        CategoryPieChart(state, totals)
+        CategoryDonutCard(state, totals)
     }
-    item { MetricGrid(state = state) }
-    item { DailyExpenseBarGraph(state) }
     item { StatementCheckCard(state) }
 }
 
 @Composable
-private fun MetricGrid(state: FinanceUiState) {
-    val currency = state.currency
-    val creditCardActivity = remember(
-        state.transactions,
-        state.selectedMonth,
-        state.activeSummaryAccountIds
-    ) {
-        state.transactions
-            .filter {
-                it.isCreditCardTransaction &&
-                    YearMonth.from(it.transactionDate()) == state.selectedMonth &&
-                    (state.activeSummaryAccountIds.isEmpty() || it.accountId in state.activeSummaryAccountIds)
+private fun ReportsHeader(state: FinanceUiState, onMonthSelected: (YearMonth) -> Unit) {
+    var showMonthMenu by remember { mutableStateOf(false) }
+    val months = remember(state.transactions) { availableMonths(state) }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            "Reports",
+            color = TextPrimary,
+            fontSize = 22.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = (-0.3).sp,
+            modifier = Modifier.weight(1f)
+        )
+        Box {
+            Row(
+                modifier = Modifier
+                    .height(34.dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(Navy850)
+                    .clickable { showMonthMenu = true }
+                    .padding(horizontal = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Icon(Icons.Rounded.CalendarMonth, contentDescription = null, tint = TextMuted, modifier = Modifier.size(17.dp))
+                Text(
+                    state.selectedMonth.month.getDisplayName(TextStyle.FULL, Locale.getDefault()),
+                    color = TextMuted,
+                    fontSize = 12.5.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
             }
-            .sumOf { it.amount }
-    }
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            SmallMetric("Total spent", money(state.monthExpense, currency), LossRed, Modifier.weight(1f))
-            SmallMetric(
-                "Daily avg",
-                money(state.monthExpense / state.selectedMonth.lengthOfMonth().coerceAtLeast(1), currency),
-                WarningAmber,
-                Modifier.weight(1f)
-            )
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            SmallMetric("Balance", money(state.currentBalanceAnchor, currency), PrimaryBlue, Modifier.weight(1f))
-            SmallMetric("Card spend", money(creditCardActivity, currency), TextPrimary, Modifier.weight(1f))
+            DropdownMenu(expanded = showMonthMenu, onDismissRequest = { showMonthMenu = false }) {
+                months.forEach { month ->
+                    DropdownMenuItem(
+                        text = { Text(month.shortLabel()) },
+                        onClick = {
+                            showMonthMenu = false
+                            onMonthSelected(month)
+                        }
+                    )
+                }
+            }
         }
     }
 }
@@ -129,23 +145,278 @@ private fun SummaryAccountFilterRow(
     onToggleAccount: (Long) -> Unit,
     onClearFilter: () -> Unit
 ) {
-    val defaultAccount = state.accounts.firstOrNull { it.id == state.defaultAccountId }
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        LabelText("ACCOUNTS")
-        ChipRow {
-            MoneyChip(
-                label = defaultAccount?.let { "Default: ${it.name}" } ?: "All",
-                selected = state.summarySelectedAccountIds.isEmpty(),
-                onClick = onClearFilter
+    Row(
+        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        AccountFilterPill(
+            label = "All accounts",
+            selected = state.summarySelectedAccountIds.isEmpty(),
+            onClick = onClearFilter
+        )
+        state.accounts.forEach { account ->
+            AccountFilterPill(
+                label = account.name,
+                selected = account.id in state.summarySelectedAccountIds,
+                onClick = { onToggleAccount(account.id) }
             )
-            state.accounts.forEach { account ->
-                MoneyChip(
-                    label = account.name,
-                    selected = account.id in state.summarySelectedAccountIds,
-                    onClick = { onToggleAccount(account.id) }
-                )
+        }
+    }
+}
+
+@Composable
+private fun AccountFilterPill(label: String, selected: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .height(34.dp)
+            .clip(RoundedCornerShape(999.dp))
+            .background(if (selected) PrimaryBlue else Navy800)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 15.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            label,
+            color = if (selected) OnAccent else TextMuted,
+            fontSize = 12.sp,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold,
+            maxLines = 1
+        )
+    }
+}
+
+@Composable
+private fun MetricGrid(state: FinanceUiState) {
+    val currency = state.currency
+    val net = state.monthReportNet
+    val netLabel = if (net >= 0) "+${money(net, currency)}" else "-${money(-net, currency)}"
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            MetricTile("Spent", money(state.monthExpense, currency), LossRed, Modifier.weight(1f))
+            MetricTile("Income", money(state.monthReportIncome, currency), MoneyGreen, Modifier.weight(1f))
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            MetricTile("Net saved", netLabel, TextPrimary, Modifier.weight(1f))
+            MetricTile("Closing bal.", money(state.balanceAtEndOfSelectedMonth, currency), TextPrimary, Modifier.weight(1f))
+        }
+    }
+}
+
+@Composable
+private fun MetricTile(label: String, value: String, valueColor: Color, modifier: Modifier) {
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(20.dp))
+            .background(Navy850)
+            .padding(16.dp)
+    ) {
+        Text(label, color = TextDim, fontSize = 11.5.sp, fontWeight = FontWeight.Medium)
+        Text(
+            value,
+            color = valueColor,
+            fontSize = 20.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(top = 4.dp)
+        )
+    }
+}
+
+@Composable
+private fun CashFlowCard(state: FinanceUiState) {
+    val months = remember(state.selectedMonth) {
+        (5 downTo 0).map { state.selectedMonth.minusMonths(it.toLong()) }
+    }
+    val monthTotals = remember(state.transactions, months) {
+        months.map { month ->
+            val txns = state.transactions.filter {
+                it.month() == month && !it.excludeFromSummary && !state.isInvestmentTransaction(it)
+            }
+            Triple(
+                month,
+                txns.filter { it.type == TransactionType.Income }.sumOf { it.amount },
+                txns.filter { it.type == TransactionType.Expense }.sumOf { it.amount }
+            )
+        }
+    }
+    val maxTotal = monthTotals.maxOf { (it.second + it.third) }.coerceAtLeast(1.0)
+
+    ReportCard {
+        Text("Cash flow", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+        Text("Last 6 months", color = TextDim, fontSize = 11.5.sp, modifier = Modifier.padding(top = 2.dp))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 18.dp)
+                .height(120.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.Bottom
+        ) {
+            monthTotals.forEach { (month, income, expense) ->
+                Column(
+                    modifier = Modifier.weight(1f).fillMaxHeight(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Bottom
+                ) {
+                    val inFraction = (income / maxTotal).toFloat().coerceIn(0.02f, 1f)
+                    val outFraction = (expense / maxTotal).toFloat().coerceIn(0.02f, 1f)
+                    Column(
+                        modifier = Modifier.fillMaxWidth().weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(3.dp, Alignment.Bottom)
+                    ) {
+                        Box(
+                            Modifier
+                                .fillMaxWidth()
+                                .fillMaxHeight(inFraction * 0.85f)
+                                .clip(RoundedCornerShape(5.dp))
+                                .background(PrimaryBlue)
+                        )
+                        Box(
+                            Modifier
+                                .fillMaxWidth()
+                                .height((88 * outFraction * 0.85f).dp.coerceAtLeast(2.dp))
+                                .clip(RoundedCornerShape(5.dp))
+                                .background(LossRed.copy(alpha = 0.85f))
+                        )
+                    }
+                    Text(
+                        month.month.getDisplayName(TextStyle.SHORT, Locale.getDefault()),
+                        color = TextDim,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(top = 6.dp)
+                    )
+                }
             }
         }
+        Row(modifier = Modifier.padding(top = 14.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            ChartLegend(PrimaryBlue, "Income")
+            ChartLegend(LossRed, "Expense")
+        }
+    }
+}
+
+@Composable
+private fun ChartLegend(color: Color, label: String) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Box(Modifier.size(10.dp).clip(RoundedCornerShape(3.dp)).background(color))
+        Text(label, color = TextMuted, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+    }
+}
+
+@Composable
+private fun ReportCard(content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(22.dp),
+        colors = CardDefaults.cardColors(containerColor = Navy900),
+        border = BorderStroke(1.dp, LineColor)
+    ) {
+        Column(Modifier.padding(18.dp), content = content)
+    }
+}
+
+@Composable
+private fun CategoryDonutCard(state: FinanceUiState, totals: List<MonthlyCategoryTotal>) {
+    ReportCard {
+        Text("Where it went", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+        val expenses = totals.filter { it.expense > 0.0 }.sortedByDescending { it.expense }
+        val total = expenses.sumOf { it.expense }
+        if (total <= 0.0) {
+            Text(
+                "No category expenses this month.",
+                color = TextDim,
+                fontSize = 12.5.sp,
+                modifier = Modifier.padding(top = 10.dp)
+            )
+        } else {
+            val slices = donutSlices(expenses)
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(18.dp)
+            ) {
+                Box(Modifier.size(120.dp), contentAlignment = Alignment.Center) {
+                    Canvas(Modifier.fillMaxSize()) {
+                        val ringWidth = 24.dp.toPx()
+                        val inset = ringWidth / 2f
+                        val arcSize = Size(size.width - ringWidth, size.height - ringWidth)
+                        var startAngle = -90f
+                        slices.forEach { slice ->
+                            val sweep = ((slice.amount / total) * 360f).toFloat()
+                            drawArc(
+                                color = slice.color,
+                                startAngle = startAngle,
+                                sweepAngle = sweep,
+                                useCenter = false,
+                                topLeft = Offset(inset, inset),
+                                size = arcSize,
+                                style = Stroke(width = ringWidth)
+                            )
+                            startAngle += sweep
+                        }
+                    }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("Total", color = TextDim, fontSize = 10.sp, fontWeight = FontWeight.Medium)
+                        Text(
+                            compactMoney(total, state.currency),
+                            color = TextPrimary,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1
+                        )
+                    }
+                }
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(11.dp)) {
+                    slices.forEach { slice ->
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                            Box(Modifier.size(11.dp).clip(RoundedCornerShape(4.dp)).background(slice.color))
+                            Text(
+                                slice.label,
+                                color = TextPrimary,
+                                fontSize = 12.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.weight(1f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                "${((slice.amount / total) * 100).toInt()}%",
+                                color = TextDim,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private data class DonutSlice(
+    val label: String,
+    val amount: Double,
+    val color: Color
+)
+
+@Composable
+private fun donutSlices(expenses: List<MonthlyCategoryTotal>): List<DonutSlice> {
+    val palette = listOf(
+        PrimaryBlue,
+        WarningAmber,
+        LossRed,
+        if (isDarkTheme()) Color(0xFF7EA2FF) else Color(0xFF7C9EE0)
+    )
+    val visible = expenses.take(3).mapIndexed { index, item ->
+        DonutSlice(item.category.name, item.expense, palette[index])
+    }
+    val otherAmount = expenses.drop(3).sumOf { it.expense }
+    return if (otherAmount > 0.0) {
+        visible + DonutSlice("Other", otherAmount, palette[3])
+    } else {
+        visible
     }
 }
 
@@ -153,9 +424,12 @@ private fun SummaryAccountFilterRow(
 private fun StatementCheckCard(state: FinanceUiState) {
     val gap = state.selectedMonthReconciliationGap
     val movementColor = if (state.calendarMonthNet >= 0.0) PrimaryBlue else LossRed
-    ElevatedPanel {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            SectionHeader("Statement check", state.selectedMonth.shortLabel())
+    ReportCard {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Statement check", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            Text(state.selectedMonth.shortLabel(), color = TextDim, fontSize = 11.5.sp, fontWeight = FontWeight.Medium)
+        }
+        Column(modifier = Modifier.padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             StatementMetricRow("Current bank balance", state.money(state.currentBalanceAnchor), PrimaryBlue)
             StatementMetricRow("Month closing balance", state.money(state.balanceAtEndOfSelectedMonth), TextPrimary)
             StatementMetricRow("Month movement", state.money(state.calendarMonthNet), movementColor)
@@ -163,13 +437,13 @@ private fun StatementCheckCard(state: FinanceUiState) {
                 Text(
                     "Statement difference: ${state.money(gap)}",
                     color = WarningAmber,
-                    style = MaterialTheme.typography.bodyMedium
+                    fontSize = 12.5.sp
                 )
             } else {
                 Text(
                     "Statement looks balanced for the selected account.",
                     color = TextDim,
-                    style = MaterialTheme.typography.bodyMedium
+                    fontSize = 12.5.sp
                 )
             }
         }
@@ -179,291 +453,8 @@ private fun StatementCheckCard(state: FinanceUiState) {
 @Composable
 private fun StatementMetricRow(label: String, value: String, color: Color) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text(label, color = TextDim, style = MaterialTheme.typography.bodyMedium)
-        Text(value, color = color, style = MaterialTheme.typography.titleMedium, maxLines = 1)
-    }
-}
-
-@Composable
-private fun SmallMetric(
-    label: String,
-    value: String,
-    valueColor: Color,
-    modifier: Modifier,
-    boxHeight: Dp = 104.dp
-) {
-    ElevatedPanel(modifier = modifier.height(boxHeight)) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.Center) {
-            Text(label, color = TextDim, style = MaterialTheme.typography.bodyMedium)
-            Text(value, color = valueColor, style = MaterialTheme.typography.titleLarge, maxLines = 1)
-        }
-    }
-}
-
-@Composable
-private fun MonthSelector(months: List<YearMonth>, selected: YearMonth, onSelected: (YearMonth) -> Unit) {
-    ChipRow {
-        months.forEach {
-            MoneyChip(it.shortLabel(), selected = it == selected, onClick = { onSelected(it) })
-        }
-    }
-}
-
-@Composable
-private fun DailyExpenseBarGraph(state: FinanceUiState) {
-    val selectedMonth = state.selectedMonth
-    val today = LocalDate.now()
-    val lastDay = if (selectedMonth == YearMonth.now()) today.dayOfMonth else selectedMonth.lengthOfMonth()
-    val firstVisibleDay = (lastDay - 6).coerceAtLeast(1)
-    val scopedExpenses = state.monthExpenseTransactions
-    val daySegments = remember(scopedExpenses, state.categories, selectedMonth, firstVisibleDay, lastDay) {
-        val categoriesById = state.categories.associateBy { it.id }
-        val grouped = scopedExpenses
-            .asSequence()
-            .filter { it.transactionDate().dayOfMonth in firstVisibleDay..lastDay }
-            .groupBy { it.transactionDate().dayOfMonth to it.categoryId }
-            .mapValues { entry -> entry.value.sumOf { it.amount } }
-        (firstVisibleDay..lastDay).map { day ->
-            val segments = grouped
-                .filterKeys { it.first == day }
-                .mapNotNull { (key, amount) ->
-                    categoriesById[key.second]?.takeIf { amount > 0.0 }?.let { it to amount }
-                }
-            selectedMonth.atDay(day) to segments
-        }
-    }
-    val max = daySegments.maxOfOrNull { it.second.sumOf { segment -> segment.second } }?.coerceAtLeast(1.0) ?: 1.0
-
-    ElevatedPanel {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            SectionHeader("Daily spending", "Last 7 days")
-            if (daySegments.all { it.second.isEmpty() }) {
-                Text("No daily expenses for this month.", color = TextDim, style = MaterialTheme.typography.bodyMedium)
-            } else {
-                LazyRow(
-                    modifier = Modifier.fillMaxWidth().height(190.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalAlignment = Alignment.Bottom
-                ) {
-                    items(daySegments, key = { it.first.toString() }) { (date, segments) ->
-                        val total = segments.sumOf { it.second }
-                        DailyExpenseBar(
-                            day = date.dayOfMonth,
-                            segments = segments,
-                            maxAmount = max,
-                            value = compactMoney(total, state.currency)
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun DailyExpenseBar(day: Int, segments: List<Pair<CategoryItem, Double>>, maxAmount: Double, value: String) {
-    val amount = segments.sumOf { it.second }
-    Column(
-        modifier = Modifier.width(42.dp).fillMaxHeight(),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Bottom
-    ) {
-        if (amount > 0.0) {
-            Text(value, color = TextDim, style = MaterialTheme.typography.labelSmall, maxLines = 1, textAlign = TextAlign.Center)
-            Spacer(Modifier.height(6.dp))
-        }
-        Column(
-            modifier = Modifier
-                .width(22.dp)
-                .height((112 * (amount / maxAmount).toFloat().coerceIn(0.05f, 1f)).dp)
-                .clip(RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp))
-                .background(appTrackColor()),
-            verticalArrangement = Arrangement.Bottom
-        ) {
-            if (amount > 0.0) {
-                segments.forEach { (category, segmentAmount) ->
-                    val segmentHeight = (112 * (segmentAmount / maxAmount).toFloat()).coerceAtLeast(3f).dp
-                    Box(
-                        Modifier
-                            .fillMaxWidth()
-                            .height(segmentHeight)
-                            .background(categoryColor(category, TransactionType.Expense))
-                    )
-                }
-            }
-        }
-        Spacer(Modifier.height(8.dp))
-        Text(day.toString(), color = TextMuted, style = MaterialTheme.typography.labelMedium)
-    }
-}
-
-@Composable
-private fun CategoryPieChart(state: FinanceUiState, totals: List<MonthlyCategoryTotal>) {
-    ElevatedPanel {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            SectionHeader("Categories", "Spending mix")
-            val expenses = totals.filter { it.expense > 0.0 }
-                .sortedByDescending { it.expense }
-            val total = expenses.sumOf { it.expense }
-            if (total <= 0.0) {
-                Text("No category expenses this month.", color = TextDim, style = MaterialTheme.typography.bodyMedium)
-            } else {
-                val slices = expenseSlices(expenses)
-                val topSlice = slices.first()
-                Box(
-                    modifier = Modifier.align(Alignment.CenterHorizontally).size(220.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Canvas(modifier = Modifier.fillMaxSize()) {
-                        val strokeWidth = 28f
-                        val inset = strokeWidth / 2f + 10f
-                        val arcSize = Size(size.width - inset * 2f, size.height - inset * 2f)
-                        drawArc(
-                            color = appTrackColor(),
-                            startAngle = -90f,
-                            sweepAngle = 360f,
-                            useCenter = false,
-                            topLeft = Offset(inset, inset),
-                            size = arcSize,
-                            style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
-                        )
-                        var startAngle = -90f
-                        slices.forEach { slice ->
-                            val sweep = ((slice.amount / total).toFloat() * 360f).coerceAtLeast(3f)
-                            drawArc(
-                                color = slice.color,
-                                startAngle = startAngle,
-                                sweepAngle = (sweep - 4f).coerceAtLeast(1f),
-                                useCenter = false,
-                                topLeft = Offset(inset, inset),
-                                size = arcSize,
-                                style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
-                            )
-                            startAngle += sweep
-                        }
-                    }
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            compactMoney(total, state.currency),
-                            color = TextPrimary,
-                            style = MaterialTheme.typography.headlineMedium,
-                            maxLines = 1
-                        )
-                        Text("spent", color = TextDim, style = MaterialTheme.typography.bodyMedium)
-                    }
-                }
-
-                TopCategoryCard(slice = topSlice, total = total, state = state)
-
-                slices.forEach { slice ->
-                    CategorySliceRow(slice = slice, total = total, state = state)
-                }
-            }
-        }
-    }
-}
-
-private data class ExpenseSlice(
-    val label: String,
-    val amount: Double,
-    val color: Color,
-    val icon: ImageVector?
-)
-
-@Composable
-private fun expenseSlices(expenses: List<MonthlyCategoryTotal>): List<ExpenseSlice> {
-    val visible = expenses.take(5).map {
-        ExpenseSlice(
-            label = it.category.name,
-            amount = it.expense,
-            color = categoryColor(it.category, TransactionType.Expense),
-            icon = it.category.icon
-        )
-    }
-    val otherAmount = expenses.drop(5).sumOf { it.expense }
-    return if (otherAmount > 0.0) {
-        visible + ExpenseSlice("Other", otherAmount, TextMuted, null)
-    } else {
-        visible
-    }
-}
-
-@Composable
-private fun TopCategoryCard(slice: ExpenseSlice, total: Double, state: FinanceUiState) {
-    val percent = ((slice.amount / total) * 100).toInt()
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .background(slice.color.copy(alpha = 0.14f))
-            .padding(14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        Box(
-            modifier = Modifier
-                .size(46.dp)
-                .clip(CircleShape)
-                .background(slice.color),
-            contentAlignment = Alignment.Center
-        ) {
-            slice.icon?.let {
-                Icon(it, contentDescription = null, tint = accentContentColor(), modifier = Modifier.size(23.dp))
-            }
-        }
-        Column(Modifier.weight(1f)) {
-            Text("Top category", color = TextDim, style = MaterialTheme.typography.labelMedium)
-            Text(
-                slice.label,
-                color = TextPrimary,
-                style = MaterialTheme.typography.titleMedium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-        Column(horizontalAlignment = Alignment.End) {
-            Text(state.money(slice.amount), color = TextPrimary, style = MaterialTheme.typography.titleMedium, maxLines = 1)
-            Text("$percent%", color = slice.color, style = MaterialTheme.typography.labelMedium)
-        }
-    }
-}
-
-@Composable
-private fun CategorySliceRow(slice: ExpenseSlice, total: Double, state: FinanceUiState) {
-    val progress by animateFloatAsState(
-        targetValue = (slice.amount / total).toFloat().coerceIn(0.04f, 1f),
-        animationSpec = tween(650, easing = FastOutSlowInEasing),
-        label = "categorySliceProgress"
-    )
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(10.dp).clip(CircleShape).background(slice.color))
-            Spacer(Modifier.width(10.dp))
-            Text(
-                slice.label,
-                color = TextPrimary,
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.weight(1f),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(state.money(slice.amount), color = TextMuted, style = MaterialTheme.typography.bodyMedium, maxLines = 1)
-        }
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(8.dp)
-                .clip(RoundedCornerShape(50))
-                .background(appTrackColor())
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxHeight()
-                    .fillMaxWidth(progress)
-                    .clip(RoundedCornerShape(50))
-                    .background(slice.color)
-            )
-        }
+        Text(label, color = TextDim, fontSize = 12.5.sp)
+        Text(value, color = color, fontSize = 13.5.sp, fontWeight = FontWeight.Bold, maxLines = 1)
     }
 }
 

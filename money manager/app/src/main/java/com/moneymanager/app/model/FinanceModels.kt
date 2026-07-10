@@ -21,6 +21,7 @@ import androidx.compose.material.icons.rounded.LocalGroceryStore
 import androidx.compose.material.icons.rounded.LocalHospital
 import androidx.compose.material.icons.rounded.Movie
 import androidx.compose.material.icons.rounded.MusicNote
+import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Pets
 import androidx.compose.material.icons.rounded.Payments
 import androidx.compose.material.icons.rounded.PieChart
@@ -59,10 +60,10 @@ enum class ActivityDateFilter(val label: String) {
 
 enum class ScreenTab(val label: String, val icon: ImageVector) {
     Dashboard("Home", Icons.Rounded.GridView),
-    Activity("Transactions", Icons.AutoMirrored.Rounded.ReceiptLong),
+    Activity("Activity", Icons.AutoMirrored.Rounded.ReceiptLong),
     Budget("Budget", Icons.Rounded.PieChart),
     Summary("Reports", Icons.Rounded.BarChart),
-    Settings("Profile", Icons.Rounded.Settings)
+    Settings("Profile", Icons.Rounded.Person)
 }
 
 enum class CurrencyOption(
@@ -86,20 +87,23 @@ enum class UiAccent(
     val darkHex: String,
     val lightHex: String,
     val softDarkHex: String,
-    val softLightHex: String
+    val softLightHex: String,
+    val onDarkHex: String,
+    val onLightHex: String
 ) {
-    Sky("Metallic Blue", "#7EA2FF", "#2F5FD0", "#B8C7FF", "#274FAD"),
-    Mint("Cool Teal", "#3FE0C4", "#087F7A", "#A7F3E6", "#0B6F6A"),
-    Rose("Raspberry", "#FF6FAE", "#C0266D", "#FFD1E6", "#A01C58"),
-    Amber("Goldenrod", "#F5C542", "#A16207", "#FFE7A3", "#854D0E"),
-    Violet("Amethyst", "#B794F6", "#6D28D9", "#E9D5FF", "#5B21B6"),
-    Cyan("Aqua Lapis", "#35D6E7", "#0277BD", "#B8F3FA", "#0369A1"),
-    Coral("Terracotta", "#FF8A65", "#B45335", "#FFD6C8", "#93452C"),
-    Pink("Salmon Pop", "#FF7A90", "#BE3A57", "#FFD0DA", "#A62D49"),
-    Emerald("Modern Myrtle", "#48D6A5", "#087C64", "#BDEEDC", "#066B56"),
-    Indigo("Electric Blue", "#5BC0FF", "#1D4ED8", "#BFDBFE", "#1E40AF"),
-    Teal("Jade Energy", "#54D17A", "#138A4E", "#C8F6D4", "#0F7A43"),
-    Slate("Ruby Slate", "#F0627D", "#9F1239", "#FFD0DB", "#881337")
+    Lime("Lime", "#B4F077", "#4E7D1C", "#D3F7AD", "#3F6516", "#16220A", "#F4FBEA"),
+    Sky("Metallic Blue", "#7EA2FF", "#2F5FD0", "#B8C7FF", "#274FAD", "#0B1633", "#F2F6FF"),
+    Mint("Cool Teal", "#3FE0C4", "#087F7A", "#A7F3E6", "#0B6F6A", "#05261F", "#EFFCF9"),
+    Rose("Raspberry", "#FF6FAE", "#C0266D", "#FFD1E6", "#A01C58", "#330E20", "#FFF1F7"),
+    Amber("Goldenrod", "#F5C542", "#A16207", "#FFE7A3", "#854D0E", "#33270A", "#FFFBEF"),
+    Violet("Amethyst", "#B794F6", "#6D28D9", "#E9D5FF", "#5B21B6", "#1E0E33", "#F8F3FF"),
+    Cyan("Aqua Lapis", "#35D6E7", "#0277BD", "#B8F3FA", "#0369A1", "#06262E", "#EFFBFE"),
+    Coral("Terracotta", "#FF8A65", "#B45335", "#FFD6C8", "#93452C", "#331507", "#FFF4F0"),
+    Pink("Salmon Pop", "#FF7A90", "#BE3A57", "#FFD0DA", "#A62D49", "#330D14", "#FFF1F4"),
+    Emerald("Modern Myrtle", "#48D6A5", "#087C64", "#BDEEDC", "#066B56", "#05291F", "#EFFCF7"),
+    Indigo("Electric Blue", "#5BC0FF", "#1D4ED8", "#BFDBFE", "#1E40AF", "#072033", "#F0F7FF"),
+    Teal("Jade Energy", "#54D17A", "#138A4E", "#C8F6D4", "#0F7A43", "#06220F", "#F1FBF4"),
+    Slate("Ruby Slate", "#F0627D", "#9F1239", "#FFD0DB", "#881337", "#330913", "#FFF1F4")
 }
 
 enum class UiSurface(
@@ -199,7 +203,7 @@ data class FinanceUiState(
     val userName: String = "",
     val currency: CurrencyOption = CurrencyOption.INR,
     val themeMode: ThemeMode = ThemeMode.Dark,
-    val uiAccent: UiAccent = UiAccent.Sky,
+    val uiAccent: UiAccent = UiAccent.Lime,
     val uiSurface: UiSurface = UiSurface.Midnight,
     val selectedTab: ScreenTab = ScreenTab.Dashboard,
     val selectedMonth: YearMonth = YearMonth.now(),

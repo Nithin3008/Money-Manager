@@ -343,7 +343,9 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
         categoryId: Long,
         accountId: Long?,
         rawMessage: String? = null,
-        isAutoDetected: Boolean = false
+        isAutoDetected: Boolean = false,
+        description: String? = null,
+        timestampMillis: Long? = null
     ) {
         if (name.isBlank() || amount <= 0.0) return
         viewModelScope.launch {
@@ -354,12 +356,13 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
                 type = type,
                 categoryId = categoryId,
                 accountId = accountId,
-                timestampMillis = System.currentTimeMillis(),
+                timestampMillis = timestampMillis ?: System.currentTimeMillis(),
                 isAutoDetected = isAutoDetected,
                 rawMessage = rawMessage,
                 smsBankLabel = null,
                 excludeFromSummary = false,
-                isCreditCardTransaction = false
+                isCreditCardTransaction = false,
+                description = description?.trim()?.takeIf { it.isNotBlank() }
             )
             val transaction = normalizeInvestmentTransaction(draftTransaction)
             repository.addTransaction(transaction)
@@ -466,13 +469,26 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun updateTransactionDetails(transactionId: Long, type: TransactionType, categoryId: Long, description: String?) {
+    fun updateTransactionDetails(
+        transactionId: Long,
+        type: TransactionType,
+        categoryId: Long,
+        description: String?,
+        name: String? = null,
+        amount: Double? = null,
+        accountId: Long? = null,
+        timestampMillis: Long? = null
+    ) {
         viewModelScope.launch {
             val transaction = _uiState.value.transactions.firstOrNull { it.id == transactionId } ?: return@launch
             val updatedTransaction = normalizeInvestmentTransaction(
                 transaction.copy(
+                    name = name?.trim()?.takeIf { it.isNotBlank() } ?: transaction.name,
+                    amount = amount?.takeIf { it > 0.0 } ?: transaction.amount,
                     type = type,
                     categoryId = categoryId,
+                    accountId = accountId,
+                    timestampMillis = timestampMillis ?: transaction.timestampMillis,
                     description = description?.trim()?.takeIf { it.isNotBlank() }
                 ),
                 originalTransaction = transaction

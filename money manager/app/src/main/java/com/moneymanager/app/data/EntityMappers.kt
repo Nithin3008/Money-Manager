@@ -41,7 +41,7 @@ internal fun UserSettingsEntity.applyTo(current: FinanceUiState): FinanceUiState
         } ?: ThemeMode.Dark,
         uiAccent = uiAccent.let { accent ->
             UiAccent.entries.firstOrNull { it.name == accent }
-        } ?: UiAccent.Sky,
+        } ?: UiAccent.Lime,
         uiSurface = uiSurface.let { surface ->
             UiSurface.entries.firstOrNull { it.name == surface }
         } ?: UiSurface.Midnight,

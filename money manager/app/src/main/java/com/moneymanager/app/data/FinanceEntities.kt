@@ -16,7 +16,7 @@ data class UserSettingsEntity(
     val bankSmsSetupCompleted: Boolean = false,
     val onboardedAtMillis: Long = 0L,
     val summaryAccountFilterIdsCsv: String = "",
-    val uiAccent: String = "Sky",
+    val uiAccent: String = "Lime",
     val uiSurface: String = "Midnight",
     val defaultAccountId: Long? = null
 )
