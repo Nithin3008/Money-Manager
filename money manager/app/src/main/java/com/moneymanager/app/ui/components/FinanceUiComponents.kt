@@ -102,29 +102,6 @@ internal fun TransactionTypeChip(type: TransactionType, selected: Boolean, onCli
 }
 
 @Composable
-internal fun ActionPanel(
-    title: String,
-    subtitle: String,
-    icon: ImageVector,
-    action: String,
-    onClick: () -> Unit
-) {
-    ElevatedPanel {
-        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconTile(icon, PrimaryBlue)
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
-                Text(title, color = TextPrimary, style = MaterialTheme.typography.titleMedium)
-                Text(subtitle, color = TextDim, style = MaterialTheme.typography.bodyMedium)
-            }
-            TextButton(onClick = onClick) {
-                Text(action, color = PrimarySoft)
-            }
-        }
-    }
-}
-
-@Composable
 internal fun DashboardPagination(
     pageCount: Int,
     currentPage: Int,

@@ -1,6 +1,5 @@
 package com.moneymanager.app.ui
 
-import android.app.DatePickerDialog
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -45,6 +44,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.ArrowForward
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.rounded.ReceiptLong
@@ -55,11 +55,15 @@ import androidx.compose.material.icons.rounded.Backup
 import androidx.compose.material.icons.rounded.BarChart
 import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.Category
+import androidx.compose.material.icons.rounded.ChevronLeft
+import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.CurrencyRupee
 import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.DarkMode
+import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.EditCalendar
 import androidx.compose.material.icons.rounded.EditNote
 import androidx.compose.material.icons.rounded.Event
 import androidx.compose.material.icons.rounded.Label
@@ -178,6 +182,7 @@ import java.text.NumberFormat
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.util.Currency
 import java.util.Locale
 import kotlinx.coroutines.delay
@@ -351,7 +356,7 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
                         onAddAccount = viewModel::addBankAccount,
                         onDefaultAccountSelected = viewModel::setDefaultAccount,
                         onDeleteCategory = viewModel::deleteCategory,
-                        onCategoryColorSelected = viewModel::updateCategoryColor,
+                        onUpdateCategory = viewModel::updateCategory,
                         onDeleteAllData = viewModel::deleteAllSavedData,
                         onExportData = { exportLauncher.launch("MoneyManager_Backup_${LocalDate.now()}.json") },
                         onImportData = { importLauncher.launch(arrayOf("application/json")) },
@@ -529,7 +534,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.settingsContent(
     onAddAccount: (String, Double) -> Unit,
     onDefaultAccountSelected: (Long?) -> Unit,
     onDeleteCategory: (Long) -> Unit,
-    onCategoryColorSelected: (Long, String) -> Unit,
+    onUpdateCategory: (Long, String, String, String) -> Unit,
     onDeleteAllData: () -> Unit,
     onExportData: () -> Unit,
     onImportData: () -> Unit,
@@ -552,7 +557,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.settingsContent(
             onAddAccount = onAddAccount,
             onDefaultAccountSelected = onDefaultAccountSelected,
             onDeleteCategory = onDeleteCategory,
-            onCategoryColorSelected = onCategoryColorSelected,
+            onUpdateCategory = onUpdateCategory,
             onDeleteAllData = onDeleteAllData,
             onExportData = onExportData,
             onImportData = onImportData,
@@ -563,7 +568,6 @@ private fun androidx.compose.foundation.lazy.LazyListScope.settingsContent(
 
 private enum class SettingsDetail(val title: String) {
     Accounts("Accounts"),
-    Categories("Categories"),
     DefaultAccount("Default account"),
     Currency("Currency"),
     Surface("Surface style"),
@@ -588,13 +592,15 @@ private fun ProfileScreen(
     onAddAccount: (String, Double) -> Unit,
     onDefaultAccountSelected: (Long?) -> Unit,
     onDeleteCategory: (Long) -> Unit,
-    onCategoryColorSelected: (Long, String) -> Unit,
+    onUpdateCategory: (Long, String, String, String) -> Unit,
     onDeleteAllData: () -> Unit,
     onExportData: () -> Unit,
     onImportData: () -> Unit,
     onExportSmsDebug: () -> Unit
 ) {
     var detail by remember { mutableStateOf<SettingsDetail?>(null) }
+    var showCategories by remember { mutableStateOf(false) }
+    var editingCategory by remember { mutableStateOf<CategoryItem?>(null) }
     val defaultAccountName = state.accounts.firstOrNull { it.id == state.defaultAccountId }?.name ?: "None"
 
     Column(Modifier.fillMaxWidth()) {
@@ -611,7 +617,7 @@ private fun ProfileScreen(
         SettingsSectionLabel("Money setup")
         SettingsCard {
             SettingsRow(Icons.Rounded.AccountBalance, "Accounts", state.accounts.size.toString(), showDivider = true) { detail = SettingsDetail.Accounts }
-            SettingsRow(Icons.Rounded.Category, "Categories", state.categories.size.toString(), showDivider = true) { detail = SettingsDetail.Categories }
+            SettingsRow(Icons.Rounded.Category, "Categories", state.categories.size.toString(), showDivider = true) { showCategories = true }
             SettingsRow(Icons.Rounded.Star, "Default account", defaultAccountName, showDivider = true) { detail = SettingsDetail.DefaultAccount }
             SettingsRow(Icons.Rounded.CurrencyRupee, "Currency", state.currency.currencyCode, showDivider = false) { detail = SettingsDetail.Currency }
         }
@@ -659,20 +665,6 @@ private fun ProfileScreen(
                     onAddAccount = onAddAccount,
                     onDefaultAccountSelected = onDefaultAccountSelected
                 )
-                SettingsDetail.Categories -> Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                    CategorySettingsGroup(
-                        categories = state.categories,
-                        onDelete = onDeleteCategory,
-                        onColorSelected = onCategoryColorSelected
-                    )
-                    ActionPanel(
-                        title = "Create category",
-                        subtitle = "Add a custom spending label with its own icon and color.",
-                        icon = Icons.Rounded.Category,
-                        action = "Create",
-                        onClick = { onAddCategory(true); detail = null }
-                    )
-                }
                 SettingsDetail.DefaultAccount -> Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
                         "Used for Home, Reports, and new manual transactions.",
@@ -717,6 +709,30 @@ private fun ProfileScreen(
                 )
             }
         }
+    }
+
+    if (showCategories) {
+        CategoriesGridSheet(
+            categories = state.categories,
+            onDismiss = { showCategories = false },
+            onEditCategory = { editingCategory = it },
+            onNewCategory = { onAddCategory(true) }
+        )
+    }
+
+    editingCategory?.let { category ->
+        EditCategorySheet(
+            category = category,
+            onDismiss = { editingCategory = null },
+            onSave = { id, name, iconKey, colorHex ->
+                onUpdateCategory(id, name, iconKey, colorHex)
+                editingCategory = null
+            },
+            onDelete = { id ->
+                onDeleteCategory(id)
+                editingCategory = null
+            }
+        )
     }
 }
 
@@ -1594,7 +1610,12 @@ private fun SheetDragHandle() {
 }
 
 @Composable
-private fun SheetTitleBar(title: String, onDismiss: () -> Unit, trailing: (@Composable () -> Unit)? = null) {
+private fun SheetTitleBar(
+    title: String,
+    onDismiss: () -> Unit,
+    icon: ImageVector = Icons.Rounded.Close,
+    trailing: (@Composable () -> Unit)? = null
+) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         Box(
             modifier = Modifier
@@ -1604,7 +1625,7 @@ private fun SheetTitleBar(title: String, onDismiss: () -> Unit, trailing: (@Comp
                 .clickable(onClick = onDismiss),
             contentAlignment = Alignment.Center
         ) {
-            Icon(Icons.Rounded.Close, contentDescription = "Close", tint = TextMuted, modifier = Modifier.size(22.dp))
+            Icon(icon, contentDescription = "Close", tint = TextMuted, modifier = Modifier.size(22.dp))
         }
         Text(
             title,
@@ -1759,25 +1780,14 @@ private fun AccountTile(state: FinanceUiState, accountId: Long?, onSelect: (Long
 
 @Composable
 private fun DateTile(date: LocalDate, onDateSelected: (LocalDate) -> Unit, modifier: Modifier = Modifier) {
-    val context = LocalContext.current
+    var showPicker by remember { mutableStateOf(false) }
     val label = if (date == LocalDate.now()) "Today · ${date.monthDayLabel()}" else date.mediumDateLabel()
     Row(
         modifier = modifier
             .height(56.dp)
             .clip(RoundedCornerShape(16.dp))
             .background(Navy850)
-            .clickable {
-                DatePickerDialog(
-                    context,
-                    { _, year, month, day -> onDateSelected(LocalDate.of(year, month + 1, day)) },
-                    date.year,
-                    date.monthValue - 1,
-                    date.dayOfMonth
-                ).apply {
-                    datePicker.maxDate = System.currentTimeMillis()
-                    show()
-                }
-            }
+            .clickable { showPicker = true }
             .padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -1787,6 +1797,219 @@ private fun DateTile(date: LocalDate, onDateSelected: (LocalDate) -> Unit, modif
             Text("Date", color = TextDim, fontSize = 10.5.sp, fontWeight = FontWeight.Medium)
             Text(label, color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
+    }
+
+    if (showPicker) {
+        AppDatePickerSheet(
+            initialDate = date,
+            maxDate = LocalDate.now(),
+            onDismiss = { showPicker = false },
+            onConfirm = { onDateSelected(it); showPicker = false }
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun AppDatePickerSheet(
+    initialDate: LocalDate,
+    maxDate: LocalDate,
+    onDismiss: () -> Unit,
+    onConfirm: (LocalDate) -> Unit
+) {
+    var selectedDate by remember { mutableStateOf(initialDate) }
+    var displayedMonth by remember { mutableStateOf(YearMonth.from(initialDate)) }
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val today = LocalDate.now()
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = Navy900,
+        contentColor = TextPrimary,
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        dragHandle = { SheetDragHandle() }
+    ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(start = 20.dp, top = 4.dp, end = 20.dp, bottom = 24.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(bottom = 18.dp)) {
+                val thisMonthStart = YearMonth.now().atDay(1)
+                DatePickerQuickChip("Today", selectedDate == today, Modifier.weight(1f)) {
+                    selectedDate = today; displayedMonth = YearMonth.from(today)
+                }
+                DatePickerQuickChip("Yesterday", selectedDate == today.minusDays(1), Modifier.weight(1f)) {
+                    val d = today.minusDays(1); selectedDate = d; displayedMonth = YearMonth.from(d)
+                }
+                DatePickerQuickChip("This month", selectedDate == thisMonthStart, Modifier.weight(1f)) {
+                    selectedDate = thisMonthStart; displayedMonth = YearMonth.from(thisMonthStart)
+                }
+            }
+
+            Row(
+                verticalAlignment = Alignment.Bottom,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
+            ) {
+                Column {
+                    Text("SELECTED DATE", color = TextDim, fontSize = 11.5.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.4.sp)
+                    Text(
+                        selectedDate.format(dateReadoutFormatter),
+                        color = TextPrimary,
+                        fontSize = 26.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = (-0.5).sp,
+                        modifier = Modifier.padding(top = 2.dp)
+                    )
+                }
+                Box(
+                    Modifier.size(44.dp).clip(RoundedCornerShape(14.dp)).background(PrimaryBlue),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Rounded.EditCalendar, contentDescription = null, tint = OnAccent, modifier = Modifier.size(22.dp))
+                }
+            }
+
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
+                Text(
+                    "${displayedMonth.month.getDisplayName(java.time.format.TextStyle.FULL, Locale.getDefault())} ${displayedMonth.year}",
+                    color = TextPrimary,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f)
+                )
+                val canGoNext = displayedMonth < YearMonth.from(maxDate)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Box(
+                        Modifier
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Navy800)
+                            .clickable { displayedMonth = displayedMonth.minusMonths(1) },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Rounded.ChevronLeft, contentDescription = "Previous month", tint = TextMuted, modifier = Modifier.size(20.dp))
+                    }
+                    Box(
+                        Modifier
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(if (canGoNext) Navy800 else Navy800.copy(alpha = 0.4f))
+                            .clickable(enabled = canGoNext) { displayedMonth = displayedMonth.plusMonths(1) },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Rounded.ChevronRight,
+                            contentDescription = "Next month",
+                            tint = if (canGoNext) TextMuted else TextDim,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+            }
+
+            Row(Modifier.fillMaxWidth()) {
+                listOf("M", "T", "W", "T", "F", "S", "S").forEach { label ->
+                    Text(
+                        label,
+                        color = TextDim,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.weight(1f).padding(vertical = 6.dp)
+                    )
+                }
+            }
+
+            val leadBlanks = displayedMonth.atDay(1).dayOfWeek.value - 1
+            val daysInMonth = displayedMonth.lengthOfMonth()
+            val totalCells = leadBlanks + daysInMonth
+            val rows = (totalCells + 6) / 7
+            for (row in 0 until rows) {
+                Row(Modifier.fillMaxWidth()) {
+                    for (col in 0 until 7) {
+                        val cellIndex = row * 7 + col
+                        val dayNum = cellIndex - leadBlanks + 1
+                        Box(Modifier.weight(1f).aspectRatio(1f), contentAlignment = Alignment.Center) {
+                            if (dayNum in 1..daysInMonth) {
+                                val cellDate = displayedMonth.atDay(dayNum)
+                                val isSelected = cellDate == selectedDate
+                                val isToday = cellDate == today
+                                val isFuture = cellDate > maxDate
+                                Box(
+                                    Modifier
+                                        .size(36.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(if (isSelected) PrimaryBlue else Color.Transparent)
+                                        .clickable(enabled = !isFuture) { selectedDate = cellDate },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        dayNum.toString(),
+                                        color = when {
+                                            isSelected -> OnAccent
+                                            isFuture -> TextDim.copy(alpha = 0.4f)
+                                            else -> TextPrimary
+                                        },
+                                        fontSize = 13.5.sp,
+                                        fontWeight = if (isSelected || isToday) FontWeight.Bold else FontWeight.Medium
+                                    )
+                                    if (isToday && !isSelected) {
+                                        Box(
+                                            Modifier
+                                                .align(Alignment.BottomCenter)
+                                                .padding(bottom = 5.dp)
+                                                .size(4.dp)
+                                                .clip(CircleShape)
+                                                .background(PrimaryBlue)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth().padding(top = 20.dp)) {
+                Row(
+                    Modifier
+                        .height(52.dp)
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(Navy800)
+                        .clickable(onClick = onDismiss)
+                        .padding(horizontal = 22.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Cancel", color = TextMuted, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                }
+                Row(
+                    Modifier
+                        .weight(1f)
+                        .height(52.dp)
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(PrimaryBlue)
+                        .clickable { onConfirm(selectedDate) },
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally)
+                ) {
+                    Icon(Icons.Rounded.Check, contentDescription = null, tint = OnAccent, modifier = Modifier.size(20.dp))
+                    Text("Set date", color = OnAccent, fontSize = 14.5.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DatePickerQuickChip(label: String, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
+    Box(
+        modifier
+            .height(38.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (selected) PrimaryBlue else Navy800)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(label, color = if (selected) OnAccent else TextMuted, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 
@@ -2456,172 +2679,67 @@ private fun BudgetCategoryTile(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+private val dateReadoutFormatter = DateTimeFormatter.ofPattern("EEE, d MMM")
+
+private val CategoryPreviewInk = Color(0xFF16220A)
+
 @Composable
-private fun AddCategorySheet(onDismiss: () -> Unit, onAdd: (String, String, String) -> Unit) {
-    var name by remember { mutableStateOf("") }
-    var selectedIconKey by remember { mutableStateOf(MoneyIcons.frequentCategoryIcons.first().key) }
-    var selectedColor by remember { mutableStateOf(categoryPalette.first()) }
-    var isExpense by remember { mutableStateOf(true) }
-    val selectedIcon = remember(selectedIconKey) {
-        MoneyIcons.allCategoryIcons.firstOrNull { it.key == selectedIconKey }
-            ?: MoneyIcons.frequentCategoryIcons.first()
-    }
-    val selectedColorValue = colorFromHex(selectedColor)
-    val previewInk = Color(0xFF16220A)
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        containerColor = Navy950,
-        contentColor = TextPrimary,
-        shape = RoundedCornerShape(topStart = 30.dp, topEnd = 30.dp),
-        dragHandle = { SheetDragHandle() }
+private fun CategoryLivePreview(name: String, icon: ImageVector, color: Color, typeLabel: String) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(24.dp))
+            .background(Navy850)
+            .padding(horizontal = 20.dp, vertical = 26.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Box(Modifier.fillMaxWidth().fillMaxHeight(0.94f).imePadding()) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState())
-                    .animateContentSize(tween(260, easing = FastOutSlowInEasing))
-                    .padding(start = 20.dp, top = 8.dp, end = 20.dp, bottom = 96.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                SheetTitleBar(title = "New category", onDismiss = onDismiss)
+        Box(
+            modifier = Modifier.size(76.dp).clip(RoundedCornerShape(24.dp)).background(color),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(icon, contentDescription = null, tint = CategoryPreviewInk, modifier = Modifier.size(38.dp))
+        }
+        Text(
+            name.ifBlank { "New category" },
+            color = TextPrimary,
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(top = 14.dp)
+        )
+        Text("$typeLabel · Preview", color = TextDim, fontSize = 12.sp, modifier = Modifier.padding(top = 3.dp))
+    }
+}
 
-                // Live preview
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(24.dp))
-                        .background(Navy850)
-                        .padding(horizontal = 20.dp, vertical = 26.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Box(
-                        modifier = Modifier.size(76.dp).clip(RoundedCornerShape(24.dp)).background(selectedColorValue),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(selectedIcon.icon, contentDescription = null, tint = previewInk, modifier = Modifier.size(38.dp))
-                    }
-                    Text(
-                        if (name.isBlank()) "New category" else name.trim(),
-                        color = TextPrimary,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(top = 14.dp)
-                    )
-                    Text(
-                        "${if (isExpense) "Expense" else "Income"} category · Preview",
-                        color = TextDim,
-                        fontSize = 12.sp,
-                        modifier = Modifier.padding(top = 3.dp)
-                    )
-                }
-
-                // Name
-                SheetSectionLabel("Name")
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(54.dp)
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(Navy850)
-                        .border(1.5.dp, PrimaryBlue, RoundedCornerShape(16.dp))
-                        .padding(horizontal = 16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Icon(Icons.Rounded.Label, contentDescription = null, tint = TextMuted, modifier = Modifier.size(21.dp))
-                    androidx.compose.foundation.text.BasicTextField(
-                        value = name,
-                        onValueChange = { name = it },
-                        modifier = Modifier.weight(1f),
-                        singleLine = true,
-                        textStyle = androidx.compose.ui.text.TextStyle(color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold),
-                        cursorBrush = androidx.compose.ui.graphics.SolidColor(PrimaryBlue),
-                        decorationBox = { inner ->
-                            Box {
-                                if (name.isEmpty()) Text("Category name", color = TextDim, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-                                inner()
-                            }
-                        }
-                    )
-                }
-
-                // Type segment (affects preview label only)
-                SheetSectionLabel("Type")
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(999.dp))
-                        .background(Navy850)
-                        .padding(5.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    CategoryTypePill("Expense", Icons.Rounded.SouthWest, isExpense) { isExpense = true }
-                    CategoryTypePill("Income", Icons.Rounded.NorthEast, !isExpense) { isExpense = false }
-                }
-
-                // Icon grid
-                SheetSectionLabel("Icon")
-                MoneyIcons.allCategoryIcons.chunked(6).forEach { rowIcons ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        rowIcons.forEach { option ->
-                            val selected = option.key == selectedIconKey
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .aspectRatio(1f)
-                                    .clip(RoundedCornerShape(15.dp))
-                                    .background(if (selected) PrimaryBlue else Navy850)
-                                    .border(1.5.dp, if (selected) PrimaryBlue else LineColor, RoundedCornerShape(15.dp))
-                                    .clickable { selectedIconKey = option.key },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(option.icon, contentDescription = option.label, tint = if (selected) OnAccent else TextMuted, modifier = Modifier.size(22.dp))
-                            }
-                        }
-                        repeat(6 - rowIcons.size) { Spacer(Modifier.weight(1f)) }
-                    }
-                }
-
-                // Color picker
-                SheetSectionLabel("Color")
-                androidx.compose.foundation.layout.FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    categoryPalette.forEach { hex ->
-                        val color = colorFromHex(hex)
-                        val selected = hex == selectedColor
-                        Box(
-                            modifier = Modifier
-                                .size(44.dp)
-                                .clip(CircleShape)
-                                .then(if (selected) Modifier.border(2.5.dp, color, CircleShape) else Modifier)
-                                .padding(if (selected) 4.dp else 2.dp)
-                                .clip(CircleShape)
-                                .background(color)
-                                .clickable { selectedColor = hex },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            if (selected) Icon(Icons.Rounded.Check, contentDescription = null, tint = previewInk, modifier = Modifier.size(20.dp))
-                        }
-                    }
+@Composable
+private fun CategoryNameField(value: String, onValueChange: (String) -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(54.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(Navy850)
+            .border(1.5.dp, PrimaryBlue, RoundedCornerShape(16.dp))
+            .padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Icon(Icons.Rounded.Label, contentDescription = null, tint = TextMuted, modifier = Modifier.size(21.dp))
+        androidx.compose.foundation.text.BasicTextField(
+            value = value,
+            onValueChange = onValueChange,
+            modifier = Modifier.weight(1f),
+            singleLine = true,
+            textStyle = androidx.compose.ui.text.TextStyle(color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold),
+            cursorBrush = androidx.compose.ui.graphics.SolidColor(PrimaryBlue),
+            decorationBox = { inner ->
+                Box {
+                    if (value.isEmpty()) Text("Category name", color = TextDim, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                    inner()
                 }
             }
-
-            SheetBottomAction(
-                text = "Create category",
-                enabled = name.isNotBlank(),
-                onClick = { onAdd(name.trim(), selectedIconKey, selectedColor) },
-                modifier = Modifier.align(Alignment.BottomCenter)
-            )
-        }
+        )
     }
 }
 
@@ -2643,49 +2761,424 @@ private fun RowScope.CategoryTypePill(label: String, icon: ImageVector, active: 
 }
 
 @Composable
-private fun ColorSwatches(selected: String, onSelected: (String) -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        categoryPalette.chunked(5).forEach { rowColors ->
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                rowColors.forEach { colorHex ->
-                    val color = colorFromHex(colorHex)
-                    val selectedColor = selected == colorHex
-                    val scale by animateFloatAsState(
-                        targetValue = if (selectedColor) 1.08f else 1f,
-                        animationSpec = tween(220, easing = FastOutSlowInEasing),
-                        label = "swatchScale"
-                    )
+private fun CategoryIconGridPicker(selectedKey: String, onSelect: (String) -> Unit) {
+    MoneyIcons.allCategoryIcons.chunked(6).forEach { rowIcons ->
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            rowIcons.forEach { option ->
+                val selected = option.key == selectedKey
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .aspectRatio(1f)
+                        .clip(RoundedCornerShape(15.dp))
+                        .background(if (selected) PrimaryBlue else Navy850)
+                        .border(1.5.dp, if (selected) PrimaryBlue else LineColor, RoundedCornerShape(15.dp))
+                        .clickable { onSelect(option.key) },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(option.icon, contentDescription = option.label, tint = if (selected) OnAccent else TextMuted, modifier = Modifier.size(22.dp))
+                }
+            }
+            repeat(6 - rowIcons.size) { Spacer(Modifier.weight(1f)) }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun CategoryColorGridPicker(selectedHex: String, onSelect: (String) -> Unit) {
+    androidx.compose.foundation.layout.FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        categoryPalette.forEach { hex ->
+            val color = colorFromHex(hex)
+            val selected = hex == selectedHex
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .then(if (selected) Modifier.border(2.5.dp, color, CircleShape) else Modifier)
+                    .padding(if (selected) 4.dp else 2.dp)
+                    .clip(CircleShape)
+                    .background(color)
+                    .clickable { onSelect(hex) },
+                contentAlignment = Alignment.Center
+            ) {
+                if (selected) Icon(Icons.Rounded.Check, contentDescription = null, tint = CategoryPreviewInk, modifier = Modifier.size(20.dp))
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+private fun AddCategorySheet(onDismiss: () -> Unit, onAdd: (String, String, String) -> Unit) {
+    var name by remember { mutableStateOf("") }
+    var selectedIconKey by remember { mutableStateOf(MoneyIcons.frequentCategoryIcons.first().key) }
+    var selectedColor by remember { mutableStateOf(categoryPalette.first()) }
+    var isExpense by remember { mutableStateOf(true) }
+    val selectedIcon = remember(selectedIconKey) {
+        MoneyIcons.allCategoryIcons.firstOrNull { it.key == selectedIconKey }
+            ?: MoneyIcons.frequentCategoryIcons.first()
+    }
+    val selectedColorValue = colorFromHex(selectedColor)
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = Navy950,
+        contentColor = TextPrimary,
+        shape = RoundedCornerShape(topStart = 30.dp, topEnd = 30.dp),
+        dragHandle = { SheetDragHandle() }
+    ) {
+        Box(Modifier.fillMaxWidth().fillMaxHeight(0.94f).imePadding()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .animateContentSize(tween(260, easing = FastOutSlowInEasing))
+                    .padding(start = 20.dp, top = 8.dp, end = 20.dp, bottom = 96.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                SheetTitleBar(title = "New category", onDismiss = onDismiss)
+
+                CategoryLivePreview(
+                    name = name,
+                    icon = selectedIcon.icon,
+                    color = selectedColorValue,
+                    typeLabel = if (isExpense) "Expense" else "Income"
+                )
+
+                SheetSectionLabel("Name")
+                CategoryNameField(value = name, onValueChange = { name = it })
+
+                // Type segment (affects preview label only)
+                SheetSectionLabel("Type")
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(Navy850)
+                        .padding(5.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    CategoryTypePill("Expense", Icons.Rounded.SouthWest, isExpense) { isExpense = true }
+                    CategoryTypePill("Income", Icons.Rounded.NorthEast, !isExpense) { isExpense = false }
+                }
+
+                SheetSectionLabel("Icon")
+                CategoryIconGridPicker(selectedKey = selectedIconKey, onSelect = { selectedIconKey = it })
+
+                SheetSectionLabel("Color")
+                CategoryColorGridPicker(selectedHex = selectedColor, onSelect = { selectedColor = it })
+            }
+
+            SheetBottomAction(
+                text = "Create category",
+                enabled = name.isNotBlank(),
+                onClick = { onAdd(name.trim(), selectedIconKey, selectedColor) },
+                modifier = Modifier.align(Alignment.BottomCenter)
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun EditCategorySheet(
+    category: CategoryItem,
+    onDismiss: () -> Unit,
+    onSave: (Long, String, String, String) -> Unit,
+    onDelete: (Long) -> Unit
+) {
+    var name by remember(category.id) { mutableStateOf(category.name) }
+    var selectedIconKey by remember(category.id) { mutableStateOf(category.iconKey) }
+    var selectedColor by remember(category.id) { mutableStateOf(category.colorHex) }
+    val selectedIcon = remember(selectedIconKey) {
+        MoneyIcons.allCategoryIcons.firstOrNull { it.key == selectedIconKey } ?: MoneyIcons.frequentCategoryIcons.first()
+    }
+    val selectedColorValue = colorFromHex(selectedColor)
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = Navy950,
+        contentColor = TextPrimary,
+        shape = RoundedCornerShape(topStart = 30.dp, topEnd = 30.dp),
+        dragHandle = { SheetDragHandle() }
+    ) {
+        Box(Modifier.fillMaxWidth().fillMaxHeight(0.94f).imePadding()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .animateContentSize(tween(260, easing = FastOutSlowInEasing))
+                    .padding(start = 20.dp, top = 8.dp, end = 20.dp, bottom = if (category.isDefault) 96.dp else 150.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                SheetTitleBar(title = "Edit category", onDismiss = onDismiss)
+
+                CategoryLivePreview(
+                    name = name,
+                    icon = selectedIcon.icon,
+                    color = selectedColorValue,
+                    typeLabel = "Expense"
+                )
+
+                SheetSectionLabel("Name")
+                CategoryNameField(value = name, onValueChange = { name = it })
+
+                SheetSectionLabel("Icon")
+                CategoryIconGridPicker(selectedKey = selectedIconKey, onSelect = { selectedIconKey = it })
+
+                SheetSectionLabel("Color")
+                CategoryColorGridPicker(selectedHex = selectedColor, onSelect = { selectedColor = it })
+            }
+
+            Column(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .background(Navy950)
+                    .padding(start = 20.dp, top = 12.dp, end = 20.dp, bottom = 20.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                val saveEnabled = name.isNotBlank()
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(54.dp)
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(if (saveEnabled) PrimaryBlue else PrimaryBlue.copy(alpha = 0.4f))
+                        .clickable(enabled = saveEnabled) { onSave(category.id, name.trim(), selectedIconKey, selectedColor) },
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally)
+                ) {
+                    Icon(Icons.Rounded.Check, contentDescription = null, tint = OnAccent, modifier = Modifier.size(21.dp))
+                    Text("Save changes", color = OnAccent, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                }
+                if (!category.isDefault) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(50.dp)
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(LossRed.copy(alpha = if (isDarkTheme()) 0.12f else 0.10f))
+                            .clickable { showDeleteConfirm = true },
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally)
+                    ) {
+                        Icon(Icons.Rounded.Delete, contentDescription = null, tint = LossRed, modifier = Modifier.size(20.dp))
+                        Text("Delete category", color = LossRed, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+
+    if (showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            title = { Text("Delete \"${category.name}\"?") },
+            text = { Text("Existing transactions in this category keep their history but the category will no longer be selectable.", color = TextMuted) },
+            confirmButton = {
+                TextButton(onClick = { showDeleteConfirm = false; onDelete(category.id) }) {
+                    Text("Delete", color = LossRed, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirm = false }) { Text("Cancel") }
+            },
+            containerColor = Navy850,
+            titleContentColor = TextPrimary,
+            textContentColor = TextMuted
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CategoriesGridSheet(
+    categories: List<CategoryItem>,
+    onDismiss: () -> Unit,
+    onEditCategory: (CategoryItem) -> Unit,
+    onNewCategory: () -> Unit
+) {
+    var query by remember { mutableStateOf("") }
+    var searchOpen by remember { mutableStateOf(false) }
+    val filtered = remember(categories, query) {
+        if (query.isBlank()) categories else categories.filter { it.name.contains(query, ignoreCase = true) }
+    }
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = Navy950,
+        contentColor = TextPrimary,
+        shape = RoundedCornerShape(topStart = 30.dp, topEnd = 30.dp),
+        dragHandle = { SheetDragHandle() }
+    ) {
+        Box(Modifier.fillMaxWidth().fillMaxHeight(0.94f).imePadding()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .padding(start = 20.dp, top = 8.dp, end = 20.dp, bottom = 96.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Box(
                         modifier = Modifier
-                            .size(46.dp)
-                            .scale(scale)
-                            .clip(CircleShape)
-                            .background(if (selectedColor) Color.White else color.copy(alpha = 0.16f))
-                            .border(
-                                width = if (selectedColor) 3.dp else 1.dp,
-                                color = if (selectedColor) Color.White else color.copy(alpha = 0.72f),
-                                shape = CircleShape
-                            )
-                            .clickable { onSelected(colorHex) },
+                            .size(40.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(Navy850)
+                            .clickable {
+                                if (searchOpen) {
+                                    searchOpen = false
+                                    query = ""
+                                } else {
+                                    onDismiss()
+                                }
+                            },
                         contentAlignment = Alignment.Center
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(if (selectedColor) 32.dp else 34.dp)
-                                .clip(CircleShape)
-                                .background(color),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            if (selectedColor) {
-                                Icon(Icons.Rounded.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back", tint = TextMuted, modifier = Modifier.size(22.dp))
+                    }
+                    if (searchOpen) {
+                        androidx.compose.foundation.text.BasicTextField(
+                            value = query,
+                            onValueChange = { query = it },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true,
+                            textStyle = androidx.compose.ui.text.TextStyle(color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold),
+                            cursorBrush = androidx.compose.ui.graphics.SolidColor(PrimaryBlue),
+                            decorationBox = { inner ->
+                                Box {
+                                    if (query.isEmpty()) Text("Search categories", color = TextDim, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                                    inner()
+                                }
                             }
+                        )
+                    } else {
+                        Text(
+                            "Categories",
+                            color = TextPrimary,
+                            fontSize = 22.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = (-0.3).sp,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(Navy850)
+                            .clickable {
+                                searchOpen = !searchOpen
+                                if (!searchOpen) query = ""
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            if (searchOpen) Icons.Rounded.Close else Icons.Rounded.Search,
+                            contentDescription = if (searchOpen) "Close search" else "Search",
+                            tint = TextMuted,
+                            modifier = Modifier.size(21.dp)
+                        )
+                    }
+                }
+
+                Text(
+                    "${filtered.size} categories · tap a tile to edit",
+                    color = TextDim,
+                    fontSize = 12.5.sp,
+                    fontWeight = FontWeight.Medium
+                )
+
+                if (filtered.isEmpty()) {
+                    EmptyStateCard(
+                        icon = Icons.Rounded.Category,
+                        title = "No categories found",
+                        caption = "Try a different search or create a new category."
+                    )
+                } else {
+                    filtered.chunked(3).forEach { rowCategories ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            rowCategories.forEach { category ->
+                                CategoryGridTile(
+                                    category = category,
+                                    onClick = { onEditCategory(category) },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                            repeat(3 - rowCategories.size) { Spacer(Modifier.weight(1f)) }
                         }
                     }
                 }
-                repeat(5 - rowColors.size) {
-                    Spacer(Modifier.size(46.dp))
-                }
             }
+
+            SheetBottomAction(
+                text = "New category",
+                enabled = true,
+                onClick = onNewCategory,
+                modifier = Modifier.align(Alignment.BottomCenter)
+            )
+        }
+    }
+}
+
+@Composable
+private fun CategoryGridTile(category: CategoryItem, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val color = categoryColor(category, TransactionType.Expense)
+    Box(
+        modifier = modifier
+            .aspectRatio(1f)
+            .clip(RoundedCornerShape(20.dp))
+            .background(Navy900)
+            .border(1.dp, LineColor, RoundedCornerShape(20.dp))
+            .clickable(onClick = onClick)
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(RoundedCornerShape(15.dp))
+                    .background(color.copy(alpha = if (isDarkTheme()) 0.20f else 0.16f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(category.icon, contentDescription = null, tint = color, modifier = Modifier.size(24.dp))
+            }
+            Text(
+                category.name,
+                color = TextPrimary,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                textAlign = TextAlign.Center,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(top = 9.dp)
+            )
+        }
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(8.dp)
+                .size(22.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(Navy850),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(Icons.Rounded.Edit, contentDescription = "Edit", tint = TextDim, modifier = Modifier.size(14.dp))
         }
     }
 }
@@ -3478,59 +3971,6 @@ private fun DefaultAccountOption(
                 color = if (selected) PrimarySoft else TextDim,
                 style = MaterialTheme.typography.bodySmall
             )
-        }
-    }
-}
-
-@Composable
-private fun CategorySettingsGroup(
-    categories: List<CategoryItem>,
-    onDelete: (Long) -> Unit,
-    onColorSelected: (Long, String) -> Unit
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        LabelText("CATEGORIES")
-        ElevatedPanel {
-            Column {
-                categories.forEachIndexed { index, category ->
-                    var expanded by remember { mutableStateOf(false) }
-                    Column {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { expanded = !expanded }
-                                .padding(start = 16.dp, top = 12.dp, end = 16.dp, bottom = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(Modifier.size(12.dp).clip(CircleShape).background(categoryColor(category, TransactionType.Expense)))
-                            Spacer(Modifier.width(10.dp))
-                            Text(
-                                category.name,
-                                color = TextPrimary,
-                                modifier = Modifier.weight(1f),
-                                style = MaterialTheme.typography.bodyLarge
-                            )
-                            Text(if (expanded) "Hide" else "Edit", color = PrimarySoft, style = MaterialTheme.typography.labelMedium)
-                        }
-                        if (expanded) {
-                            Column(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                ColorSwatches(
-                                    selected = category.colorHex,
-                                    onSelected = { onColorSelected(category.id, it) }
-                                )
-                                if (!category.isDefault) {
-                                    TextButton(onClick = { onDelete(category.id) }) {
-                                        Text("Delete Category", color = LossRed)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    if (index != categories.lastIndex) {
-                        HorizontalDivider(color = appDividerColor(), modifier = Modifier.padding(horizontal = 16.dp))
-                    }
-                }
-            }
         }
     }
 }

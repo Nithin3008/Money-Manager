@@ -535,10 +535,18 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun updateCategoryColor(categoryId: Long, colorHex: String) {
+    fun updateCategory(categoryId: Long, name: String, iconKey: String, colorHex: String) {
+        if (name.isBlank()) return
         viewModelScope.launch {
             val category = _uiState.value.categories.firstOrNull { it.id == categoryId } ?: return@launch
-            repository.addCategory(category.copy(colorHex = colorHex))
+            repository.addCategory(
+                category.copy(
+                    name = name.trim(),
+                    iconKey = iconKey,
+                    icon = MoneyIcons.resolveCategoryIcon(iconKey),
+                    colorHex = colorHex
+                )
+            )
             reloadState()
         }
     }

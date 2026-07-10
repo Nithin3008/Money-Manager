@@ -1,6 +1,5 @@
 package com.moneymanager.app.ui
 
-import android.app.DatePickerDialog
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -27,7 +26,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -36,7 +34,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -58,7 +55,6 @@ import com.moneymanager.app.ui.theme.TextDim
 import com.moneymanager.app.ui.theme.TextMuted
 import com.moneymanager.app.ui.theme.TextPrimary
 import java.time.LocalDate
-import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 private val activityDayFormatter = DateTimeFormatter.ofPattern("d MMM")
@@ -248,45 +244,31 @@ private fun ActivityDateFilterRow(
     }
 
     if (showStartPicker) {
-        val context = LocalContext.current
-        LaunchedEffect(showStartPicker) {
-            DatePickerDialog(
-                context,
-                { _, year, month, day ->
-                    startDate = LocalDate.of(year, month + 1, day)
-                    if (startDate.isAfter(endDate)) endDate = startDate
-                    onDateFilterSelected(ActivityDateFilter.Custom, startDate, endDate)
-                    showStartPicker = false
-                },
-                startDate.year,
-                startDate.monthValue - 1,
-                startDate.dayOfMonth
-            ).apply {
-                datePicker.maxDate = today.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
-                show()
+        AppDatePickerSheet(
+            initialDate = startDate,
+            maxDate = today,
+            onDismiss = { showStartPicker = false },
+            onConfirm = { picked ->
+                startDate = picked
+                if (startDate.isAfter(endDate)) endDate = startDate
+                onDateFilterSelected(ActivityDateFilter.Custom, startDate, endDate)
+                showStartPicker = false
             }
-        }
+        )
     }
 
     if (showEndPicker) {
-        val context = LocalContext.current
-        LaunchedEffect(showEndPicker) {
-            DatePickerDialog(
-                context,
-                { _, year, month, day ->
-                    endDate = LocalDate.of(year, month + 1, day).coerceAtMost(today)
-                    if (startDate.isAfter(endDate)) startDate = endDate
-                    onDateFilterSelected(ActivityDateFilter.Custom, startDate, endDate)
-                    showEndPicker = false
-                },
-                endDate.year,
-                endDate.monthValue - 1,
-                endDate.dayOfMonth
-            ).apply {
-                datePicker.maxDate = today.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
-                show()
+        AppDatePickerSheet(
+            initialDate = endDate,
+            maxDate = today,
+            onDismiss = { showEndPicker = false },
+            onConfirm = { picked ->
+                endDate = picked.coerceAtMost(today)
+                if (startDate.isAfter(endDate)) startDate = endDate
+                onDateFilterSelected(ActivityDateFilter.Custom, startDate, endDate)
+                showEndPicker = false
             }
-        }
+        )
     }
 }
 
