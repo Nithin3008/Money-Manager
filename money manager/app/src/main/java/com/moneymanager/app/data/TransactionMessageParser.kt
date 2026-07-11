@@ -324,6 +324,9 @@ object TransactionMessageParser {
 
     private fun looksLikeInternalTransferMessage(message: String): Boolean {
         val lower = message.lowercase()
+        // Interest, refunds, and cashback land in "your a/c" too but are real income,
+        // never a leg of a self transfer.
+        if (listOf("interest", "refund", "cashback", "reversal").any { it in lower }) return false
         val explicitHints = listOf(
             "transfer to own",
             "transfer from own",
@@ -469,7 +472,7 @@ object TransactionMessageParser {
             .replace(Regex("""(?i)\s*/\s*sms\b.*$"""), "")
             .replace(Regex("""(?i)\s+sms\s+block\b.*$"""), "")
             .replace(Regex("""(?i)\s+call\s+\d{5,}.*$"""), "")
-            .replace(Regex("""(?i)\s+\b(?:ref|using)\b.*$"""), "")
+            .replace(Regex("""(?i)[\s.]+\b(?:ref|using)\b.*$"""), "")
             .trim(' ', '.', ',', '-', '_', ';', ':')
 
         if (cleaned.isBlank() || cleaned.lowercase().startsWith("rs")) {
