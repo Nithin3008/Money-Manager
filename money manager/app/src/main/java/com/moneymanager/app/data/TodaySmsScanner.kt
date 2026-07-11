@@ -24,40 +24,29 @@ data class SmsScanProgress(
 )
 
 class TodaySmsScanner(private val context: Context) {
-    private companion object {
-        const val MAX_LOCAL_LLM_MESSAGES_PER_SCAN = 30
-    }
 
     fun scanToday(
-        categories: List<LocalLlmCategoryOption> = emptyList(),
-        useLocalLlm: Boolean = false,
         onProgress: (SmsScanProgress) -> Unit = {}
     ): List<ParsedTransactionMessage> =
-        scanRange(LocalDate.now(), LocalDate.now(), categories, useLocalLlm, onProgress)
+        scanRange(LocalDate.now(), LocalDate.now(), onProgress)
 
     fun scanYesterday(
-        categories: List<LocalLlmCategoryOption> = emptyList(),
-        useLocalLlm: Boolean = false,
         onProgress: (SmsScanProgress) -> Unit = {}
     ): List<ParsedTransactionMessage> {
         val yesterday = LocalDate.now().minusDays(1)
-        return scanRange(yesterday, yesterday, categories, useLocalLlm, onProgress)
+        return scanRange(yesterday, yesterday, onProgress)
     }
 
     fun scanLast7Days(
-        categories: List<LocalLlmCategoryOption> = emptyList(),
-        useLocalLlm: Boolean = false,
         onProgress: (SmsScanProgress) -> Unit = {}
     ): List<ParsedTransactionMessage> {
         val today = LocalDate.now()
-        return scanRange(today.minusDays(6), today, categories, useLocalLlm, onProgress)
+        return scanRange(today.minusDays(6), today, onProgress)
     }
 
     fun scanRange(
         startDate: LocalDate,
         endDate: LocalDate,
-        categories: List<LocalLlmCategoryOption> = emptyList(),
-        useLocalLlm: Boolean = false,
         onProgress: (SmsScanProgress) -> Unit = {}
     ): List<ParsedTransactionMessage> {
         val startMillis = startDate.atStartOfDay(ZoneId.systemDefault())
@@ -96,27 +85,17 @@ class TodaySmsScanner(private val context: Context) {
 
         val total = rows.size
         onProgress(SmsScanProgress(processed = 0, total = total))
-        var localLlmMessagesUsed = 0
         rows.forEachIndexed { index, row ->
-            val useLocalLlmForRow = useLocalLlm &&
-                TransactionMessageParser.localLlmInterpreter != null &&
-                localLlmMessagesUsed < MAX_LOCAL_LLM_MESSAGES_PER_SCAN &&
-                TransactionMessageParser.shouldUseLocalLlmForMessage(row.body)
-            if (useLocalLlmForRow) localLlmMessagesUsed += 1
             TransactionMessageParser.parse(
                 message = row.body,
                 transactionTimestampMillis = row.timestampMillis,
-                sender = row.sender,
-                categories = categories,
-                useLocalLlm = useLocalLlmForRow
+                sender = row.sender
             )?.let(messages::add)
             val processed = index + 1
             if (processed == total || processed % 2 == 0) {
                 onProgress(SmsScanProgress(processed = processed, total = total))
             }
-            if (useLocalLlmForRow) {
-                Thread.sleep(150L)
-            } else if (processed % 4 == 0) {
+            if (processed % 4 == 0) {
                 Thread.yield()
             }
         }

@@ -87,9 +87,6 @@ dependencies {
     implementation("com.google.code.gson:gson:2.14.0")
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
-    runtimeOnly("com.google.ai.edge.litertlm:litertlm-android:0.12.0") {
-        exclude(group = "org.jetbrains.kotlin")
-    }
 
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")

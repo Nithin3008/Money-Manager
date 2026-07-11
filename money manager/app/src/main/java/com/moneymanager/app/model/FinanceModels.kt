@@ -233,7 +233,6 @@ data class FinanceUiState(
     val activityStartDate: java.time.LocalDate = java.time.LocalDate.now(),
     val activityEndDate: java.time.LocalDate = java.time.LocalDate.now(),
     val scanStatusMessage: String = "",
-    val offlineLlmStatusMessage: String = "",
     val scanStartedAtMillis: Long? = null,
     val scanProcessedCount: Int = 0,
     val scanTotalCount: Int = 0,
@@ -241,7 +240,6 @@ data class FinanceUiState(
     val dashboardTransactionPage: Int = 1,
     val activityTransactionPage: Int = 1,
     val isScanningMessages: Boolean = false,
-    val isOfflineLlmModelDownloading: Boolean = false,
     val showTransactionSheet: Boolean = false,
     val showBudgetSheet: Boolean = false,
     val showCategorySheet: Boolean = false,
@@ -258,8 +256,6 @@ data class FinanceUiState(
     /** Counterparty keys the user said are not salary; never suggest them again. */
     val dismissedSalaryKeys: Set<String> = emptySet(),
     val bankSmsSetupCompleted: Boolean = false,
-    val offlineLlmParsingEnabled: Boolean = false,
-    val offlineLlmModelDownloaded: Boolean = false,
     /** When the user completed registration; transactions dated before this never move account balances. */
     val onboardedAtMillis: Long = 0L,
     /** When the last SMS scan completed with permission; the next catch-up scan resumes here. */

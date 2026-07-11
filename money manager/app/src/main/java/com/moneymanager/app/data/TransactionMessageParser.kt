@@ -14,49 +14,10 @@ data class ParsedTransactionMessage(
     val requiresUserReview: Boolean = false,
     val isCreditCardTransaction: Boolean = false,
     val isInternalTransfer: Boolean = false,
-    val excludeFromSummary: Boolean = false,
-    val suggestedCategoryId: Long? = null,
-    val categoryRequiresUserReview: Boolean = false
-)
-
-/**
- * Contract for an on-device LLM or compact local classifier.
- *
- * Implementations should run fully offline and return only fields supported by the message text.
- * The parser still validates critical fields before using them.
- */
-fun interface LocalLlmTransactionInterpreter {
-    fun interpret(
-        message: String,
-        sender: String?,
-        categories: List<LocalLlmCategoryOption>
-    ): LocalLlmTransactionInterpretation?
-}
-
-data class LocalLlmCategoryOption(
-    val id: Long,
-    val name: String
-)
-
-data class LocalLlmTransactionInterpretation(
-    val amount: Double? = null,
-    val type: TransactionType? = null,
-    val bankName: String? = null,
-    val accountHint: String? = null,
-    val counterparty: String? = null,
-    val isCreditCardTransaction: Boolean? = null,
-    val isInternalTransfer: Boolean? = null,
-    val suggestedCategoryId: Long? = null,
-    val confidence: Double = 0.0
+    val excludeFromSummary: Boolean = false
 )
 
 object TransactionMessageParser {
-
-    private const val MIN_LOCAL_LLM_CONFIDENCE = 0.65
-    private const val AMOUNT_EPSILON = 0.02
-
-    @Volatile
-    var localLlmInterpreter: LocalLlmTransactionInterpreter? = null
 
     /**
      * The user's bank-registered name (from the profile). UPI legs whose counterparty
@@ -120,9 +81,7 @@ object TransactionMessageParser {
     fun parse(
         message: String,
         transactionTimestampMillis: Long = System.currentTimeMillis(),
-        sender: String? = null,
-        categories: List<LocalLlmCategoryOption> = emptyList(),
-        useLocalLlm: Boolean = false
+        sender: String? = null
     ): ParsedTransactionMessage? {
         val normalized = message.replace('\n', ' ').trim()
         if (SmsTransactionNormalizer.isFailedTransactionArtifact(normalized)) return null
@@ -132,69 +91,36 @@ object TransactionMessageParser {
         if (SmsTransactionNormalizer.isPaymentAppCardConfirmation(normalized)) return null
         if (!looksLikeBankTransaction(normalized)) return null
 
-        val amountCandidates = extractAmounts(normalized)
-        val allowLocalLlm = useLocalLlm && shouldUseLocalLlmForMessage(normalized)
-        val llmInterpretation = if (allowLocalLlm) {
-            localLlmInterpreter
-                ?.interpret(normalized, sender, categories)
-                ?.takeIf { it.confidence >= MIN_LOCAL_LLM_CONFIDENCE }
-        } else {
-            null
-        }
-        val usedLocalLlm = llmInterpretation != null
-        val suggestedCategoryId = llmInterpretation
-            ?.suggestedCategoryId
-            ?.takeIf { suggested -> categories.any { it.id == suggested } }
+        val amount = extractAmounts(normalized).firstOrNull() ?: return null
 
-        val amount = llmInterpretation
-            ?.amount
-            ?.takeIf { interpreted -> amountCandidates.any { sameAmount(it, interpreted) } }
-            ?: amountCandidates.firstOrNull()
-            ?: return null
-
-        val ruleDetectedType = detectTransactionType(normalized)
-        val modelDetectedType = llmInterpretation?.type?.takeIf { it != TransactionType.Transfer }
-        val detectedType = ruleDetectedType ?: modelDetectedType
+        val detectedType = detectTransactionType(normalized)
         val isForeignRemittance = foreignRemittanceRegex.containsMatchIn(normalized)
-        val requiresUserReview = detectedType == null || usedLocalLlm || isForeignRemittance
+        val requiresUserReview = detectedType == null || isForeignRemittance
         val type = detectedType ?: TransactionType.Expense
-        val isCreditCardTransaction = llmInterpretation?.isCreditCardTransaction
-            ?: (
-                SmsTransactionNormalizer.isCreditCardSpend(normalized) ||
-                    SmsTransactionNormalizer.isCreditCardRefund(normalized)
-                )
+        val isCreditCardTransaction = SmsTransactionNormalizer.isCreditCardSpend(normalized) ||
+            SmsTransactionNormalizer.isCreditCardRefund(normalized)
         val isCreditCardBillPayment = SmsTransactionNormalizer.isCreditCardBillPaymentDebit(normalized)
         val isOwnDepositDebit = ownDepositAutoDebitRegex.containsMatchIn(normalized)
-        val baseInternalTransfer = llmInterpretation?.isInternalTransfer
-            ?: (isCreditCardBillPayment || isOwnDepositDebit || looksLikeInternalTransferMessage(normalized))
+        val baseInternalTransfer = isCreditCardBillPayment ||
+            isOwnDepositDebit ||
+            looksLikeInternalTransferMessage(normalized)
 
         val senderLabel = sender?.let(::bankNameFromSender)
-        val baseBankName = llmInterpretation?.bankName?.cleanModelField(maxLength = 32)?.uppercase()
-            ?: senderLabel
+        val baseBankName = senderLabel
             ?: bankRegex.find(normalized)
                 ?.value?.trim()?.uppercase()
             ?: "Bank"
         val isCardSpendAccount = isCreditCardTransaction && !isCreditCardBillPayment
-        val accountHint = if (isCardSpendAccount) {
-            llmInterpretation?.accountHint?.filter(Char::isDigit)?.takeLast(6)?.takeIf { it.length >= 3 }
-                ?: extractAccountHint(normalized)
-        } else {
-            llmInterpretation?.accountHint?.filter(Char::isDigit)?.takeLast(6)?.takeIf { it.length >= 3 }
-                ?: extractAccountHint(normalized)
-        }
+        val accountHint = extractAccountHint(normalized)
         val bankName = accountHint?.let {
             if (isCardSpendAccount) "$baseBankName CARD $it" else "$baseBankName A/C $it"
         } ?: baseBankName
 
-        val modelCounterparty = llmInterpretation?.counterparty
-            ?.cleanModelField(maxLength = 40)
-            ?.takeIf { it.isNotBlank() && !it.lowercase().startsWith("rs") }
         val iciciCounterparty = if (isIciciCreditCardBillDebit(normalized)) "Credit Card Bill" else null
 
         // Try the semicolon pattern first, then fall back to to/at/for.
         var counterparty = (
-            modelCounterparty
-                ?: if (isCreditCardBillPayment) "Credit Card Payment" else null
+            (if (isCreditCardBillPayment) "Credit Card Payment" else null)
                 ?: iciciCounterparty
                 ?: if (isOwnDepositDebit) "RD/FD Deposit" else null
                 ?: if (isForeignRemittance) "Foreign Remittance" else null
@@ -232,23 +158,8 @@ object TransactionMessageParser {
             requiresUserReview = requiresUserReview,
             isCreditCardTransaction = isCreditCardTransaction,
             isInternalTransfer = isInternalTransfer,
-            excludeFromSummary = isInternalTransfer,
-            suggestedCategoryId = suggestedCategoryId,
-            categoryRequiresUserReview = suggestedCategoryId != null
+            excludeFromSummary = isInternalTransfer
         )
-    }
-
-    fun shouldUseLocalLlmForMessage(message: String): Boolean {
-        val normalized = message.replace('\n', ' ').trim()
-        if (normalized.isBlank()) return false
-        if (SmsTransactionNormalizer.isCreditCardDueReminder(normalized)) return false
-        if (SmsTransactionNormalizer.isPaymentAppCardConfirmation(normalized)) return false
-        if (SmsTransactionNormalizer.isCreditCardRefund(normalized)) return true
-        if (SmsTransactionNormalizer.isCreditCardSettlementArtifact(normalized)) return false
-        if (SmsTransactionNormalizer.isCreditCardStatementArtifact(normalized)) return false
-        return SmsTransactionNormalizer.isCreditCardSpend(normalized) ||
-            SmsTransactionNormalizer.isCreditCardBillPaymentDebit(normalized) ||
-            looksLikePossibleOwnTransferForAi(normalized)
     }
 
     private val debitActionRegexes = listOf(
@@ -359,18 +270,6 @@ object TransactionMessageParser {
         return distinctAccountHints.size >= 2 && listOf("own", "self", "my account", "your account").any { it in lower }
     }
 
-    private fun looksLikePossibleOwnTransferForAi(message: String): Boolean {
-        val lower = message.lowercase()
-        val hasTransferRail = listOf("transfer", "neft", "rtgs", "imps", "upi", "utr").any { it in lower }
-        if (!hasTransferRail) return false
-        if (looksLikeInternalTransferMessage(message)) return true
-        val distinctAccountHints = accountHintRegexes
-            .flatMap { regex -> regex.findAll(message).mapNotNull { it.groupValues.getOrNull(1) } }
-            .map { it.takeLast(4) }
-            .distinct()
-        return distinctAccountHints.size >= 1 && listOf("from", "to", "credited", "debited").any { it in lower }
-    }
-
     /**
      * Matches a UPI counterparty against [selfName], tolerating bank-side truncation
      * ("NITHI" for "Nithin", "DEVATHI N NI" for "Devathi N Nithin") and one-character
@@ -459,13 +358,6 @@ object TransactionMessageParser {
         }
     }
 
-    private fun String.cleanModelField(maxLength: Int): String {
-        return replace(Regex("""[\t\r\n]+"""), " ")
-            .replace(Regex("\\s+"), " ")
-            .trim()
-            .take(maxLength)
-    }
-
     private fun cleanCounterparty(counterparty: String, type: TransactionType): String {
         val cleaned = counterparty
             .replace(Regex("""(?i)\s+(?:to\s+dispute|dispute)\b.*$"""), "")
@@ -479,9 +371,5 @@ object TransactionMessageParser {
             return if (type == TransactionType.Income) "Bank Credit" else "Bank Transaction"
         }
         return cleaned.take(28)
-    }
-
-    private fun sameAmount(a: Double, b: Double): Boolean {
-        return kotlin.math.abs(a - b) <= AMOUNT_EPSILON
     }
 }

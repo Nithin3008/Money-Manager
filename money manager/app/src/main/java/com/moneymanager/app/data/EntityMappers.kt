@@ -27,8 +27,9 @@ internal fun FinanceUiState.toSettingsEntity(): UserSettingsEntity = UserSetting
     salaryCounterpartyKey = salaryCounterpartyKey?.takeIf { it.isNotBlank() },
     dismissedSalaryKeysCsv = dismissedSalaryKeys.joinToString(","),
     bankSmsSetupCompleted = bankSmsSetupCompleted,
-    offlineLlmParsingEnabled = offlineLlmParsingEnabled,
-    offlineLlmModelDownloaded = offlineLlmModelDownloaded,
+    // Legacy offline-LLM columns are kept in the schema to avoid a migration.
+    offlineLlmParsingEnabled = false,
+    offlineLlmModelDownloaded = false,
     onboardedAtMillis = onboardedAtMillis,
     lastSuccessfulScanMillis = lastSuccessfulScanMillis,
     defaultAccountId = defaultAccountId,
@@ -60,8 +61,6 @@ internal fun UserSettingsEntity.applyTo(current: FinanceUiState): FinanceUiState
             .filter { it.isNotEmpty() }
             .toSet(),
         bankSmsSetupCompleted = bankSmsSetupCompleted,
-        offlineLlmParsingEnabled = offlineLlmParsingEnabled,
-        offlineLlmModelDownloaded = offlineLlmModelDownloaded,
         onboardedAtMillis = onboardedAtMillis,
         lastSuccessfulScanMillis = lastSuccessfulScanMillis,
         defaultAccountId = defaultAccountId,
