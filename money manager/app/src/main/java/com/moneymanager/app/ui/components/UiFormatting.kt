@@ -7,9 +7,11 @@ import com.moneymanager.app.model.DetectedTransactionDraft
 import com.moneymanager.app.model.FinanceUiState
 import com.moneymanager.app.model.LedgerTransaction
 import com.moneymanager.app.model.TransactionType
+import com.moneymanager.app.ui.theme.LineColor
 import com.moneymanager.app.ui.theme.LossRed
 import com.moneymanager.app.ui.theme.MoneyGreen
 import com.moneymanager.app.ui.theme.Navy800
+import com.moneymanager.app.ui.theme.OnAccent
 import com.moneymanager.app.ui.theme.TextDim
 import com.moneymanager.app.ui.theme.TextMuted
 import com.moneymanager.app.ui.theme.TextPrimary
@@ -27,11 +29,11 @@ private val parsedColorCache = mutableMapOf<String, Color>()
 private val moneyFormatterCache = ThreadLocal<MutableMap<CurrencyOption, NumberFormat>>()
 
 internal fun appBorderColor(): Color {
-    return if (isAmoledTheme()) Color(0xFF323232) else Color(0xFFDDE3EA)
+    return LineColor
 }
 
 internal fun appDividerColor(): Color {
-    return if (isAmoledTheme()) Color(0xFF2A2A2A) else Color(0xFFE4E8EF)
+    return LineColor
 }
 
 internal fun appTrackColor(): Color {
@@ -47,11 +49,11 @@ internal fun isDarkTheme(): Boolean {
 }
 
 internal fun primaryContentColor(): Color {
-    return if (isDarkTheme()) Color(0xFF141414) else Color.White
+    return OnAccent
 }
 
 internal fun accentContentColor(): Color {
-    return if (isDarkTheme()) Color(0xFF141414) else Color.White
+    return OnAccent
 }
 
 internal fun categoryColor(category: CategoryItem?, type: TransactionType): Color {

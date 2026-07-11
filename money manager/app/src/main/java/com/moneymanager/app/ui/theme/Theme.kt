@@ -7,6 +7,7 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.unit.dp
 import com.moneymanager.app.model.ThemeMode
 import com.moneymanager.app.model.UiAccent
@@ -24,6 +25,9 @@ var PrimarySoft = Color(0xFFB4F077)
 var MoneyGreen = Color(0xFFB4F077)
 var WarningAmber = Color(0xFFFFC857)
 var LossRed = Color(0xFFFF6B4A)
+var OnAccent = Color(0xFF16220A)
+var LineColor = Color(0xFF2A2A2A)
+var NavSolid = Color(0xFF242424)
 
 private val ExpressiveShapes = Shapes(
     extraSmall = RoundedCornerShape(8.dp),
@@ -62,9 +66,9 @@ private fun expressiveColorScheme(dark: Boolean) = if (dark) {
         surfaceContainerHigh = Navy800,
         surfaceContainerHighest = Navy800,
         primary = PrimaryBlue,
-        onPrimary = Color(0xFF141414),
+        onPrimary = OnAccent,
         primaryContainer = PrimaryBlue,
-        onPrimaryContainer = Color(0xFF141414),
+        onPrimaryContainer = OnAccent,
         secondary = MoneyGreen,
         onSecondary = Color(0xFF141414),
         tertiary = WarningAmber,
@@ -85,7 +89,7 @@ private fun expressiveColorScheme(dark: Boolean) = if (dark) {
         surfaceContainerHigh = Navy800,
         surfaceContainerHighest = Navy800,
         primary = PrimaryBlue,
-        onPrimary = Color.White,
+        onPrimary = OnAccent,
         primaryContainer = PrimarySoft,
         onPrimaryContainer = TextPrimary,
         secondary = MoneyGreen,
@@ -114,6 +118,9 @@ private fun applyThemeTokens(dark: Boolean, uiAccent: UiAccent, uiSurface: UiSur
         MoneyGreen = Color(0xFFB4F077)
         WarningAmber = Color(0xFFFFD166)
         LossRed = Color(0xFFFF6B4A)
+        OnAccent = uiAccent.onDarkHex.toColorOr(Color(0xFF16220A))
+        LineColor = Navy800
+        NavSolid = lerp(Navy850, Navy800, 0.4f)
     } else {
         Navy950 = uiSurface.lightBackgroundHex.toColorOr(Color(0xFFF7FAF2))
         Navy900 = uiSurface.lightCardHex.toColorOr(Color.White)
@@ -127,6 +134,9 @@ private fun applyThemeTokens(dark: Boolean, uiAccent: UiAccent, uiSurface: UiSur
         MoneyGreen = Color(0xFF4E7D1C)
         WarningAmber = Color(0xFFC87400)
         LossRed = Color(0xFFD94A2B)
+        OnAccent = uiAccent.onLightHex.toColorOr(Color(0xFFF4FBEA))
+        LineColor = lerp(Navy800, Navy850, 0.35f)
+        NavSolid = Navy900
     }
 }
 

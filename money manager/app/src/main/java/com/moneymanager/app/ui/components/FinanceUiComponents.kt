@@ -19,6 +19,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.layout.offset
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
@@ -37,6 +40,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.moneymanager.app.model.CategoryItem
 import com.moneymanager.app.model.FinanceUiState
 import com.moneymanager.app.model.LedgerTransaction
@@ -46,6 +50,7 @@ import com.moneymanager.app.model.transactionDate
 import com.moneymanager.app.ui.theme.MoneyGreen
 import com.moneymanager.app.ui.theme.Navy850
 import com.moneymanager.app.ui.theme.Navy800
+import com.moneymanager.app.ui.theme.OnAccent
 import com.moneymanager.app.ui.theme.PrimaryBlue
 import com.moneymanager.app.ui.theme.PrimarySoft
 import com.moneymanager.app.ui.theme.TextDim
@@ -101,29 +106,6 @@ internal fun TransactionTypeChip(type: TransactionType, selected: Boolean, onCli
 }
 
 @Composable
-internal fun ActionPanel(
-    title: String,
-    subtitle: String,
-    icon: ImageVector,
-    action: String,
-    onClick: () -> Unit
-) {
-    ElevatedPanel {
-        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconTile(icon, PrimaryBlue)
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
-                Text(title, color = TextPrimary, style = MaterialTheme.typography.titleMedium)
-                Text(subtitle, color = TextDim, style = MaterialTheme.typography.bodyMedium)
-            }
-            TextButton(onClick = onClick) {
-                Text(action, color = PrimarySoft)
-            }
-        }
-    }
-}
-
-@Composable
 internal fun DashboardPagination(
     pageCount: Int,
     currentPage: Int,
@@ -173,103 +155,85 @@ internal fun TransactionRow(
 ) {
     val category = state.categoriesById[transaction.categoryId]
     val isTransfer = transaction.type == TransactionType.Transfer
-    val isCardSpend = transaction.isCreditCardTransaction
-    val color = when {
-        isCardSpend -> OtherIncomeGold
-        isTransfer -> categoryColor(category, transaction.type)
-        else -> categoryColor(category, transaction.type)
-    }
     val rowIcon = when {
         isTransfer -> MoneyIcons.Account
-        isCardSpend -> MoneyIcons.resolveCategoryIcon("credit_card")
+        transaction.isCreditCardTransaction -> MoneyIcons.resolveCategoryIcon("credit_card")
         else -> category?.icon ?: MoneyIcons.Category
     }
-    val cardColor = if (isAmoledTheme()) Color(0xFF1A1A1A) else Color.White
-    val neutralBorder = if (isAmoledTheme()) Color(0xFF323232) else Color(0xFFD8E5CC)
-    val borderColor = if (!isTransfer && !isCardSpend && category?.name == "Uncategorized") {
-        neutralBorder
-    } else {
-        color.copy(alpha = if (isAmoledTheme()) 0.52f else 0.34f)
-    }
-    val dateLabel = transaction.transactionDate().mediumDateLabel()
-    val categoryLabel = when {
-        isTransfer -> "Transfer"
-        isCardSpend -> "CC"
-        else -> category?.name ?: "Set category"
-    }
+    val accountName = transaction.accountId?.let { id -> state.accounts.firstOrNull { it.id == id }?.name }
+        ?: transaction.smsBankLabel
+    val meta = buildList {
+        add(if (isTransfer) "Transfer" else category?.name ?: "Set category")
+        accountName?.takeIf { it.isNotBlank() }?.let(::add)
+        if (transaction.isCreditCardTransaction) add("CC")
+    }.joinToString(" · ")
 
-    Card(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { onSelect(transaction.id) },
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = cardColor),
-        border = BorderStroke(1.dp, borderColor)
+            .clip(RoundedCornerShape(14.dp))
+            .clickable { onSelect(transaction.id) }
+            .padding(horizontal = 2.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(42.dp)) {
             Box(
                 modifier = Modifier
-                    .size(44.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(color.copy(alpha = if (isAmoledTheme()) 0.18f else 0.12f)),
+                    .size(42.dp)
+                    .clip(RoundedCornerShape(13.dp))
+                    .background(Navy850),
                 contentAlignment = Alignment.Center
             ) {
                 androidx.compose.material3.Icon(
                     imageVector = rowIcon,
                     contentDescription = null,
-                    tint = color,
-                    modifier = Modifier.size(23.dp)
+                    tint = TextMuted,
+                    modifier = Modifier.size(21.dp)
                 )
             }
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                Row(verticalAlignment = Alignment.Top) {
-                    Text(
-                        transaction.name,
-                        color = TextPrimary,
-                        style = MaterialTheme.typography.titleMedium,
-                        modifier = Modifier.weight(1f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Spacer(Modifier.width(10.dp))
-                    Text(
-                        transaction.signedAmount(state.currency),
-                        color = transaction.type.amountColor(),
-                        style = MaterialTheme.typography.titleMedium,
-                        maxLines = 1
-                    )
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        categoryLabel,
-                        color = color,
-                        style = MaterialTheme.typography.labelMedium,
-                        modifier = Modifier.weight(1f, fill = false),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    if (transaction.isCreditCardTransaction && categoryLabel != "CC") {
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            "CC",
-                            color = OtherIncomeGold,
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1
-                        )
-                    }
-                    Text("  |  ", color = TextDim, style = MaterialTheme.typography.labelMedium)
-                    Text(
-                        dateLabel,
-                        color = TextMuted,
-                        style = MaterialTheme.typography.labelMedium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
+            if (transaction.isAutoDetected) {
+                Box(
+                    modifier = Modifier
+                        .size(16.dp)
+                        .align(Alignment.BottomEnd)
+                        .offset(x = 3.dp, y = 3.dp)
+                        .clip(CircleShape)
+                        .background(PrimaryBlue),
+                    contentAlignment = Alignment.Center
+                ) {
+                    androidx.compose.material3.Icon(
+                        imageVector = Icons.Rounded.Bolt,
+                        contentDescription = "Auto-detected",
+                        tint = OnAccent,
+                        modifier = Modifier.size(12.dp)
                     )
                 }
             }
         }
+        Column(Modifier.weight(1f)) {
+            Text(
+                transaction.name,
+                color = TextPrimary,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                meta,
+                color = TextDim,
+                fontSize = 11.5.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        Text(
+            transaction.signedAmount(state.currency),
+            color = transaction.type.amountColor(),
+            fontSize = 14.5.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1
+        )
     }
 }

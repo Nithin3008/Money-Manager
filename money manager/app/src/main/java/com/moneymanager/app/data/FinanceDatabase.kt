@@ -16,7 +16,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         BudgetEntity::class,
         DetectedDraftEntity::class
     ],
-    version = 15
+    version = 18
 )
 abstract class FinanceDatabase : RoomDatabase() {
     abstract fun dao(): FinanceDao
@@ -45,7 +45,10 @@ abstract class FinanceDatabase : RoomDatabase() {
                         Migration11To12,
                         Migration12To13,
                         Migration13To14,
-                        Migration14To15
+                        Migration14To15,
+                        Migration15To16,
+                        Migration16To17,
+                        Migration17To18
                     )
                     .build()
                     .also { instance = it }
@@ -183,9 +186,63 @@ abstract class FinanceDatabase : RoomDatabase() {
 
         private val Migration14To15 = object : Migration(14, 15) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                db.execSQL("ALTER TABLE detected_drafts ADD COLUMN fromAccountId INTEGER")
-                db.execSQL("ALTER TABLE detected_drafts ADD COLUMN toAccountId INTEGER")
+                db.addColumnIfMissing("detected_drafts", "fromAccountId", "INTEGER")
+                db.addColumnIfMissing("detected_drafts", "toAccountId", "INTEGER")
             }
+        }
+
+        private val Migration15To16 = object : Migration(15, 16) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.addColumnIfMissing("user_settings", "salaryCounterpartyKey", "TEXT")
+                db.addColumnIfMissing("user_settings", "dismissedSalaryKeysCsv", "TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
+        private val Migration16To17 = object : Migration(16, 17) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.addColumnIfMissing("user_settings", "lastSuccessfulScanMillis", "INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
+        // Catch-up after merging the LLM-Integration and Major-Overhaul branches: installs
+        // from either branch may be missing columns the other branch added, so add them all
+        // idempotently here.
+        private val Migration17To18 = object : Migration(17, 18) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.addColumnIfMissing("user_settings", "offlineLlmParsingEnabled", "INTEGER NOT NULL DEFAULT 0")
+                db.addColumnIfMissing("user_settings", "offlineLlmModelDownloaded", "INTEGER NOT NULL DEFAULT 0")
+                db.addColumnIfMissing("user_settings", "onboardedAtMillis", "INTEGER NOT NULL DEFAULT 0")
+                db.addColumnIfMissing("user_settings", "lastSuccessfulScanMillis", "INTEGER NOT NULL DEFAULT 0")
+                db.addColumnIfMissing("user_settings", "salaryCounterpartyKey", "TEXT")
+                db.addColumnIfMissing("user_settings", "dismissedSalaryKeysCsv", "TEXT NOT NULL DEFAULT ''")
+                db.addColumnIfMissing("accounts", "accountType", "TEXT NOT NULL DEFAULT 'Bank'")
+                db.addColumnIfMissing("transactions", "fromAccountId", "INTEGER")
+                db.addColumnIfMissing("transactions", "toAccountId", "INTEGER")
+                db.addColumnIfMissing("detected_drafts", "fromAccountId", "INTEGER")
+                db.addColumnIfMissing("detected_drafts", "toAccountId", "INTEGER")
+            }
+        }
+
+        private fun SupportSQLiteDatabase.addColumnIfMissing(
+            tableName: String,
+            columnName: String,
+            columnDefinition: String
+        ) {
+            if (!hasColumn(tableName, columnName)) {
+                execSQL("ALTER TABLE `$tableName` ADD COLUMN `$columnName` $columnDefinition")
+            }
+        }
+
+        private fun SupportSQLiteDatabase.hasColumn(tableName: String, columnName: String): Boolean {
+            query("PRAGMA table_info(`$tableName`)").use { cursor ->
+                val nameIndex = cursor.getColumnIndex("name")
+                while (cursor.moveToNext()) {
+                    if (nameIndex >= 0 && cursor.getString(nameIndex) == columnName) {
+                        return true
+                    }
+                }
+            }
+            return false
         }
     }
 }

@@ -5,6 +5,7 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -31,6 +32,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -51,12 +53,13 @@ internal fun LargeTitle(title: String, subtitle: String) {
 }
 
 @Composable
-internal fun SectionHeader(title: String, action: String) {
+internal fun SectionHeader(title: String, action: String, onAction: (() -> Unit)? = null) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text(
             title,
-            color = PrimarySoft,
-            style = MaterialTheme.typography.titleLarge,
+            color = TextPrimary,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.Bold,
             modifier = Modifier.weight(1f),
             maxLines = 2,
             overflow = TextOverflow.Ellipsis
@@ -65,9 +68,15 @@ internal fun SectionHeader(title: String, action: String) {
         Text(
             action,
             color = PrimaryBlue,
-            style = MaterialTheme.typography.titleMedium,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
             textAlign = TextAlign.End,
-            maxLines = 2
+            maxLines = 2,
+            modifier = if (onAction != null) {
+                Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onAction).padding(2.dp)
+            } else {
+                Modifier
+            }
         )
     }
 }
@@ -85,8 +94,8 @@ internal fun ElevatedPanel(
     }
     Card(
         modifier = panelModifier,
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
         border = BorderStroke(1.dp, appBorderColor())
     ) {
         content()
@@ -115,7 +124,13 @@ internal fun IconTile(icon: ImageVector, tint: Color) {
 
 @Composable
 internal fun LabelText(text: String) {
-    Text(text, color = PrimarySoft, style = MaterialTheme.typography.labelMedium, letterSpacing = 0.sp)
+    Text(
+        text,
+        color = TextDim,
+        fontSize = 12.sp,
+        fontWeight = FontWeight.Bold,
+        letterSpacing = 0.4.sp
+    )
 }
 
 @Composable

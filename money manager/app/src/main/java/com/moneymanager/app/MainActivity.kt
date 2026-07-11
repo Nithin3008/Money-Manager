@@ -61,7 +61,7 @@ class MainActivity : ComponentActivity() {
             grantResults.isNotEmpty() &&
             grantResults.any { it == PackageManager.PERMISSION_GRANTED }
         ) {
-            moneyViewModel.scanTodayMessages()
+            moneyViewModel.scanForNewMessages()
         }
     }
 }

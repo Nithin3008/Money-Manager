@@ -1,6 +1,7 @@
 package com.moneymanager.app.model
 
 import java.time.LocalDate
+import java.time.YearMonth
 
 internal object SummaryCalculations {
     fun passesAccountFilter(state: FinanceUiState, tx: LedgerTransaction): Boolean {
@@ -72,15 +73,17 @@ internal object SummaryCalculations {
         return balanceAnchor(state) - movementFromCutoffToNow
     }
 
+    /**
+     * Summary rows for [FinanceUiState.selectedMonth]. Expenses always follow the calendar;
+     * income follows [summaryIncomeMonth], so late-month credits shift forward when the
+     * payroll-month setting is on.
+     */
     fun monthTransactions(state: FinanceUiState): List<LedgerTransaction> {
-        val monthStart = state.selectedMonth.atDay(1)
-        val monthEnd = state.selectedMonth.atEndOfMonth()
         return state.transactions.filter { tx ->
             if (state.isInvestmentTransaction(tx)) return@filter false
             if (tx.excludeFromSummary) return@filter false
             if (!passesAccountFilter(state, tx)) return@filter false
-            val date = tx.transactionDate()
-            !date.isBefore(monthStart) && !date.isAfter(monthEnd)
+            tx.summaryIncomeMonth(state.salaryShiftIncomeEnabled, state.salaryShiftWindowDays) == state.selectedMonth
         }
     }
 
@@ -88,21 +91,18 @@ internal object SummaryCalculations {
         if (tx.type != TransactionType.Income) return false
         val salaryId = state.salaryCategoryId
         if (salaryId != null && tx.categoryId == salaryId) return true
-        if (!state.salaryKeywordsForUncategorized) return false
-        val uncategorizedId = state.categories.firstOrNull { it.name == "Uncategorized" }?.id ?: return false
-        if (tx.categoryId != uncategorizedId) return false
-        return SalaryIncomeRules.matchesSalaryKeywords(tx.name, tx.rawMessage)
+        return SalaryDetection.matchesConfirmedSalary(state, tx)
     }
 
+    /** Income dated inside the calendar month, using the same exclusions as [monthTransactions]. */
     fun calendarMonthIncomeTotal(state: FinanceUiState): Double {
-        val monthStart = state.selectedMonth.atDay(1)
-        val monthEnd = state.selectedMonth.atEndOfMonth()
-        return balanceTransactions(state)
+        return state.transactions
             .filter { tx ->
-                if (tx.excludeFromSummary) return@filter false
                 if (tx.type != TransactionType.Income) return@filter false
-                val date = tx.transactionDate()
-                !date.isBefore(monthStart) && !date.isAfter(monthEnd)
+                if (state.isInvestmentTransaction(tx)) return@filter false
+                if (tx.excludeFromSummary) return@filter false
+                if (!passesAccountFilter(state, tx)) return@filter false
+                YearMonth.from(tx.transactionDate()) == state.selectedMonth
             }
             .sumOf { it.amount }
     }

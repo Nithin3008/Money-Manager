@@ -24,10 +24,13 @@ internal fun FinanceUiState.toSettingsEntity(): UserSettingsEntity = UserSetting
     salaryShiftIncomeEnabled = salaryShiftIncomeEnabled,
     salaryShiftWindowDays = salaryShiftWindowDays.coerceIn(1, 14),
     salaryCategoryId = salaryCategoryId,
-    salaryKeywordsForUncategorized = salaryKeywordsForUncategorized,
+    salaryCounterpartyKey = salaryCounterpartyKey?.takeIf { it.isNotBlank() },
+    dismissedSalaryKeysCsv = dismissedSalaryKeys.joinToString(","),
     bankSmsSetupCompleted = bankSmsSetupCompleted,
     offlineLlmParsingEnabled = offlineLlmParsingEnabled,
     offlineLlmModelDownloaded = offlineLlmModelDownloaded,
+    onboardedAtMillis = onboardedAtMillis,
+    lastSuccessfulScanMillis = lastSuccessfulScanMillis,
     defaultAccountId = defaultAccountId,
     summaryAccountFilterIdsCsv = summarySelectedAccountIds.joinToString(",")
 )
@@ -43,17 +46,24 @@ internal fun UserSettingsEntity.applyTo(current: FinanceUiState): FinanceUiState
         } ?: ThemeMode.Dark,
         uiAccent = uiAccent.let { accent ->
             UiAccent.entries.firstOrNull { it.name == accent }
-        } ?: UiAccent.Sky,
+        } ?: UiAccent.Lime,
         uiSurface = uiSurface.let { surface ->
             UiSurface.entries.firstOrNull { it.name == surface }
         } ?: UiSurface.Midnight,
         salaryShiftIncomeEnabled = salaryShiftIncomeEnabled,
         salaryShiftWindowDays = salaryShiftWindowDays.coerceIn(1, 14),
         salaryCategoryId = salaryCategoryId,
-        salaryKeywordsForUncategorized = salaryKeywordsForUncategorized,
+        salaryCounterpartyKey = salaryCounterpartyKey?.takeIf { it.isNotBlank() },
+        dismissedSalaryKeys = dismissedSalaryKeysCsv
+            .split(",")
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .toSet(),
         bankSmsSetupCompleted = bankSmsSetupCompleted,
         offlineLlmParsingEnabled = offlineLlmParsingEnabled,
         offlineLlmModelDownloaded = offlineLlmModelDownloaded,
+        onboardedAtMillis = onboardedAtMillis,
+        lastSuccessfulScanMillis = lastSuccessfulScanMillis,
         defaultAccountId = defaultAccountId,
         summarySelectedAccountIds = summaryAccountFilterIdsCsv
             .split(",")
