@@ -23,9 +23,11 @@ internal fun FinanceUiState.toSettingsEntity(): UserSettingsEntity = UserSetting
     salaryShiftIncomeEnabled = salaryShiftIncomeEnabled,
     salaryShiftWindowDays = salaryShiftWindowDays.coerceIn(1, 14),
     salaryCategoryId = salaryCategoryId,
-    salaryKeywordsForUncategorized = salaryKeywordsForUncategorized,
+    salaryCounterpartyKey = salaryCounterpartyKey?.takeIf { it.isNotBlank() },
+    dismissedSalaryKeysCsv = dismissedSalaryKeys.joinToString(","),
     bankSmsSetupCompleted = bankSmsSetupCompleted,
     onboardedAtMillis = onboardedAtMillis,
+    lastSuccessfulScanMillis = lastSuccessfulScanMillis,
     defaultAccountId = defaultAccountId,
     summaryAccountFilterIdsCsv = summarySelectedAccountIds.joinToString(",")
 )
@@ -48,9 +50,15 @@ internal fun UserSettingsEntity.applyTo(current: FinanceUiState): FinanceUiState
         salaryShiftIncomeEnabled = salaryShiftIncomeEnabled,
         salaryShiftWindowDays = salaryShiftWindowDays.coerceIn(1, 14),
         salaryCategoryId = salaryCategoryId,
-        salaryKeywordsForUncategorized = salaryKeywordsForUncategorized,
+        salaryCounterpartyKey = salaryCounterpartyKey?.takeIf { it.isNotBlank() },
+        dismissedSalaryKeys = dismissedSalaryKeysCsv
+            .split(",")
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .toSet(),
         bankSmsSetupCompleted = bankSmsSetupCompleted,
         onboardedAtMillis = onboardedAtMillis,
+        lastSuccessfulScanMillis = lastSuccessfulScanMillis,
         defaultAccountId = defaultAccountId,
         summarySelectedAccountIds = summaryAccountFilterIdsCsv
             .split(",")

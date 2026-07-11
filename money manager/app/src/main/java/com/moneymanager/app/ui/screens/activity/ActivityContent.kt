@@ -19,8 +19,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.SearchOff
-import androidx.compose.material.icons.rounded.Sms
-import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedButton
@@ -61,15 +59,13 @@ private val activityDayFormatter = DateTimeFormatter.ofPattern("d MMM")
 
 internal fun LazyListScope.activityContent(
     state: FinanceUiState,
-    onScanNow: () -> Unit,
-    onPopulateThreeMonths: () -> Unit,
     onDateFilterSelected: (ActivityDateFilter, LocalDate?, LocalDate?) -> Unit,
     onDeleteTransaction: (Long) -> Unit,
     onEditTransaction: (Long) -> Unit,
     onLoadMore: () -> Unit
 ) {
     item {
-        ActivityHeader(state, onScanNow, onPopulateThreeMonths)
+        ActivityHeader()
     }
     item {
         ActivityDateFilterRow(state, onDateFilterSelected)
@@ -89,7 +85,7 @@ internal fun LazyListScope.activityContent(
     }
     if (state.activityTransactions.isEmpty()) {
         item {
-            ActivityEmptyState(onScanNow)
+            ActivityEmptyState()
         }
     } else {
         val groups = state.pagedTransactions.groupBy { it.transactionDate() }
@@ -131,51 +127,14 @@ internal fun LazyListScope.activityContent(
 }
 
 @Composable
-private fun ActivityHeader(
-    state: FinanceUiState,
-    onScanNow: () -> Unit,
-    onPopulateThreeMonths: () -> Unit
-) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(
-            "Transactions",
-            color = TextPrimary,
-            fontSize = 22.sp,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = (-0.3).sp,
-            modifier = Modifier.weight(1f)
-        )
-        Box(
-            modifier = Modifier
-                .size(40.dp)
-                .clip(RoundedCornerShape(14.dp))
-                .background(Navy850)
-                .clickable(enabled = !state.isScanningMessages, onClick = onPopulateThreeMonths),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                Icons.Rounded.CalendarMonth,
-                contentDescription = "Backfill 3 months",
-                tint = TextMuted,
-                modifier = Modifier.size(21.dp)
-            )
-        }
-        Box(
-            modifier = Modifier
-                .size(40.dp)
-                .clip(RoundedCornerShape(14.dp))
-                .background(Navy850)
-                .clickable(enabled = !state.isScanningMessages, onClick = onScanNow),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                Icons.Rounded.Sync,
-                contentDescription = "Scan SMS",
-                tint = TextMuted,
-                modifier = Modifier.size(21.dp)
-            )
-        }
-    }
+private fun ActivityHeader() {
+    Text(
+        "Transactions",
+        color = TextPrimary,
+        fontSize = 22.sp,
+        fontWeight = FontWeight.Bold,
+        letterSpacing = (-0.3).sp
+    )
 }
 
 @Composable
@@ -372,7 +331,7 @@ private fun ActivityDayHeader(
 }
 
 @Composable
-private fun ActivityEmptyState(onScanNow: () -> Unit) {
+private fun ActivityEmptyState() {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -404,26 +363,12 @@ private fun ActivityEmptyState(onScanNow: () -> Unit) {
             modifier = Modifier.padding(top = 14.dp)
         )
         Text(
-            "Try a wider date filter or scan your\nSMS inbox for missed alerts.",
+            "Try a wider date filter. New bank SMS\nare picked up automatically.",
             color = TextDim,
             fontSize = 12.5.sp,
             lineHeight = 19.sp,
             textAlign = TextAlign.Center,
             modifier = Modifier.padding(top = 5.dp)
         )
-        Row(
-            modifier = Modifier
-                .padding(top = 16.dp)
-                .height(40.dp)
-                .clip(RoundedCornerShape(999.dp))
-                .background(PrimaryBlue)
-                .clickable(onClick = onScanNow)
-                .padding(horizontal = 18.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Icon(Icons.Rounded.Sms, contentDescription = null, tint = OnAccent, modifier = Modifier.size(18.dp))
-            Text("Scan SMS", color = OnAccent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-        }
     }
 }

@@ -12,9 +12,13 @@ data class UserSettingsEntity(
     val salaryShiftIncomeEnabled: Boolean = false,
     val salaryShiftWindowDays: Int = 5,
     val salaryCategoryId: Long? = null,
+    // Legacy keyword toggle; superseded by salaryCounterpartyKey but kept for schema stability.
     val salaryKeywordsForUncategorized: Boolean = true,
+    val salaryCounterpartyKey: String? = null,
+    val dismissedSalaryKeysCsv: String = "",
     val bankSmsSetupCompleted: Boolean = false,
     val onboardedAtMillis: Long = 0L,
+    val lastSuccessfulScanMillis: Long = 0L,
     val summaryAccountFilterIdsCsv: String = "",
     val uiAccent: String = "Lime",
     val uiSurface: String = "Midnight",

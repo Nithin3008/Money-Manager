@@ -231,10 +231,15 @@ data class FinanceUiState(
     val salaryShiftIncomeEnabled: Boolean = false,
     val salaryShiftWindowDays: Int = 5,
     val salaryCategoryId: Long? = null,
-    val salaryKeywordsForUncategorized: Boolean = true,
+    /** Normalized counterparty key the user confirmed as their salary source. */
+    val salaryCounterpartyKey: String? = null,
+    /** Counterparty keys the user said are not salary; never suggest them again. */
+    val dismissedSalaryKeys: Set<String> = emptySet(),
     val bankSmsSetupCompleted: Boolean = false,
     /** When the user completed registration; transactions dated before this never move account balances. */
     val onboardedAtMillis: Long = 0L,
+    /** When the last SMS scan completed with permission; the next catch-up scan resumes here. */
+    val lastSuccessfulScanMillis: Long = 0L,
     val defaultAccountId: Long? = null,
     /** Empty = all accounts on Summary; otherwise filter to these account ids. */
     val summarySelectedAccountIds: Set<Long> = emptySet(),
@@ -324,6 +329,21 @@ data class FinanceUiState(
     /** Actual credits dated inside [selectedMonth] (calendar), for comparison when payroll shift moves income. */
     val calendarMonthIncomeTotal: Double by lazy(LazyThreadSafetyMode.NONE) {
         SummaryCalculations.calendarMonthIncomeTotal(this)
+    }
+
+    /** Recurring monthly credit that looks like salary, awaiting a one-time user confirmation. */
+    val salaryCandidate: SalaryCandidate? by lazy(LazyThreadSafetyMode.NONE) {
+        SalaryDetection.detectCandidate(this)
+    }
+
+    /** Human-readable name of the confirmed salary source, from its most recent transaction. */
+    val confirmedSalaryName: String? by lazy(LazyThreadSafetyMode.NONE) {
+        val key = salaryCounterpartyKey ?: return@lazy null
+        transactions
+            .filter { it.type == TransactionType.Income && SalaryDetection.salaryMatchKey(it.name) == key }
+            .maxByOrNull { it.timestampMillis }
+            ?.name
+            ?: key
     }
 
     val selectedMonthOpeningBalance: Double by lazy(LazyThreadSafetyMode.NONE) {

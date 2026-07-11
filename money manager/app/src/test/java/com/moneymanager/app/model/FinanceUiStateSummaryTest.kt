@@ -20,9 +20,10 @@ class FinanceUiStateSummaryTest {
     fun summaryUsesCalendarMonthDepositsAndExpensesForDefaultAccount() {
         val state = state(
             defaultAccountId = bankA.id,
+            salaryCounterpartyKey = "acme corp",
             transactions = listOf(
-                tx(1, 65_000.0, TransactionType.Income, "2026-04-30", bankA.id, raw = "Salary credited"),
-                tx(2, 16_000.0, TransactionType.Income, "2026-04-12", bankA.id, raw = "Refund credited"),
+                tx(1, 65_000.0, TransactionType.Income, "2026-04-30", bankA.id, name = "ACME Corp"),
+                tx(2, 16_000.0, TransactionType.Income, "2026-04-12", bankA.id, name = "Refund"),
                 tx(3, 10_000.0, TransactionType.Expense, "2026-04-13", bankA.id),
                 tx(4, 45_000.0, TransactionType.Income, "2026-04-15", bankB.id),
                 tx(5, 9_000.0, TransactionType.Income, "2026-05-01", bankA.id),
@@ -35,6 +36,117 @@ class FinanceUiStateSummaryTest {
         assertEquals(16_000.0, state.monthOtherIncome, 0.001)
         assertEquals(10_000.0, state.monthExpense, 0.001)
         assertEquals(71_000.0, state.monthReportNet, 0.001)
+    }
+
+    @Test
+    fun salaryShiftMovesLateMonthCreditToNextMonthAndKeepsCalendarComparison() {
+        val transactions = listOf(
+            tx(1, 65_000.0, TransactionType.Income, "2026-04-28", bankA.id, name = "ACME Corp"),
+            tx(2, 5_000.0, TransactionType.Income, "2026-04-10", bankA.id, name = "Refund"),
+            tx(3, 8_000.0, TransactionType.Expense, "2026-04-13", bankA.id)
+        )
+        val aprilShifted = state(
+            defaultAccountId = bankA.id,
+            salaryShiftIncomeEnabled = true,
+            transactions = transactions
+        )
+        val mayShifted = aprilShifted.copy(selectedMonth = YearMonth.of(2026, 5))
+        val aprilCalendar = state(
+            defaultAccountId = bankA.id,
+            transactions = transactions
+        )
+
+        assertEquals(5_000.0, aprilShifted.monthIncome, 0.001)
+        assertEquals(65_000.0, mayShifted.monthIncome, 0.001)
+        assertEquals(70_000.0, aprilShifted.calendarMonthIncomeTotal, 0.001)
+        assertEquals(8_000.0, aprilShifted.monthExpense, 0.001)
+        assertEquals(70_000.0, aprilCalendar.monthIncome, 0.001)
+    }
+
+    @Test
+    fun recurringMonthlyCreditIsDetectedAsSalaryCandidate() {
+        val state = state(
+            defaultAccountId = null,
+            transactions = listOf(
+                tx(1, 64_500.0, TransactionType.Income, "2026-02-28", bankA.id, name = "ACME Corp"),
+                tx(2, 65_000.0, TransactionType.Income, "2026-03-31", bankA.id, name = "ACME Corp"),
+                tx(3, 65_000.0, TransactionType.Income, "2026-04-30", bankA.id, name = "ACME Corp"),
+                tx(4, 70_000.0, TransactionType.Income, "2026-04-12", bankA.id, name = "One-off bonus"),
+                tx(5, 500.0, TransactionType.Income, "2026-03-05", bankA.id, name = "Cashback"),
+                tx(6, 450.0, TransactionType.Income, "2026-04-05", bankA.id, name = "Cashback")
+            )
+        )
+
+        val candidate = state.salaryCandidate
+        assertTrue(candidate != null)
+        assertEquals("acme corp", candidate?.key)
+        assertEquals(65_000.0, candidate?.typicalAmount ?: 0.0, 0.001)
+        assertEquals(3, candidate?.monthsObserved)
+    }
+
+    @Test
+    fun dismissedAndConfirmedKeysAreNeverSuggestedAgain() {
+        val transactions = listOf(
+            tx(1, 65_000.0, TransactionType.Income, "2026-03-31", bankA.id, name = "ACME Corp"),
+            tx(2, 65_000.0, TransactionType.Income, "2026-04-30", bankA.id, name = "ACME Corp")
+        )
+        val dismissed = state(
+            defaultAccountId = null,
+            dismissedSalaryKeys = setOf("acme corp"),
+            transactions = transactions
+        )
+        val confirmed = state(
+            defaultAccountId = null,
+            salaryCounterpartyKey = "acme corp",
+            transactions = transactions
+        )
+
+        assertTrue(dismissed.salaryCandidate == null)
+        assertTrue(confirmed.salaryCandidate == null)
+        assertTrue(SalaryDetection.matchesConfirmedSalary(confirmed, transactions.first()))
+    }
+
+    @Test
+    fun changingReferenceNumbersDoNotBreakSalaryGrouping() {
+        val observations = listOf(
+            CreditObservation("NEFT-ACME PVT LTD-104523", 65_000.0, millis("2026-05-30")),
+            CreditObservation("NEFT-ACME PVT LTD-998811", 65_000.0, millis("2026-06-30")),
+            CreditObservation("NEFT ACME PVT LTD 445566", 66_000.0, millis("2026-07-07"))
+        )
+
+        val candidate = SalaryDetection.detectRecurringCredit(observations)
+
+        assertEquals("neft acme pvt ltd", candidate?.key)
+        assertEquals(3, candidate?.monthsObserved)
+    }
+
+    @Test
+    fun recurringCreditIsDetectedFromScannedObservationsWithoutImport() {
+        val observations = listOf(
+            CreditObservation("ACME Corp", 64_500.0, millis("2026-05-31")),
+            CreditObservation("ACME Corp", 65_000.0, millis("2026-07-07")),
+            CreditObservation("Cashback", 300.0, millis("2026-06-02")),
+            CreditObservation("Property sale", 500_000.0, millis("2026-06-15"))
+        )
+
+        val candidate = SalaryDetection.detectRecurringCredit(observations)
+
+        assertEquals("acme corp", candidate?.key)
+        assertEquals(65_000.0, candidate?.typicalAmount ?: 0.0, 0.001)
+    }
+
+    @Test
+    fun inconsistentAmountsOrSingleMonthDoNotBecomeSalaryCandidates() {
+        val state = state(
+            defaultAccountId = null,
+            transactions = listOf(
+                tx(1, 65_000.0, TransactionType.Income, "2026-03-31", bankA.id, name = "ACME Corp"),
+                tx(2, 20_000.0, TransactionType.Income, "2026-04-30", bankA.id, name = "ACME Corp"),
+                tx(3, 90_000.0, TransactionType.Income, "2026-04-02", bankA.id, name = "Property sale")
+            )
+        )
+
+        assertTrue(state.salaryCandidate == null)
     }
 
     @Test
@@ -254,6 +366,9 @@ class FinanceUiStateSummaryTest {
         accounts: List<BankAccount> = listOf(bankA, bankB),
         categories: List<CategoryItem> = DefaultCategories.items,
         summarySelectedAccountIds: Set<Long> = emptySet(),
+        salaryShiftIncomeEnabled: Boolean = false,
+        salaryCounterpartyKey: String? = null,
+        dismissedSalaryKeys: Set<String> = emptySet(),
         transactions: List<LedgerTransaction>
     ): FinanceUiState = FinanceUiState(
         isAppInitializing = false,
@@ -262,7 +377,10 @@ class FinanceUiStateSummaryTest {
         categories = categories,
         transactions = transactions,
         defaultAccountId = defaultAccountId,
-        summarySelectedAccountIds = summarySelectedAccountIds
+        summarySelectedAccountIds = summarySelectedAccountIds,
+        salaryShiftIncomeEnabled = salaryShiftIncomeEnabled,
+        salaryCounterpartyKey = salaryCounterpartyKey,
+        dismissedSalaryKeys = dismissedSalaryKeys
     )
 
     private fun tx(
@@ -274,10 +392,11 @@ class FinanceUiStateSummaryTest {
         raw: String? = null,
         exclude: Boolean = false,
         creditCard: Boolean = false,
-        categoryId: Long = 0L
+        categoryId: Long = 0L,
+        name: String? = null
     ): LedgerTransaction = LedgerTransaction(
         id = id,
-        name = if (type == TransactionType.Income) "Bank Credit" else "Spend",
+        name = name ?: if (type == TransactionType.Income) "Bank Credit" else "Spend",
         amount = amount,
         type = type,
         categoryId = categoryId,

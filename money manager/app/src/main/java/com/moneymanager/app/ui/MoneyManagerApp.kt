@@ -246,10 +246,10 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
     }
 
     LaunchedEffect(Unit) {
-        viewModel.scanTodayMessages()
+        viewModel.scanForNewMessages()
         while (true) {
             delay(5 * 60 * 1000L)
-            viewModel.scanTodayMessages()
+            viewModel.scanForNewMessages()
         }
     }
 
@@ -322,8 +322,6 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
                     )
                     ScreenTab.Activity -> activityContent(
                         state = state,
-                        onScanNow = viewModel::scanCurrentActivityPeriod,
-                        onPopulateThreeMonths = viewModel::populateLastThreeMonths,
                         onDateFilterSelected = viewModel::setActivityDateFilter,
                         onDeleteTransaction = viewModel::deleteTransaction,
                         onEditTransaction = viewModel::requestEditTransactionCategory,
@@ -338,7 +336,9 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
                         state = state,
                         onMonthSelected = viewModel::selectMonth,
                         onToggleSummaryAccount = viewModel::toggleSummaryAccountInFilter,
-                        onClearSummaryAccountFilter = viewModel::clearSummaryAccountFilter
+                        onClearSummaryAccountFilter = viewModel::clearSummaryAccountFilter,
+                        onConfirmSalaryCandidate = viewModel::confirmSalaryCandidate,
+                        onDismissSalaryCandidate = viewModel::dismissSalaryCandidate
                     )
                     ScreenTab.Settings -> settingsContent(
                         state = state,
@@ -350,7 +350,7 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
                         onSalaryShiftChanged = viewModel::setSalaryShiftIncomeEnabled,
                         onSalaryWindowDaysChanged = viewModel::setSalaryShiftWindowDays,
                         onSalaryCategorySelected = viewModel::setSalaryCategoryId,
-                        onSalaryKeywordsToggled = viewModel::setSalaryKeywordsForUncategorized,
+                        onClearSalarySource = viewModel::clearSalaryCounterparty,
                         onDeleteAccount = viewModel::deleteAccount,
                         onUpdateAccountBalance = viewModel::updateAccountBalance,
                         onAddAccount = viewModel::addBankAccount,
@@ -528,7 +528,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.settingsContent(
     onSalaryShiftChanged: (Boolean) -> Unit,
     onSalaryWindowDaysChanged: (Int) -> Unit,
     onSalaryCategorySelected: (Long?) -> Unit,
-    onSalaryKeywordsToggled: (Boolean) -> Unit,
+    onClearSalarySource: () -> Unit,
     onDeleteAccount: (Long) -> Unit,
     onUpdateAccountBalance: (Long, Double) -> Unit,
     onAddAccount: (String, Double) -> Unit,
@@ -551,7 +551,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.settingsContent(
             onSalaryShiftChanged = onSalaryShiftChanged,
             onSalaryWindowDaysChanged = onSalaryWindowDaysChanged,
             onSalaryCategorySelected = onSalaryCategorySelected,
-            onSalaryKeywordsToggled = onSalaryKeywordsToggled,
+            onClearSalarySource = onClearSalarySource,
             onDeleteAccount = onDeleteAccount,
             onUpdateAccountBalance = onUpdateAccountBalance,
             onAddAccount = onAddAccount,
@@ -586,7 +586,7 @@ private fun ProfileScreen(
     onSalaryShiftChanged: (Boolean) -> Unit,
     onSalaryWindowDaysChanged: (Int) -> Unit,
     onSalaryCategorySelected: (Long?) -> Unit,
-    onSalaryKeywordsToggled: (Boolean) -> Unit,
+    onClearSalarySource: () -> Unit,
     onDeleteAccount: (Long) -> Unit,
     onUpdateAccountBalance: (Long, Double) -> Unit,
     onAddAccount: (String, Double) -> Unit,
@@ -638,7 +638,7 @@ private fun ProfileScreen(
             SettingsToggleRow(
                 icon = Icons.Rounded.Sms,
                 label = "Salary shift income",
-                subtitle = "Count late-month salary in the month",
+                subtitle = "Count late-month salary in the next month",
                 checked = state.salaryShiftIncomeEnabled,
                 onCheckedChange = onSalaryShiftChanged,
                 showDivider = true
@@ -698,7 +698,7 @@ private fun ProfileScreen(
                     SalaryCategorySettings(
                         state = state,
                         onSalaryCategorySelected = onSalaryCategorySelected,
-                        onSalaryKeywordsToggled = onSalaryKeywordsToggled
+                        onClearSalarySource = onClearSalarySource
                     )
                 }
                 SettingsDetail.Backup -> BackupRestorePanel(
@@ -3423,7 +3423,7 @@ private fun usefulSmsAccountLabels(labels: List<String>): List<String> {
 private fun SalaryCategorySettings(
     state: FinanceUiState,
     onSalaryCategorySelected: (Long?) -> Unit,
-    onSalaryKeywordsToggled: (Boolean) -> Unit
+    onClearSalarySource: () -> Unit
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         LabelText("SALARY ON SUMMARY")
@@ -3449,26 +3449,34 @@ private fun SalaryCategorySettings(
                         )
                     }
                 }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            "Salary keywords for Uncategorized",
-                            color = TextPrimary,
-                            style = MaterialTheme.typography.titleMedium
-                        )
-                        Text(
-                            "Treat matching payroll SMS as salary when still Uncategorized.",
-                            color = TextDim,
-                            style = MaterialTheme.typography.bodySmall
-                        )
+                LabelText("SALARY SOURCE")
+                if (state.salaryCounterpartyKey != null) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                state.confirmedSalaryName ?: state.salaryCounterpartyKey,
+                                color = TextPrimary,
+                                style = MaterialTheme.typography.titleMedium
+                            )
+                            Text(
+                                "New credits from this sender are categorized as salary automatically.",
+                                color = TextDim,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                        TextButton(onClick = onClearSalarySource) {
+                            Text("Clear")
+                        }
                     }
-                    Switch(
-                        checked = state.salaryKeywordsForUncategorized,
-                        onCheckedChange = onSalaryKeywordsToggled,
-                        colors = appSwitchColors()
+                } else {
+                    Text(
+                        "No salary source confirmed yet. When a recurring monthly credit is detected, " +
+                            "Reports will ask you to confirm it as salary.",
+                        color = TextDim,
+                        style = MaterialTheme.typography.bodySmall
                     )
                 }
             }

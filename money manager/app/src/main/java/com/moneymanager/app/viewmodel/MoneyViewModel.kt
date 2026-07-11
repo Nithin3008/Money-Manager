@@ -16,12 +16,14 @@ import com.moneymanager.app.model.BudgetPlan
 import com.moneymanager.app.model.MessageScanRange
 import java.time.LocalDate
 import com.moneymanager.app.model.CategoryItem
+import com.moneymanager.app.model.CreditObservation
 import com.moneymanager.app.model.CurrencyOption
 import com.moneymanager.app.model.DetectedTransactionDraft
 import com.moneymanager.app.model.ActivityDateFilter
 import com.moneymanager.app.model.FinanceUiState
 import com.moneymanager.app.model.LedgerTransaction
 import com.moneymanager.app.model.MoneyIcons
+import com.moneymanager.app.model.SalaryDetection
 import com.moneymanager.app.model.ScreenTab
 import com.moneymanager.app.model.ThemeMode
 import com.moneymanager.app.model.TransactionType
@@ -61,10 +63,63 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
                 )
             )
             reloadState()
-            scanMessages(
-                range = MessageScanRange.Custom,
-                startDate = LocalDate.now().minusMonths(3),
-                endDate = LocalDate.now()
+            bootstrapSalaryFromRecentSms()
+        }
+    }
+
+    /**
+     * Tracking starts at onboarding: instead of importing months of history, scan recent SMS
+     * in memory, find the recurring salary credit, and import only the latest one so the
+     * current month's income is right while balances stay anchored to the entered amounts.
+     */
+    private suspend fun bootstrapSalaryFromRecentSms() {
+        if (!hasSmsPermission()) return
+        val today = LocalDate.now()
+        val parsed = runCatching {
+            TodaySmsScanner(getApplication()).scanRange(today.minusMonths(3), today)
+        }.getOrDefault(emptyList())
+        val credits = SmsTransactionNormalizer.filterImportBatch(parsed)
+            .filter { it.type == TransactionType.Income && it.amount > 0.0 && !it.isCreditCardTransaction }
+        val candidate = SalaryDetection.detectRecurringCredit(
+            credits.map { CreditObservation(it.counterparty, it.amount, it.transactionTimestampMillis) }
+        )
+        if (candidate == null) {
+            _uiState.update {
+                it.copy(scanStatusMessage = "No recurring salary credit found in recent SMS. Tracking starts from today.")
+            }
+            return
+        }
+        val latest = credits
+            .filter { SalaryDetection.salaryMatchKey(it.counterparty) == candidate.key }
+            .maxByOrNull { it.transactionTimestampMillis }
+            ?: return
+        val state = _uiState.value
+        val salaryCategoryId = ensureSalaryCategoryId(state)
+        val transaction = LedgerTransaction(
+            id = 0,
+            name = latest.counterparty,
+            amount = latest.amount,
+            type = TransactionType.Income,
+            categoryId = salaryCategoryId,
+            accountId = SmsBankKeys.resolveAccountId(latest.bankName, state.accounts)
+                ?: state.defaultAccountId
+                ?: state.accounts.singleOrNull()?.id,
+            timestampMillis = latest.transactionTimestampMillis,
+            isAutoDetected = true,
+            rawMessage = latest.rawMessage,
+            smsBankLabel = latest.bankName,
+            excludeFromSummary = false,
+            isCreditCardTransaction = false
+        )
+        repository.addTransaction(transaction)
+        applyTransactionBalanceMovement(transaction)
+        repository.persistUserSettings(
+            state.copy(salaryCounterpartyKey = candidate.key, salaryCategoryId = salaryCategoryId)
+        )
+        reloadState {
+            it.copy(
+                scanStatusMessage = "Found your salary from ${latest.counterparty}. " +
+                    "Imported the latest credit; everything else is tracked from today."
             )
         }
     }
@@ -184,12 +239,72 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun setSalaryKeywordsForUncategorized(enabled: Boolean) {
+    fun confirmSalaryCandidate() {
         viewModelScope.launch {
-            val next = _uiState.value.copy(salaryKeywordsForUncategorized = enabled)
+            val state = _uiState.value
+            val candidate = state.salaryCandidate ?: return@launch
+            val salaryCategoryId = ensureSalaryCategoryId(state)
+            repository.persistUserSettings(
+                state.copy(
+                    salaryCounterpartyKey = candidate.key,
+                    salaryCategoryId = salaryCategoryId
+                )
+            )
+            val uncategorizedId = state.categories.firstOrNull { it.name == "Uncategorized" }?.id ?: 0L
+            state.transactions
+                .filter {
+                    it.type == TransactionType.Income &&
+                        it.categoryId == uncategorizedId &&
+                        SalaryDetection.salaryMatchKey(it.name) == candidate.key
+                }
+                .forEach { repository.updateTransaction(it.copy(categoryId = salaryCategoryId)) }
+            reloadState()
+        }
+    }
+
+    fun dismissSalaryCandidate() {
+        viewModelScope.launch {
+            val state = _uiState.value
+            val candidate = state.salaryCandidate ?: return@launch
+            val next = state.copy(dismissedSalaryKeys = state.dismissedSalaryKeys + candidate.key)
             repository.persistUserSettings(next)
             _uiState.value = next
         }
+    }
+
+    fun clearSalaryCounterparty() {
+        viewModelScope.launch {
+            val next = _uiState.value.copy(salaryCounterpartyKey = null)
+            repository.persistUserSettings(next)
+            _uiState.value = next
+        }
+    }
+
+    /** Salary category to attach confirmed salary credits to; found by setting, by name, or created. */
+    private suspend fun ensureSalaryCategoryId(state: FinanceUiState): Long {
+        state.salaryCategoryId?.let { id ->
+            if (state.categories.any { it.id == id }) return id
+        }
+        state.categories.firstOrNull { it.name.equals("Salary", ignoreCase = true) }?.let { return it.id }
+        val category = CategoryItem(
+            id = System.currentTimeMillis(),
+            name = "Salary",
+            iconKey = "work",
+            icon = MoneyIcons.resolveCategoryIcon("work"),
+            isDefault = false,
+            colorHex = "#38E68B"
+        )
+        repository.addCategory(category)
+        return category.id
+    }
+
+    /** Category override for credits from the confirmed salary counterparty. */
+    private fun confirmedSalaryCategoryId(name: String, type: TransactionType): Long? {
+        val state = _uiState.value
+        val key = state.salaryCounterpartyKey ?: return null
+        if (type != TransactionType.Income) return null
+        if (SalaryDetection.salaryMatchKey(name) != key) return null
+        return state.salaryCategoryId
     }
 
     fun setSummaryAccountFilter(accountIds: Set<Long>) {
@@ -551,13 +666,63 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun scanTodayMessages() {
-        scanMessages(MessageScanRange.Today)
+    /**
+     * The single catch-up scan: resumes from the last successful scan (or onboarding on the
+     * first run) through today, so no post-onboarding SMS is ever missed no matter how long
+     * the app was closed. Decoupled from the Activity date filter, which is view-only.
+     */
+    fun scanForNewMessages() {
+        // Never import before registration completes: onboarding defines where tracking
+        // starts, and scanning without it would resurrect history after a data wipe.
+        if (!_uiState.value.hasCompletedRegistration) return
+        viewModelScope.launch {
+            val hadSalarySource = _uiState.value.salaryCounterpartyKey != null
+            maybeRetrySalaryBootstrap()
+            val state = _uiState.value
+            if (!hadSalarySource && state.salaryCounterpartyKey != null) {
+                // Keep the bootstrap outcome visible; the scan below overwrites the status line.
+                pendingScanNote = "Salary found: ${state.confirmedSalaryName ?: "recurring credit"}."
+            }
+            val today = LocalDate.now()
+            val onboardedDate = state.onboardedAtMillis
+                .takeIf { it > 0L }
+                ?.let { millisToLocalDate(it) }
+            val lastScanDate = state.lastSuccessfulScanMillis
+                .takeIf { it > 0L }
+                ?.let { millisToLocalDate(it) }
+            // Re-cover the last scan's day so messages that arrived later that day are not lost;
+            // the duplicate filter absorbs the overlap.
+            val start = lastScanDate
+                ?: onboardedDate
+                ?: today
+            scanMessages(MessageScanRange.Custom, start.coerceAtMost(today), today)
+        }
     }
 
-    fun scanCurrentActivityPeriod() {
+    private var salaryBootstrapInFlight = false
+    private var pendingScanNote: String? = null
+
+    /**
+     * Registration can finish before the SMS permission dialog is answered, which makes the
+     * one-shot salary bootstrap silently skip. Retry it here until the first successful scan
+     * is recorded (or a salary source is confirmed), after which it can never apply again.
+     */
+    private suspend fun maybeRetrySalaryBootstrap() {
         val state = _uiState.value
-        scanMessages(MessageScanRange.Custom, state.activityStartDate, state.activityEndDate)
+        if (salaryBootstrapInFlight) return
+        if (state.salaryCounterpartyKey != null) return
+        if (state.lastSuccessfulScanMillis > 0L) return
+        if (!hasSmsPermission()) return
+        salaryBootstrapInFlight = true
+        try {
+            bootstrapSalaryFromRecentSms()
+        } finally {
+            salaryBootstrapInFlight = false
+        }
+    }
+
+    private fun millisToLocalDate(millis: Long): LocalDate {
+        return Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault()).toLocalDate()
     }
 
     fun exportPreviousMonthSmsDebug() {
@@ -583,11 +748,6 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
-    }
-
-    fun populateLastThreeMonths() {
-        val today = LocalDate.now()
-        scanMessages(MessageScanRange.Custom, today.minusMonths(3), today)
     }
 
     fun scanMessages(range: MessageScanRange, startDate: LocalDate? = null, endDate: LocalDate? = null) {
@@ -633,17 +793,36 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
             val filteredParsed = SmsTransactionNormalizer.filterImportBatch(parsedMessages)
             val accountsSnapshot = _uiState.value.accounts.associateBy { it.id }.toMutableMap()
             repository.cleanupCreditCardRepaymentArtifacts()
+            // Tracking starts on the onboarding DAY: the whole install day stays visible so the
+            // app never looks empty on day one, while older history stays out. Balance movement
+            // is still guarded by the exact onboarding moment separately.
+            val trackingStartMillis = _uiState.value.onboardedAtMillis
+                .takeIf { it > 0L }
+                ?.let {
+                    millisToLocalDate(it)
+                        .atStartOfDay(ZoneId.systemDefault())
+                        .toInstant()
+                        .toEpochMilli()
+                }
+                ?: 0L
             var importedCount = 0
             var reviewCount = 0
             var autoMappedCount = 0
+            var skippedPreOnboarding = 0
             filteredParsed.forEach { msg ->
                 if (msg.amount <= 0.0) return@forEach
+                if (trackingStartMillis > 0L && msg.transactionTimestampMillis < trackingStartMillis) {
+                    skippedPreOnboarding += 1
+                    return@forEach
+                }
                 val normRaw = normalizedSmsRaw(msg.rawMessage)
                 if (normRaw.isBlank() || normRaw in normalizedExisting) return@forEach
                 normalizedExisting.add(normRaw)
-                val categoryId = inferCategoryId(msg) ?: _uiState.value.categories.firstOrNull { category ->
-                    category.name == "Uncategorized"
-                }?.id ?: 0L
+                val categoryId = confirmedSalaryCategoryId(msg.counterparty, msg.type)
+                    ?: inferCategoryId(msg)
+                    ?: _uiState.value.categories.firstOrNull { category ->
+                        category.name == "Uncategorized"
+                    }?.id ?: 0L
                 val availableAccounts = accountsSnapshot.values.toList()
                 val accountId = SmsBankKeys.resolveAccountId(msg.bankName, availableAccounts)
                     ?: availableAccounts.singleOrNull()?.id
@@ -686,15 +865,19 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
                 importedCount += 1
             }
 
-            val status = when {
+            val baseStatus = when {
                 parsedMessages.isEmpty() -> "No transaction messages found for this period."
                 filteredParsed.isEmpty() -> "Found ${parsedMessages.size} transaction-like SMS, but all were filtered as duplicates, reminders, or internal transfers."
+                importedCount == 0 && reviewCount == 0 && skippedPreOnboarding > 0 ->
+                    "Skipped $skippedPreOnboarding SMS from before you started tracking; nothing new to import."
                 importedCount == 0 && reviewCount == 0 -> "Found ${filteredParsed.size} transaction SMS, but no new transactions were imported."
                 importedCount == 0 -> "Found $reviewCount transaction SMS that need your review."
                 reviewCount > 0 -> "Imported $importedCount transactions and sent $reviewCount for review. Auto-mapped $autoMappedCount to bank accounts."
                 importedCount == 1 -> "Imported 1 transaction. Auto-mapped $autoMappedCount to bank accounts."
                 else -> "Imported $importedCount transactions. Auto-mapped $autoMappedCount to bank accounts."
             }
+            val status = listOfNotNull(pendingScanNote, baseStatus).joinToString(" ")
+            pendingScanNote = null
             val newestMonth = parsedMessages.maxByOrNull { it.transactionTimestampMillis }
                 ?.let {
                     YearMonth.from(
@@ -704,6 +887,10 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 }
             repository.remapTransactionAccountsFromSmsLabels()
+            // The scan reached this point with SMS permission, so the next catch-up can resume here.
+            repository.persistUserSettings(
+                _uiState.value.copy(lastSuccessfulScanMillis = System.currentTimeMillis())
+            )
             reloadState {
                 it.copy(
                     isScanningMessages = false,
