@@ -36,6 +36,7 @@ import com.moneymanager.app.model.TransactionType
 import com.moneymanager.app.model.UiAccent
 import com.moneymanager.app.model.UiSurface
 import java.time.Instant
+import com.moneymanager.app.widget.MoneyWidgets
 import java.time.ZoneId
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -1563,6 +1564,9 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
         )
         _uiState.value = transform(loaded)
         TransactionMessageParser.selfName = _uiState.value.userName.takeIf { it.isNotBlank() }
+        // Nearly every data mutation funnels through here, so this one hook keeps the
+        // home-screen widgets in sync with the app.
+        MoneyWidgets.refresh(getApplication())
     }
 
     private fun hasSmsPermission(): Boolean {

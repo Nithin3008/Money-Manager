@@ -86,6 +86,8 @@ dependencies {
 
     implementation("com.google.code.gson:gson:2.14.0")
 
+    implementation("androidx.glance:glance-appwidget:1.1.1")
+
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 
     testImplementation("junit:junit:4.13.2")

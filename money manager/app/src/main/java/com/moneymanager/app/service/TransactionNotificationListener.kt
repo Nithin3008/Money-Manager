@@ -6,6 +6,7 @@ import com.moneymanager.app.data.FinanceDatabase
 import com.moneymanager.app.data.FinanceRepository
 import com.moneymanager.app.data.TransactionMessageParser
 import com.moneymanager.app.model.DetectedTransactionDraft
+import com.moneymanager.app.widget.MoneyWidgets
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -33,6 +34,8 @@ class TransactionNotificationListener : NotificationListenerService() {
                     transactionTimestampMillis = parsed.transactionTimestampMillis
                 )
             )
+            // Keep the Needs Review widget current even while the app is closed.
+            MoneyWidgets.refresh(applicationContext)
         }
     }
 }
