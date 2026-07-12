@@ -29,6 +29,7 @@ import androidx.glance.layout.Row
 import androidx.glance.layout.Spacer
 import androidx.glance.layout.fillMaxSize
 import androidx.glance.layout.fillMaxWidth
+import androidx.glance.layout.height
 import androidx.glance.layout.padding
 import androidx.glance.layout.size
 import androidx.glance.layout.width
@@ -137,11 +138,12 @@ private fun ColumnScope.FullContent(snapshot: WidgetSnapshot) {
         Spacer(GlanceModifier.width(12.dp))
         TodayPanel(R.drawable.ic_widget_out, "OUT TODAY", snapshot.outText, WidgetPalette.red, GlanceModifier.defaultWeight())
     }
+    // Keep the separation outside the banner so its background does not absorb the gap.
+    Spacer(GlanceModifier.height(15.dp))
     val caughtUp = snapshot.uncategorizedCount == 0
     Row(
         modifier = GlanceModifier
             .fillMaxWidth()
-            .padding(top = 15.dp)
             .background(WidgetPalette.accentTint)
             .cornerRadius(14.dp)
             .padding(horizontal = 14.dp, vertical = 11.dp),
