@@ -25,6 +25,7 @@ var PrimarySoft = Color(0xFFB4F077)
 var MoneyGreen = Color(0xFFB4F077)
 var WarningAmber = Color(0xFFFFC857)
 var LossRed = Color(0xFFFF6B4A)
+var TransferBlue = Color(0xFF7EA2FF)
 var OnAccent = Color(0xFF16220A)
 var LineColor = Color(0xFF2A2A2A)
 var NavSolid = Color(0xFF242424)
@@ -118,6 +119,7 @@ private fun applyThemeTokens(dark: Boolean, uiAccent: UiAccent, uiSurface: UiSur
         MoneyGreen = Color(0xFFB4F077)
         WarningAmber = Color(0xFFFFD166)
         LossRed = Color(0xFFFF6B4A)
+        TransferBlue = Color(0xFF7EA2FF)
         OnAccent = uiAccent.onDarkHex.toColorOr(Color(0xFF16220A))
         LineColor = Navy800
         NavSolid = lerp(Navy850, Navy800, 0.4f)
@@ -134,6 +136,7 @@ private fun applyThemeTokens(dark: Boolean, uiAccent: UiAccent, uiSurface: UiSur
         MoneyGreen = Color(0xFF4E7D1C)
         WarningAmber = Color(0xFFC87400)
         LossRed = Color(0xFFD94A2B)
+        TransferBlue = Color(0xFF3B6FD4)
         OnAccent = uiAccent.onLightHex.toColorOr(Color(0xFFF4FBEA))
         LineColor = lerp(Navy800, Navy850, 0.35f)
         NavSolid = Navy900

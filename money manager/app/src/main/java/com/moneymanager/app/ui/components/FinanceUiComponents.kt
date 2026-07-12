@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -37,12 +38,16 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.PlatformTextStyle
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.moneymanager.app.model.BankAccount
 import com.moneymanager.app.model.CategoryItem
-import com.moneymanager.app.model.FinanceUiState
+import com.moneymanager.app.model.CurrencyOption
 import com.moneymanager.app.model.LedgerTransaction
 import com.moneymanager.app.model.MoneyIcons
 import com.moneymanager.app.model.TransactionType
@@ -56,6 +61,17 @@ import com.moneymanager.app.ui.theme.PrimarySoft
 import com.moneymanager.app.ui.theme.TextDim
 import com.moneymanager.app.ui.theme.TextMuted
 import com.moneymanager.app.ui.theme.TextPrimary
+import com.moneymanager.app.ui.theme.TransferBlue
+
+/** Trims the font's asymmetric line padding so short labels sit optically centered
+ *  inside fixed-height pills. */
+private val pillLabelStyle = TextStyle(
+    platformStyle = PlatformTextStyle(includeFontPadding = false),
+    lineHeightStyle = LineHeightStyle(
+        alignment = LineHeightStyle.Alignment.Center,
+        trim = LineHeightStyle.Trim.Both
+    )
+)
 
 @Composable
 internal fun CategoryChoiceChip(
@@ -150,26 +166,33 @@ internal fun LegendDot(color: Color, label: String) {
 @Composable
 internal fun TransactionRow(
     transaction: LedgerTransaction,
-    state: FinanceUiState,
-    onSelect: (Long) -> Unit
+    categoriesById: Map<Long, CategoryItem>,
+    accountsById: Map<Long, BankAccount>,
+    currency: CurrencyOption,
+    onSelect: (Long) -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    val category = state.categoriesById[transaction.categoryId]
+    val category = categoriesById[transaction.categoryId]
     val isTransfer = transaction.type == TransactionType.Transfer
     val rowIcon = when {
         isTransfer -> MoneyIcons.Account
         transaction.isCreditCardTransaction -> MoneyIcons.resolveCategoryIcon("credit_card")
         else -> category?.icon ?: MoneyIcons.Category
     }
-    val accountName = transaction.accountId?.let { id -> state.accounts.firstOrNull { it.id == id }?.name }
+    val accountName = transaction.accountId?.let { id -> accountsById[id]?.name }
         ?: transaction.smsBankLabel
-    val meta = buildList {
-        add(if (isTransfer) "Transfer" else category?.name ?: "Set category")
+    val categoryLabel = if (isTransfer) "Transfer" else category?.name ?: "Set category"
+    val accountLabel = buildList {
         accountName?.takeIf { it.isNotBlank() }?.let(::add)
         if (transaction.isCreditCardTransaction) add("CC")
     }.joinToString(" · ")
 
+    // Category-tinted icon tile + pill, per the Activity design.
+    val ink = if (isTransfer) TransferBlue else categoryColor(category, transaction.type)
+    val tint = ink.copy(alpha = if (isDarkTheme()) 0.18f else 0.13f)
+
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
             .clickable { onSelect(transaction.id) }
@@ -182,13 +205,13 @@ internal fun TransactionRow(
                 modifier = Modifier
                     .size(42.dp)
                     .clip(RoundedCornerShape(13.dp))
-                    .background(Navy850),
+                    .background(tint),
                 contentAlignment = Alignment.Center
             ) {
                 androidx.compose.material3.Icon(
                     imageVector = rowIcon,
                     contentDescription = null,
-                    tint = TextMuted,
+                    tint = ink,
                     modifier = Modifier.size(21.dp)
                 )
             }
@@ -220,16 +243,42 @@ internal fun TransactionRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-            Text(
-                meta,
-                color = TextDim,
-                fontSize = 11.5.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+            Row(
+                modifier = Modifier.padding(top = 5.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(7.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .height(20.dp)
+                        .clip(RoundedCornerShape(7.dp))
+                        .background(tint)
+                        .padding(horizontal = 9.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        categoryLabel,
+                        color = ink,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        style = pillLabelStyle
+                    )
+                }
+                if (accountLabel.isNotBlank()) {
+                    Text(
+                        accountLabel,
+                        color = TextMuted,
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
         }
         Text(
-            transaction.signedAmount(state.currency),
+            transaction.signedAmount(currency),
             color = transaction.type.amountColor(),
             fontSize = 14.5.sp,
             fontWeight = FontWeight.Bold,

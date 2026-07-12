@@ -114,7 +114,14 @@ internal fun LazyListScope.dashboardContent(
         }
     } else {
         items(state.dashboardPagedTransactions, key = { "dashboard_txn_${it.id}" }) {
-            TransactionRow(transaction = it, state = state, onSelect = onEditTransaction)
+            TransactionRow(
+                transaction = it,
+                categoriesById = state.categoriesById,
+                accountsById = state.accountsById,
+                currency = state.currency,
+                onSelect = onEditTransaction,
+                modifier = Modifier.animateItem()
+            )
         }
         item {
             DashboardPagination(

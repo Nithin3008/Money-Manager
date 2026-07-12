@@ -1,10 +1,20 @@
 package com.moneymanager.app.ui
 
-import androidx.compose.animation.Crossfade
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.EaseOutBack
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -268,7 +278,11 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
             )
         },
         floatingActionButton = {
-            if (state.selectedTab != ScreenTab.Settings) {
+            AnimatedVisibility(
+                visible = state.selectedTab != ScreenTab.Settings,
+                enter = scaleIn(tween(240, easing = EaseOutBack)) + fadeIn(tween(180)),
+                exit = scaleOut(tween(160)) + fadeOut(tween(140))
+            ) {
                 Button(
                     onClick = {
                         when (state.selectedTab) {
@@ -290,9 +304,19 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
             }
         }
     ) { padding ->
-        Crossfade(
+        AnimatedContent(
             targetState = state.selectedTab,
-            animationSpec = tween(140, easing = FastOutSlowInEasing),
+            transitionSpec = {
+                // Slide the incoming screen in from the direction of travel along the nav bar:
+                // moving to a higher-index tab enters from the right, lower index from the left.
+                val forward = targetState.ordinal > initialState.ordinal
+                val slide: (Int) -> Int = { full -> if (forward) full / 6 else -full / 6 }
+                val slideOut: (Int) -> Int = { full -> if (forward) -full / 6 else full / 6 }
+                (slideInHorizontally(tween(240, easing = FastOutSlowInEasing), slide) +
+                    fadeIn(tween(200))) togetherWith
+                    (slideOutHorizontally(tween(240, easing = FastOutSlowInEasing), slideOut) +
+                        fadeOut(tween(160))) using SizeTransform(clip = false)
+            },
             label = "tabTransition"
         ) { tab ->
             LazyColumn(
@@ -327,7 +351,8 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
                         onDateFilterSelected = viewModel::setActivityDateFilter,
                         onDeleteTransaction = viewModel::deleteTransaction,
                         onEditTransaction = viewModel::requestEditTransactionCategory,
-                        onLoadMore = viewModel::loadMoreTransactions
+                        onLoadMore = viewModel::loadMoreTransactions,
+                        onScanSms = viewModel::scanForNewMessages
                     )
                     ScreenTab.Budget -> budgetContent(
                         state = state,

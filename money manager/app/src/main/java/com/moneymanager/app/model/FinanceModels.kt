@@ -284,6 +284,10 @@ data class FinanceUiState(
         categories.associateBy { it.id }
     }
 
+    val accountsById: Map<Long, BankAccount> by lazy(LazyThreadSafetyMode.NONE) {
+        accounts.associateBy { it.id }
+    }
+
     val activeSummaryAccountIds: Set<Long> by lazy(LazyThreadSafetyMode.NONE) {
         SummaryCalculations.activeAccountIds(this)
     }
@@ -487,6 +491,12 @@ data class FinanceUiState(
 
     val pagedTransactions: List<LedgerTransaction> by lazy(LazyThreadSafetyMode.NONE) {
         activityTransactions.take((activityTransactionPage.coerceAtLeast(1)) * TRANSACTIONS_PER_PAGE)
+    }
+
+    /** [pagedTransactions] grouped by day, preserving order; memoized so the Activity list
+     *  doesn't re-group on every recomposition. */
+    val pagedTransactionsByDay: Map<java.time.LocalDate, List<LedgerTransaction>> by lazy(LazyThreadSafetyMode.NONE) {
+        pagedTransactions.groupBy { it.transactionDate() }
     }
 
     val hasMoreTransactions: Boolean by lazy(LazyThreadSafetyMode.NONE) {

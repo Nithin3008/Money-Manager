@@ -1,5 +1,11 @@
 package com.moneymanager.app.ui
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -13,12 +19,15 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.SearchOff
+import androidx.compose.material.icons.rounded.Sms
+import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedButton
@@ -32,6 +41,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -62,10 +72,11 @@ internal fun LazyListScope.activityContent(
     onDateFilterSelected: (ActivityDateFilter, LocalDate?, LocalDate?) -> Unit,
     onDeleteTransaction: (Long) -> Unit,
     onEditTransaction: (Long) -> Unit,
-    onLoadMore: () -> Unit
+    onLoadMore: () -> Unit,
+    onScanSms: () -> Unit
 ) {
     item {
-        ActivityHeader()
+        ActivityHeader(isScanning = state.isScanningMessages, onScanSms = onScanSms)
     }
     item {
         ActivityDateFilterRow(state, onDateFilterSelected)
@@ -85,17 +96,24 @@ internal fun LazyListScope.activityContent(
     }
     if (state.activityTransactions.isEmpty()) {
         item {
-            ActivityEmptyState()
+            ActivityEmptyState(onScanSms = onScanSms)
         }
     } else {
-        val groups = state.pagedTransactions.groupBy { it.transactionDate() }
+        val groups = state.pagedTransactionsByDay
         groups.forEach { (day, transactions) ->
             item(key = "day_header_$day") {
-                ActivityDayHeader(day = day, transactions = transactions, state = state)
+                ActivityDayHeader(day = day, transactions = transactions, state = state, modifier = Modifier.animateItem())
             }
             transactions.forEach { transaction ->
                 item(key = "activity_txn_${transaction.id}") {
-                    TransactionRow(transaction = transaction, state = state, onSelect = onEditTransaction)
+                    TransactionRow(
+                        transaction = transaction,
+                        categoriesById = state.categoriesById,
+                        accountsById = state.accountsById,
+                        currency = state.currency,
+                        onSelect = onEditTransaction,
+                        modifier = Modifier.animateItem()
+                    )
                 }
             }
         }
@@ -127,14 +145,53 @@ internal fun LazyListScope.activityContent(
 }
 
 @Composable
-private fun ActivityHeader() {
-    Text(
-        "Transactions",
-        color = TextPrimary,
-        fontSize = 22.sp,
-        fontWeight = FontWeight.Bold,
-        letterSpacing = (-0.3).sp
+private fun ActivityHeader(isScanning: Boolean, onScanSms: () -> Unit) {
+    val rotation = rememberInfiniteTransition(label = "syncSpin")
+    val angle by rotation.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(900, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "syncAngle"
     )
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Text(
+            "Transactions",
+            color = TextPrimary,
+            fontSize = 22.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = (-0.3).sp
+        )
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .wrapContentWidth(Alignment.End)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Navy850)
+                    .clickable(enabled = !isScanning, onClick = onScanSms),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    Icons.Rounded.Sync,
+                    contentDescription = "Scan messages",
+                    tint = TextMuted,
+                    modifier = Modifier
+                        .size(21.dp)
+                        .then(if (isScanning) Modifier.rotate(angle) else Modifier)
+                )
+            }
+        }
+    }
 }
 
 @Composable
@@ -303,7 +360,8 @@ private fun ActivitySummaryStrip(state: FinanceUiState) {
 private fun ActivityDayHeader(
     day: LocalDate,
     transactions: List<LedgerTransaction>,
-    state: FinanceUiState
+    state: FinanceUiState,
+    modifier: Modifier = Modifier
 ) {
     val today = LocalDate.now()
     val dayLabel = when (day) {
@@ -315,7 +373,7 @@ private fun ActivityDayHeader(
     val netLabel = if (net >= 0) "+${state.money(net)}" else "-${state.money(-net)}"
 
     Row(
-        modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+        modifier = modifier.fillMaxWidth().padding(top = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
@@ -331,7 +389,7 @@ private fun ActivityDayHeader(
 }
 
 @Composable
-private fun ActivityEmptyState() {
+private fun ActivityEmptyState(onScanSms: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -363,12 +421,26 @@ private fun ActivityEmptyState() {
             modifier = Modifier.padding(top = 14.dp)
         )
         Text(
-            "Try a wider date filter. New bank SMS\nare picked up automatically.",
+            "Try a wider date filter or scan your\nSMS inbox for missed alerts.",
             color = TextDim,
             fontSize = 12.5.sp,
             lineHeight = 19.sp,
             textAlign = TextAlign.Center,
             modifier = Modifier.padding(top = 5.dp)
         )
+        Row(
+            modifier = Modifier
+                .padding(top = 16.dp)
+                .height(40.dp)
+                .clip(RoundedCornerShape(999.dp))
+                .background(PrimaryBlue)
+                .clickable(onClick = onScanSms)
+                .padding(horizontal = 18.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Icon(Icons.Rounded.Sms, contentDescription = null, tint = OnAccent, modifier = Modifier.size(18.dp))
+            Text("Scan SMS", color = OnAccent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        }
     }
 }
