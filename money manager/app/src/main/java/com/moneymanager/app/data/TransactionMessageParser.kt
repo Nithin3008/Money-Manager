@@ -85,6 +85,7 @@ object TransactionMessageParser {
     ): ParsedTransactionMessage? {
         val normalized = message.replace('\n', ' ').trim()
         if (SmsTransactionNormalizer.isFailedTransactionArtifact(normalized)) return null
+        if (SmsTransactionNormalizer.isOtpVerificationArtifact(normalized)) return null
         if (SmsTransactionNormalizer.isCreditCardDueReminder(normalized)) return null
         if (SmsTransactionNormalizer.isCreditCardSettlementArtifact(normalized)) return null
         if (SmsTransactionNormalizer.isCreditCardStatementArtifact(normalized)) return null

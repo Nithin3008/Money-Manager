@@ -54,11 +54,43 @@ object SmsTransactionNormalizer {
     fun isNonLedgerTransactionArtifact(rawMessage: String?, type: TransactionType): Boolean {
         if (type == TransactionType.Transfer) return false
         return isFailedTransactionArtifact(rawMessage) ||
+            isOtpVerificationArtifact(rawMessage) ||
             isCreditCardRepaymentArtifact(rawMessage, type) ||
             isCreditCardSettlementArtifact(rawMessage) ||
             isCreditCardStatementArtifact(rawMessage) ||
             isCreditCardDueReminder(rawMessage) ||
             isPaymentAppCardConfirmation(rawMessage)
+    }
+
+    /**
+     * OTP prompts sent before a card/net-banking transaction completes ("123456 is the OTP
+     * for txn of Rs.12171.00 at MERCHANT on your Credit Card XX1234"). They quote the amount
+     * and card, so they parse like a spend, but no money has moved yet — the bank sends a
+     * separate success alert with a completed verb (debited/spent/credited). Success alerts
+     * that merely warn "never share OTP/PIN" carry such a verb and are deliberately kept.
+     */
+    fun isOtpVerificationArtifact(rawMessage: String?): Boolean {
+        val raw = rawMessage?.lowercase().orEmpty()
+        if (raw.isBlank()) return false
+        val hasOtpWord = listOf("otp", "one time password", "one-time password", "verification code")
+            .any { it in raw }
+        if (!hasOtpWord) return false
+        // "will be debited from your a/c" in an OTP prompt is still future tense, not a
+        // completed movement, so neutralize it before looking for completed verbs.
+        val withoutFutureTense = raw.replace(
+            Regex("""\bwill\s+be\s+(?:debited|credited|charged|deducted)\b"""),
+            ""
+        )
+        val hasCompletedAction = listOf(
+            "debited",
+            "credited",
+            "spent",
+            "withdrawn",
+            "deposited",
+            "payment received",
+            "payment made"
+        ).any { it in withoutFutureTense }
+        return !hasCompletedAction
     }
 
     /**

@@ -250,6 +250,7 @@ class TodaySmsScanner(private val context: Context) {
             SmsTransactionNormalizer.isCreditCardSettlementArtifact(message) -> "credit_card_settlement"
             SmsTransactionNormalizer.isPaymentAppCardConfirmation(message) -> "payment_app_card_duplicate"
             SmsTransactionNormalizer.isFailedTransactionArtifact(message) -> "failed_transaction"
+            SmsTransactionNormalizer.isOtpVerificationArtifact(message) -> "otp_verification"
             parsedType != null && SmsTransactionNormalizer.isCreditCardRepaymentArtifact(message, parsedType) -> "credit_card_repayment"
             else -> ""
         }
