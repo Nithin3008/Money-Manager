@@ -40,6 +40,36 @@ class TransactionMessageParserSafetyTest {
     }
 
     @Test
+    fun realWorldCreditCardOtpSmsIsIgnored() {
+        val message = "890876 is One-Time Password for INR 12171.92 transaction towards HDFC ERGO G " +
+            "using ICICI Bank Credit Card XX0006. OTPs are SECRET. DO NOT disclose"
+
+        val parsed = TransactionMessageParser.parse(
+            message = message,
+            transactionTimestampMillis = 1_000L,
+            sender = "ICICI"
+        )
+
+        assertTrue(SmsTransactionNormalizer.isOtpVerificationArtifact(message))
+        assertTrue(parsed == null)
+    }
+
+    @Test
+    fun otpSmsWithoutAnyBankNameIsIgnored() {
+        val message = "456789 is your One Time Password for a purchase of Rs.2,500.00 on your card ending 9876. " +
+            "Valid for 10 minutes. Do not share it with anyone."
+
+        val parsed = TransactionMessageParser.parse(
+            message = message,
+            transactionTimestampMillis = 1_000L,
+            sender = "AX-UNKNWN"
+        )
+
+        assertTrue(SmsTransactionNormalizer.isOtpVerificationArtifact(message))
+        assertTrue(parsed == null)
+    }
+
+    @Test
     fun otpSmsWithFutureDebitWordingIsIgnored() {
         val message = "Use OTP 111222 to complete payment of Rs.12171.00 at FLIPKART. " +
             "Amount will be debited from your ICICI Bank Credit Card XX1003."

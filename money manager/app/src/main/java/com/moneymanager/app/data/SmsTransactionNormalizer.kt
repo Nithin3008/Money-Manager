@@ -72,8 +72,19 @@ object SmsTransactionNormalizer {
     fun isOtpVerificationArtifact(rawMessage: String?): Boolean {
         val raw = rawMessage?.lowercase().orEmpty()
         if (raw.isBlank()) return false
-        val hasOtpWord = listOf("otp", "one time password", "one-time password", "verification code")
-            .any { it in raw }
+        val hasOtpWord = listOf(
+            "otp",
+            "one time password",
+            "one-time password",
+            "onetime password",
+            "verification code",
+            "security code",
+            "auth code",
+            "authentication code",
+            "2fa code",
+            "do not share this code",
+            "code to complete"
+        ).any { it in raw }
         if (!hasOtpWord) return false
         // "will be debited from your a/c" in an OTP prompt is still future tense, not a
         // completed movement, so neutralize it before looking for completed verbs.
