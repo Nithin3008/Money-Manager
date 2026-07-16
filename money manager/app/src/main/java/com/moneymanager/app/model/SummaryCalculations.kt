@@ -73,25 +73,14 @@ internal object SummaryCalculations {
         return balanceAnchor(state) - movementFromCutoffToNow
     }
 
-    /**
-     * Summary rows for [FinanceUiState.selectedMonth]. Expenses always follow the calendar;
-     * income follows [summaryIncomeMonth], so late-month credits shift forward when the
-     * payroll-month setting is on.
-     */
+    /** Summary rows for [FinanceUiState.selectedMonth], bucketed by calendar month. */
     fun monthTransactions(state: FinanceUiState): List<LedgerTransaction> {
         return state.transactions.filter { tx ->
             if (state.isInvestmentTransaction(tx)) return@filter false
             if (tx.excludeFromSummary) return@filter false
             if (!passesAccountFilter(state, tx)) return@filter false
-            tx.summaryIncomeMonth(state.salaryShiftIncomeEnabled, state.salaryShiftWindowDays) == state.selectedMonth
+            YearMonth.from(tx.transactionDate()) == state.selectedMonth
         }
-    }
-
-    fun incomeCountsAsSalary(state: FinanceUiState, tx: LedgerTransaction): Boolean {
-        if (tx.type != TransactionType.Income) return false
-        val salaryId = state.salaryCategoryId
-        if (salaryId != null && tx.categoryId == salaryId) return true
-        return SalaryDetection.matchesConfirmedSalary(state, tx)
     }
 
     /** Income dated inside the calendar month, using the same exclusions as [monthTransactions]. */

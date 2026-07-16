@@ -24,20 +24,6 @@ android {
         }
     }
 
-    flavorDimensions += "environment"
-    productFlavors {
-        create("prod") {
-            dimension = "environment"
-        }
-        create("dev") {
-            dimension = "environment"
-            applicationIdSuffix = ".dev"
-            versionNameSuffix = "-dev"
-            manifestPlaceholders["appLabel"] = "Money Manager Dev"
-            manifestPlaceholders["transactionDetectionLabel"] = "Money Manager Dev Transaction Detection"
-        }
-    }
-
     buildTypes {
         release {
             isMinifyEnabled = false

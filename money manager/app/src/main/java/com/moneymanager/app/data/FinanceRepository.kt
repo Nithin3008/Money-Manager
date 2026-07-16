@@ -49,7 +49,10 @@ class FinanceRepository(private val dao: FinanceDao) {
                 name = name,
                 balance = balance,
                 smsMatchKey = smsMatchKey?.trim()?.takeIf { it.isNotEmpty() },
-                accountType = accountType.name
+                accountType = accountType.name,
+                // The typed starting balance is ground truth as of this moment; older
+                // transactions are already inside it and must not move the balance.
+                balanceAnchorAtMillis = System.currentTimeMillis()
             )
         )
     }
@@ -61,7 +64,8 @@ class FinanceRepository(private val dao: FinanceDao) {
                 name = account.name,
                 balance = account.balance,
                 smsMatchKey = account.smsMatchKey?.trim()?.takeIf { it.isNotEmpty() },
-                accountType = account.type.name
+                accountType = account.type.name,
+                balanceAnchorAtMillis = account.balanceAnchorAtMillis
             )
         )
     }

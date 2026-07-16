@@ -21,7 +21,6 @@ import com.moneymanager.app.model.BudgetPlan
 import com.moneymanager.app.model.MessageScanRange
 import java.time.LocalDate
 import com.moneymanager.app.model.CategoryItem
-import com.moneymanager.app.model.CreditObservation
 import com.moneymanager.app.model.CurrencyOption
 import com.moneymanager.app.model.DetectedTransactionDraft
 import com.moneymanager.app.model.ActivityDateFilter
@@ -29,7 +28,6 @@ import com.moneymanager.app.model.FinanceUiState
 import com.moneymanager.app.model.LedgerTransaction
 import com.moneymanager.app.model.MoneyIcons
 import com.moneymanager.app.model.RegistrationAccountInput
-import com.moneymanager.app.model.SalaryDetection
 import com.moneymanager.app.model.ScreenTab
 import com.moneymanager.app.model.ThemeMode
 import com.moneymanager.app.model.TransactionType
@@ -90,64 +88,6 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
                 )
             )
             reloadState()
-            bootstrapSalaryFromRecentSms()
-        }
-    }
-
-    /**
-     * Tracking starts at onboarding: instead of importing months of history, scan recent SMS
-     * in memory, find the recurring salary credit, and import only the latest one so the
-     * current month's income is right while balances stay anchored to the entered amounts.
-     */
-    private suspend fun bootstrapSalaryFromRecentSms() {
-        if (!hasSmsPermission()) return
-        val today = LocalDate.now()
-        val parsed = runCatching {
-            TodaySmsScanner(getApplication()).scanRange(today.minusMonths(3), today)
-        }.getOrDefault(emptyList())
-        val credits = SmsTransactionNormalizer.filterImportBatch(parsed)
-            .filter { it.type == TransactionType.Income && it.amount > 0.0 && !it.isCreditCardTransaction }
-        val candidate = SalaryDetection.detectRecurringCredit(
-            credits.map { CreditObservation(it.counterparty, it.amount, it.transactionTimestampMillis) }
-        )
-        if (candidate == null) {
-            _uiState.update {
-                it.copy(scanStatusMessage = "No recurring salary credit found in recent SMS. Tracking starts from today.")
-            }
-            return
-        }
-        val latest = credits
-            .filter { SalaryDetection.salaryMatchKey(it.counterparty) == candidate.key }
-            .maxByOrNull { it.transactionTimestampMillis }
-            ?: return
-        val state = _uiState.value
-        val salaryCategoryId = ensureSalaryCategoryId(state)
-        val transaction = LedgerTransaction(
-            id = 0,
-            name = latest.counterparty,
-            amount = latest.amount,
-            type = TransactionType.Income,
-            categoryId = salaryCategoryId,
-            accountId = SmsBankKeys.resolveAccountId(latest.bankName, state.accounts)
-                ?: state.defaultAccountId
-                ?: state.accounts.singleOrNull()?.id,
-            timestampMillis = latest.transactionTimestampMillis,
-            isAutoDetected = true,
-            rawMessage = latest.rawMessage,
-            smsBankLabel = latest.bankName,
-            excludeFromSummary = false,
-            isCreditCardTransaction = false
-        )
-        repository.addTransaction(transaction)
-        applyTransactionBalanceMovement(transaction)
-        repository.persistUserSettings(
-            state.copy(salaryCounterpartyKey = candidate.key, salaryCategoryId = salaryCategoryId)
-        )
-        reloadState {
-            it.copy(
-                scanStatusMessage = "Found your salary from ${latest.counterparty}. " +
-                    "Imported the latest credit; everything else is tracked from today."
-            )
         }
     }
 
@@ -241,99 +181,6 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun setSalaryShiftIncomeEnabled(enabled: Boolean) {
-        viewModelScope.launch {
-            val next = _uiState.value.copy(salaryShiftIncomeEnabled = enabled)
-            repository.persistUserSettings(next)
-            _uiState.value = next
-        }
-    }
-
-    fun setSalaryShiftWindowDays(days: Int) {
-        viewModelScope.launch {
-            val coerced = days.coerceIn(3, 14)
-            val next = _uiState.value.copy(salaryShiftWindowDays = coerced)
-            repository.persistUserSettings(next)
-            _uiState.value = next
-        }
-    }
-
-    fun setSalaryCategoryId(categoryId: Long?) {
-        viewModelScope.launch {
-            val next = _uiState.value.copy(salaryCategoryId = categoryId)
-            repository.persistUserSettings(next)
-            _uiState.value = next
-        }
-    }
-
-    fun confirmSalaryCandidate() {
-        viewModelScope.launch {
-            val state = _uiState.value
-            val candidate = state.salaryCandidate ?: return@launch
-            val salaryCategoryId = ensureSalaryCategoryId(state)
-            repository.persistUserSettings(
-                state.copy(
-                    salaryCounterpartyKey = candidate.key,
-                    salaryCategoryId = salaryCategoryId
-                )
-            )
-            val uncategorizedId = state.categories.firstOrNull { it.name == "Uncategorized" }?.id ?: 0L
-            state.transactions
-                .filter {
-                    it.type == TransactionType.Income &&
-                        it.categoryId == uncategorizedId &&
-                        SalaryDetection.salaryMatchKey(it.name) == candidate.key
-                }
-                .forEach { repository.updateTransaction(it.copy(categoryId = salaryCategoryId)) }
-            reloadState()
-        }
-    }
-
-    fun dismissSalaryCandidate() {
-        viewModelScope.launch {
-            val state = _uiState.value
-            val candidate = state.salaryCandidate ?: return@launch
-            val next = state.copy(dismissedSalaryKeys = state.dismissedSalaryKeys + candidate.key)
-            repository.persistUserSettings(next)
-            _uiState.value = next
-        }
-    }
-
-    fun clearSalaryCounterparty() {
-        viewModelScope.launch {
-            val next = _uiState.value.copy(salaryCounterpartyKey = null)
-            repository.persistUserSettings(next)
-            _uiState.value = next
-        }
-    }
-
-    /** Salary category to attach confirmed salary credits to; found by setting, by name, or created. */
-    private suspend fun ensureSalaryCategoryId(state: FinanceUiState): Long {
-        state.salaryCategoryId?.let { id ->
-            if (state.categories.any { it.id == id }) return id
-        }
-        state.categories.firstOrNull { it.name.equals("Salary", ignoreCase = true) }?.let { return it.id }
-        val category = CategoryItem(
-            id = System.currentTimeMillis(),
-            name = "Salary",
-            iconKey = "work",
-            icon = MoneyIcons.resolveCategoryIcon("work"),
-            isDefault = false,
-            colorHex = "#38E68B"
-        )
-        repository.addCategory(category)
-        return category.id
-    }
-
-    /** Category override for credits from the confirmed salary counterparty. */
-    private fun confirmedSalaryCategoryId(name: String, type: TransactionType): Long? {
-        val state = _uiState.value
-        val key = state.salaryCounterpartyKey ?: return null
-        if (type != TransactionType.Income) return null
-        if (SalaryDetection.salaryMatchKey(name) != key) return null
-        return state.salaryCategoryId
-    }
-
     fun setSummaryAccountFilter(accountIds: Set<Long>) {
         viewModelScope.launch {
             val next = _uiState.value.copy(summarySelectedAccountIds = accountIds)
@@ -400,7 +247,14 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
         if (balance < 0.0) return
         viewModelScope.launch {
             val account = _uiState.value.accounts.firstOrNull { it.id == accountId } ?: return@launch
-            repository.updateAccount(account.copy(balance = balance))
+            repository.updateAccount(
+                account.copy(
+                    balance = balance,
+                    // Typing the real balance re-anchors this account: everything dated before
+                    // now is already reflected in it, so history can never double-count again.
+                    balanceAnchorAtMillis = System.currentTimeMillis()
+                )
+            )
             reloadState()
         }
     }
@@ -710,13 +564,7 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
         // starts, and scanning without it would resurrect history after a data wipe.
         if (!_uiState.value.hasCompletedRegistration) return
         viewModelScope.launch {
-            val hadSalarySource = _uiState.value.salaryCounterpartyKey != null
-            maybeRetrySalaryBootstrap()
             val state = _uiState.value
-            if (!hadSalarySource && state.salaryCounterpartyKey != null) {
-                // Keep the bootstrap outcome visible; the scan below overwrites the status line.
-                pendingScanNote = "Salary found: ${state.confirmedSalaryName ?: "recurring credit"}."
-            }
             val today = LocalDate.now()
             val onboardedDate = state.onboardedAtMillis
                 .takeIf { it > 0L }
@@ -733,27 +581,7 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private var salaryBootstrapInFlight = false
     private var pendingScanNote: String? = null
-
-    /**
-     * Registration can finish before the SMS permission dialog is answered, which makes the
-     * one-shot salary bootstrap silently skip. Retry it here until the first successful scan
-     * is recorded (or a salary source is confirmed), after which it can never apply again.
-     */
-    private suspend fun maybeRetrySalaryBootstrap() {
-        val state = _uiState.value
-        if (salaryBootstrapInFlight) return
-        if (state.salaryCounterpartyKey != null) return
-        if (state.lastSuccessfulScanMillis > 0L) return
-        if (!hasSmsPermission()) return
-        salaryBootstrapInFlight = true
-        try {
-            bootstrapSalaryFromRecentSms()
-        } finally {
-            salaryBootstrapInFlight = false
-        }
-    }
 
     private fun millisToLocalDate(millis: Long): LocalDate {
         return Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault()).toLocalDate()
@@ -782,11 +610,6 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
-    }
-
-    fun populateLastThreeMonths() {
-        val today = LocalDate.now()
-        scanMessages(MessageScanRange.Custom, today.minusMonths(3), today)
     }
 
     fun scanMessages(
@@ -969,10 +792,7 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
                     return@forEach
                 }
                 normalizedExisting.addAll(rawKeys)
-                val learnedCategoryId = inferCategoryId(msg)
-                val categoryId = confirmedSalaryCategoryId(msg.counterparty, msg.type)
-                    ?: learnedCategoryId
-                    ?: uncategorizedId
+                val categoryId = inferCategoryId(msg) ?: uncategorizedId
                 val availableAccounts = accountsSnapshot.values.toList()
                 val accountCandidates = if (msg.isCreditCardTransaction) {
                     availableAccounts.filter { it.type == AccountType.CreditCard }
@@ -1167,6 +987,7 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
             runCatching {
                 repository.cleanupCreditCardRepaymentArtifacts()
                 reloadState()
+                ensureTrackingStartAnchored()
                 if (mergeExistingCrossAccountTransferPairs() > 0) {
                     reloadState()
                 }
@@ -1176,6 +997,21 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
                     _uiState.update { state -> state.copy(isAppInitializing = false) }
                 }
         }
+    }
+
+    /**
+     * Older installs (upgraded in place before onboarding stamping existed) can have
+     * onboardedAtMillis == 0, which leaves the "tracking starts on install day" cutoff open.
+     * Anchor it once to now so scans can never import — and old imports can never move the
+     * balance for — transactions dated before this point.
+     */
+    private suspend fun ensureTrackingStartAnchored() {
+        val state = _uiState.value
+        if (!state.hasCompletedRegistration) return
+        if (state.onboardedAtMillis > 0L) return
+        val next = state.copy(onboardedAtMillis = System.currentTimeMillis())
+        repository.persistUserSettings(next)
+        reloadState()
     }
 
     /**
@@ -1451,28 +1287,37 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
         accountsById: MutableMap<Long, BankAccount>? = null
     ): List<Pair<Long, Double>> {
         if (transaction.amount <= 0.0) return emptyList()
-        // Account balances were entered as-of onboarding, so transactions dated before that
-        // moment are already reflected in them and must not move the balance again.
-        if (transaction.timestampMillis < _uiState.value.onboardedAtMillis) return emptyList()
         if (transaction.type == TransactionType.Transfer) {
             return listOfNotNull(
                 transaction.fromAccountId?.let { id ->
-                    accountForBalanceMovement(id, accountsById)?.let { account ->
-                        id to outgoingBalanceMovement(account, transaction.amount)
-                    }
+                    accountForBalanceMovement(id, accountsById)
+                        ?.takeIf { transactionMovesBalanceOf(transaction, it) }
+                        ?.let { account -> id to outgoingBalanceMovement(account, transaction.amount) }
                 },
                 transaction.toAccountId?.let { id ->
-                    accountForBalanceMovement(id, accountsById)?.let { account ->
-                        id to incomingBalanceMovement(account, transaction.amount)
-                    }
+                    accountForBalanceMovement(id, accountsById)
+                        ?.takeIf { transactionMovesBalanceOf(transaction, it) }
+                        ?.let { account -> id to incomingBalanceMovement(account, transaction.amount) }
                 }
             )
         }
 
         val accountId = transaction.accountId ?: return emptyList()
         val account = accountForBalanceMovement(accountId, accountsById) ?: return emptyList()
+        if (!transactionMovesBalanceOf(transaction, account)) return emptyList()
         return listOf(accountId to singleAccountBalanceMovement(transaction, account))
             .filter { it.second != 0.0 }
+    }
+
+    /**
+     * An account's balance is ground truth as of its anchor (registration, account creation, or
+     * the last manual balance edit — whichever is latest). Transactions dated before that moment
+     * are already reflected in the anchored figure, so importing, editing, or deleting them must
+     * never move the balance again.
+     */
+    private fun transactionMovesBalanceOf(transaction: LedgerTransaction, account: BankAccount): Boolean {
+        val cutoff = maxOf(_uiState.value.onboardedAtMillis, account.balanceAnchorAtMillis)
+        return transaction.timestampMillis >= cutoff
     }
 
     private fun accountForBalanceMovement(

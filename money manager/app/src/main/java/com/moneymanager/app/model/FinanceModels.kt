@@ -137,7 +137,9 @@ data class BankAccount(
     val name: String,
     val balance: Double,
     val smsMatchKey: String? = null,
-    val type: AccountType = AccountType.Bank
+    val type: AccountType = AccountType.Bank,
+    /** When this account's balance was last set as ground truth; older transactions never move it. */
+    val balanceAnchorAtMillis: Long = 0L
 )
 
 data class RegistrationAccountInput(
@@ -248,13 +250,6 @@ data class FinanceUiState(
     val showTransactionDetailSheet: Boolean = false,
     val selectedTransactionId: Long? = null,
     val budgetWarning: BudgetWarning? = null,
-    val salaryShiftIncomeEnabled: Boolean = false,
-    val salaryShiftWindowDays: Int = 5,
-    val salaryCategoryId: Long? = null,
-    /** Normalized counterparty key the user confirmed as their salary source. */
-    val salaryCounterpartyKey: String? = null,
-    /** Counterparty keys the user said are not salary; never suggest them again. */
-    val dismissedSalaryKeys: Set<String> = emptySet(),
     val bankSmsSetupCompleted: Boolean = false,
     /** When the user completed registration; transactions dated before this never move account balances. */
     val onboardedAtMillis: Long = 0L,
@@ -305,18 +300,6 @@ data class FinanceUiState(
         monthTransactions.filter { it.type == TransactionType.Income && !it.isCreditCardTransaction }
     }
 
-    val monthSalaryIncome: Double by lazy(LazyThreadSafetyMode.NONE) {
-        monthIncomeTransactions
-            .filter { SummaryCalculations.incomeCountsAsSalary(this, it) }
-            .sumOf { it.amount }
-    }
-
-    val monthOtherIncome: Double by lazy(LazyThreadSafetyMode.NONE) {
-        monthIncomeTransactions
-            .filter { !SummaryCalculations.incomeCountsAsSalary(this, it) }
-            .sumOf { it.amount }
-    }
-
     val monthExpense: Double by lazy(LazyThreadSafetyMode.NONE) {
         monthExpenseTransactions
             .sumOf { it.amount }
@@ -327,7 +310,7 @@ data class FinanceUiState(
     }
 
     val monthIncome: Double by lazy(LazyThreadSafetyMode.NONE) {
-        monthSalaryIncome + monthOtherIncome
+        monthIncomeTransactions.sumOf { it.amount }
     }
 
     val monthReportIncome: Double by lazy(LazyThreadSafetyMode.NONE) {
@@ -391,27 +374,8 @@ data class FinanceUiState(
         SummaryCalculations.calendarMonthIncomeTotal(this)
     }
 
-    /** Recurring monthly credit that looks like salary, awaiting a one-time user confirmation. */
-    val salaryCandidate: SalaryCandidate? by lazy(LazyThreadSafetyMode.NONE) {
-        SalaryDetection.detectCandidate(this)
-    }
-
-    /** Human-readable name of the confirmed salary source, from its most recent transaction. */
-    val confirmedSalaryName: String? by lazy(LazyThreadSafetyMode.NONE) {
-        val key = salaryCounterpartyKey ?: return@lazy null
-        transactions
-            .filter { it.type == TransactionType.Income && SalaryDetection.salaryMatchKey(it.name) == key }
-            .maxByOrNull { it.timestampMillis }
-            ?.name
-            ?: key
-    }
-
     val selectedMonthOpeningBalance: Double by lazy(LazyThreadSafetyMode.NONE) {
         balanceAtStartOfSelectedMonth
-    }
-
-    val selectedMonthSalaryIncome: Double by lazy(LazyThreadSafetyMode.NONE) {
-        monthSalaryIncome
     }
 
     /** Current user-entered account balance, used as the anchor for reverse reconstruction. */

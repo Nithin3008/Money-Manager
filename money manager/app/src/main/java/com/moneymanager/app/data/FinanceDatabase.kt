@@ -16,7 +16,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         BudgetEntity::class,
         DetectedDraftEntity::class
     ],
-    version = 18
+    version = 19
 )
 abstract class FinanceDatabase : RoomDatabase() {
     abstract fun dao(): FinanceDao
@@ -48,7 +48,8 @@ abstract class FinanceDatabase : RoomDatabase() {
                         Migration14To15,
                         Migration15To16,
                         Migration16To17,
-                        Migration17To18
+                        Migration17To18,
+                        Migration18To19
                     )
                     .build()
                     .also { instance = it }
@@ -220,6 +221,14 @@ abstract class FinanceDatabase : RoomDatabase() {
                 db.addColumnIfMissing("transactions", "toAccountId", "INTEGER")
                 db.addColumnIfMissing("detected_drafts", "fromAccountId", "INTEGER")
                 db.addColumnIfMissing("detected_drafts", "toAccountId", "INTEGER")
+            }
+        }
+
+        private val Migration18To19 = object : Migration(18, 19) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // 0 = unanchored; the balance guard then falls back to the global onboarding
+                // stamp. The anchor arms itself on the next manual balance edit.
+                db.addColumnIfMissing("accounts", "balanceAnchorAtMillis", "INTEGER NOT NULL DEFAULT 0")
             }
         }
 

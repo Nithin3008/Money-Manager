@@ -21,13 +21,8 @@ internal fun FinanceUiState.toSettingsEntity(): UserSettingsEntity = UserSetting
     themeMode = themeMode.name,
     uiAccent = uiAccent.name,
     uiSurface = uiSurface.name,
-    salaryShiftIncomeEnabled = salaryShiftIncomeEnabled,
-    salaryShiftWindowDays = salaryShiftWindowDays.coerceIn(1, 14),
-    salaryCategoryId = salaryCategoryId,
-    salaryCounterpartyKey = salaryCounterpartyKey?.takeIf { it.isNotBlank() },
-    dismissedSalaryKeysCsv = dismissedSalaryKeys.joinToString(","),
     bankSmsSetupCompleted = bankSmsSetupCompleted,
-    // Legacy offline-LLM columns are kept in the schema to avoid a migration.
+    // Legacy salary + offline-LLM columns are kept in the schema (defaults) to avoid a migration.
     offlineLlmParsingEnabled = false,
     offlineLlmModelDownloaded = false,
     onboardedAtMillis = onboardedAtMillis,
@@ -51,15 +46,6 @@ internal fun UserSettingsEntity.applyTo(current: FinanceUiState): FinanceUiState
         uiSurface = uiSurface.let { surface ->
             UiSurface.entries.firstOrNull { it.name == surface }
         } ?: UiSurface.Midnight,
-        salaryShiftIncomeEnabled = salaryShiftIncomeEnabled,
-        salaryShiftWindowDays = salaryShiftWindowDays.coerceIn(1, 14),
-        salaryCategoryId = salaryCategoryId,
-        salaryCounterpartyKey = salaryCounterpartyKey?.takeIf { it.isNotBlank() },
-        dismissedSalaryKeys = dismissedSalaryKeysCsv
-            .split(",")
-            .map { it.trim() }
-            .filter { it.isNotEmpty() }
-            .toSet(),
         bankSmsSetupCompleted = bankSmsSetupCompleted,
         onboardedAtMillis = onboardedAtMillis,
         lastSuccessfulScanMillis = lastSuccessfulScanMillis,
@@ -76,7 +62,8 @@ internal fun AccountEntity.toModel() = BankAccount(
     name = name,
     balance = balance,
     smsMatchKey = smsMatchKey,
-    type = AccountType.entries.firstOrNull { it.name == accountType } ?: AccountType.Bank
+    type = AccountType.entries.firstOrNull { it.name == accountType } ?: AccountType.Bank,
+    balanceAnchorAtMillis = balanceAnchorAtMillis
 )
 
 internal fun CategoryEntity.toModel() = CategoryItem(

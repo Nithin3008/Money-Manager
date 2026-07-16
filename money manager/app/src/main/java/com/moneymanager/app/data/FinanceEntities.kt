@@ -33,7 +33,8 @@ data class AccountEntity(
     val name: String,
     val balance: Double,
     val smsMatchKey: String? = null,
-    val accountType: String = "Bank"
+    val accountType: String = "Bank",
+    val balanceAnchorAtMillis: Long = 0L
 )
 
 @Entity(tableName = "categories")

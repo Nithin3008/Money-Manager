@@ -363,9 +363,7 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
                         state = state,
                         onMonthSelected = viewModel::selectMonth,
                         onToggleSummaryAccount = viewModel::toggleSummaryAccountInFilter,
-                        onClearSummaryAccountFilter = viewModel::clearSummaryAccountFilter,
-                        onConfirmSalaryCandidate = viewModel::confirmSalaryCandidate,
-                        onDismissSalaryCandidate = viewModel::dismissSalaryCandidate
+                        onClearSummaryAccountFilter = viewModel::clearSummaryAccountFilter
                     )
                     ScreenTab.Settings -> settingsContent(
                         state = state,
@@ -374,10 +372,6 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
                         onThemeSelected = viewModel::selectThemeMode,
                         onUiAccentSelected = viewModel::selectUiAccent,
                         onUiSurfaceSelected = viewModel::selectUiSurface,
-                        onSalaryShiftChanged = viewModel::setSalaryShiftIncomeEnabled,
-                        onSalaryWindowDaysChanged = viewModel::setSalaryShiftWindowDays,
-                        onSalaryCategorySelected = viewModel::setSalaryCategoryId,
-                        onClearSalarySource = viewModel::clearSalaryCounterparty,
                         onDeleteAccount = viewModel::deleteAccount,
                         onUpdateAccountBalance = viewModel::updateAccountBalance,
                         onAddAccount = viewModel::addBankAccount,
@@ -553,10 +547,6 @@ private fun androidx.compose.foundation.lazy.LazyListScope.settingsContent(
     onThemeSelected: (ThemeMode) -> Unit,
     onUiAccentSelected: (UiAccent) -> Unit,
     onUiSurfaceSelected: (UiSurface) -> Unit,
-    onSalaryShiftChanged: (Boolean) -> Unit,
-    onSalaryWindowDaysChanged: (Int) -> Unit,
-    onSalaryCategorySelected: (Long?) -> Unit,
-    onClearSalarySource: () -> Unit,
     onDeleteAccount: (Long) -> Unit,
     onUpdateAccountBalance: (Long, Double) -> Unit,
     onAddAccount: (String, Double) -> Unit,
@@ -577,10 +567,6 @@ private fun androidx.compose.foundation.lazy.LazyListScope.settingsContent(
             onThemeSelected = onThemeSelected,
             onUiAccentSelected = onUiAccentSelected,
             onUiSurfaceSelected = onUiSurfaceSelected,
-            onSalaryShiftChanged = onSalaryShiftChanged,
-            onSalaryWindowDaysChanged = onSalaryWindowDaysChanged,
-            onSalaryCategorySelected = onSalaryCategorySelected,
-            onClearSalarySource = onClearSalarySource,
             onDeleteAccount = onDeleteAccount,
             onUpdateAccountBalance = onUpdateAccountBalance,
             onAddAccount = onAddAccount,
@@ -601,7 +587,6 @@ private enum class SettingsDetail(val title: String) {
     DefaultAccount("Default account"),
     Currency("Currency"),
     Surface("Surface style"),
-    Salary("Salary behavior"),
     Backup("Backup & restore")
 }
 
@@ -613,10 +598,6 @@ private fun ProfileScreen(
     onThemeSelected: (ThemeMode) -> Unit,
     onUiAccentSelected: (UiAccent) -> Unit,
     onUiSurfaceSelected: (UiSurface) -> Unit,
-    onSalaryShiftChanged: (Boolean) -> Unit,
-    onSalaryWindowDaysChanged: (Int) -> Unit,
-    onSalaryCategorySelected: (Long?) -> Unit,
-    onClearSalarySource: () -> Unit,
     onDeleteAccount: (Long) -> Unit,
     onUpdateAccountBalance: (Long, Double) -> Unit,
     onAddAccount: (String, Double) -> Unit,
@@ -664,19 +645,6 @@ private fun ProfileScreen(
             onOpenSurface = { detail = SettingsDetail.Surface }
         )
 
-        SettingsSectionLabel("Automation")
-        SettingsCard {
-            SettingsToggleRow(
-                icon = Icons.Rounded.Sms,
-                label = "Salary shift income",
-                subtitle = "Count late-month salary in the next month",
-                checked = state.salaryShiftIncomeEnabled,
-                onCheckedChange = onSalaryShiftChanged,
-                showDivider = true
-            )
-            SettingsRow(Icons.Rounded.Payments, "Salary behavior", "Window · category", showDivider = false) { detail = SettingsDetail.Salary }
-        }
-
         SettingsSectionLabel("Data")
         SettingsCard {
             SettingsRow(Icons.Rounded.Backup, "Backup & restore", null, showDivider = false) { detail = SettingsDetail.Backup }
@@ -720,19 +688,6 @@ private fun ProfileScreen(
                     darkMode = state.themeMode == ThemeMode.Dark,
                     onSelected = onUiSurfaceSelected
                 )
-                SettingsDetail.Salary -> Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                    SummaryBehaviorSettings(
-                        salaryShiftEnabled = state.salaryShiftIncomeEnabled,
-                        windowDays = state.salaryShiftWindowDays,
-                        onSalaryShiftChanged = onSalaryShiftChanged,
-                        onWindowDaysChanged = onSalaryWindowDaysChanged
-                    )
-                    SalaryCategorySettings(
-                        state = state,
-                        onSalaryCategorySelected = onSalaryCategorySelected,
-                        onClearSalarySource = onClearSalarySource
-                    )
-                }
                 SettingsDetail.Backup -> BackupRestorePanel(
                     statusMessage = state.scanStatusMessage,
                     onExport = onExportData,
@@ -3318,52 +3273,6 @@ private fun BrandHeader(userName: String, onOpenSettings: () -> Unit) {
 }
 
 @Composable
-private fun SummaryBehaviorSettings(
-    salaryShiftEnabled: Boolean,
-    windowDays: Int,
-    onSalaryShiftChanged: (Boolean) -> Unit,
-    onWindowDaysChanged: (Int) -> Unit
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        LabelText("MONTHLY SUMMARY")
-        ElevatedPanel {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Payroll month for income", color = TextPrimary, style = MaterialTheme.typography.titleMedium)
-                        Text(
-                            "Credits in the last days of a month can count toward the next month on Summary.",
-                            color = TextDim,
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                    }
-                    Switch(
-                        checked = salaryShiftEnabled,
-                        onCheckedChange = onSalaryShiftChanged,
-                        colors = appSwitchColors()
-                    )
-                }
-                if (salaryShiftEnabled) {
-                    Text("Payday window (last N days)", color = TextMuted, style = MaterialTheme.typography.labelMedium)
-                    ChipRow {
-                        listOf(3, 5, 7, 10, 14).forEach { days ->
-                            MoneyChip(
-                                "$days d",
-                                selected = windowDays == days,
-                                onClick = { onWindowDaysChanged(days) }
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
 private fun BankSmsSetupScreen(
     state: FinanceUiState,
     onMapBank: (String, Long) -> Unit,
@@ -3480,71 +3389,6 @@ private fun usefulSmsAccountLabels(labels: List<String>): List<String> {
                 SmsBankKeys.normalize(label) in accountSpecificBases
         }
         .sortedWith(compareByDescending<String> { it.contains(" A/C ", ignoreCase = true) }.thenBy { it })
-}
-
-@Composable
-private fun SalaryCategorySettings(
-    state: FinanceUiState,
-    onSalaryCategorySelected: (Long?) -> Unit,
-    onClearSalarySource: () -> Unit
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        LabelText("SALARY ON SUMMARY")
-        ElevatedPanel {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(
-                    "The income tile highlights salary separately; other income appears in gold.",
-                    color = TextDim,
-                    style = MaterialTheme.typography.bodyMedium
-                )
-                LabelText("SALARY CATEGORY")
-                ChipRow {
-                    MoneyChip(
-                        "None",
-                        selected = state.salaryCategoryId == null,
-                        onClick = { onSalaryCategorySelected(null) }
-                    )
-                    state.categories.forEach { cat ->
-                        MoneyChip(
-                            cat.name,
-                            selected = state.salaryCategoryId == cat.id,
-                            onClick = { onSalaryCategorySelected(cat.id) }
-                        )
-                    }
-                }
-                LabelText("SALARY SOURCE")
-                if (state.salaryCounterpartyKey != null) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text(
-                                state.confirmedSalaryName ?: state.salaryCounterpartyKey,
-                                color = TextPrimary,
-                                style = MaterialTheme.typography.titleMedium
-                            )
-                            Text(
-                                "New credits from this sender are categorized as salary automatically.",
-                                color = TextDim,
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                        }
-                        TextButton(onClick = onClearSalarySource) {
-                            Text("Clear")
-                        }
-                    }
-                } else {
-                    Text(
-                        "No salary source confirmed yet. When a recurring monthly credit is detected, " +
-                            "Reports will ask you to confirm it as salary.",
-                        color = TextDim,
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                }
-            }
-        }
-    }
 }
 
 @Composable

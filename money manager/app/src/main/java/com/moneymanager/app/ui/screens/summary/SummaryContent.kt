@@ -48,7 +48,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.moneymanager.app.model.FinanceUiState
 import com.moneymanager.app.model.MonthlyCategoryTotal
-import com.moneymanager.app.model.SalaryCandidate
 import com.moneymanager.app.model.TransactionType
 import com.moneymanager.app.model.month
 import com.moneymanager.app.model.shortLabel
@@ -72,9 +71,7 @@ internal fun LazyListScope.summaryContent(
     state: FinanceUiState,
     onMonthSelected: (YearMonth) -> Unit,
     onToggleSummaryAccount: (Long) -> Unit,
-    onClearSummaryAccountFilter: () -> Unit,
-    onConfirmSalaryCandidate: () -> Unit,
-    onDismissSalaryCandidate: () -> Unit
+    onClearSummaryAccountFilter: () -> Unit
 ) {
     item {
         ReportsHeader(state, onMonthSelected)
@@ -85,16 +82,6 @@ internal fun LazyListScope.summaryContent(
                 state = state,
                 onToggleAccount = onToggleSummaryAccount,
                 onClearFilter = onClearSummaryAccountFilter
-            )
-        }
-    }
-    state.salaryCandidate?.let { candidate ->
-        item {
-            SalarySuggestionCard(
-                state = state,
-                candidate = candidate,
-                onConfirm = onConfirmSalaryCandidate,
-                onDismiss = onDismissSalaryCandidate
             )
         }
     }
@@ -205,22 +192,10 @@ private fun MetricGrid(state: FinanceUiState) {
     val currency = state.currency
     val net = state.monthReportNet
     val netLabel = if (net >= 0) "+${money(net, currency)}" else "-${money(-net, currency)}"
-    val incomeShifted = state.salaryShiftIncomeEnabled &&
-        kotlin.math.abs(state.calendarMonthIncomeTotal - state.monthReportIncome) > 0.01
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             MetricTile("Spent", money(state.monthExpense, currency), LossRed, Modifier.weight(1f))
-            MetricTile(
-                "Income",
-                money(state.monthReportIncome, currency),
-                MoneyGreen,
-                Modifier.weight(1f),
-                subValue = if (incomeShifted) {
-                    "${money(state.calendarMonthIncomeTotal, currency)} by statement date"
-                } else {
-                    null
-                }
-            )
+            MetricTile("Income", money(state.monthReportIncome, currency), MoneyGreen, Modifier.weight(1f))
         }
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             MetricTile("Net saved", netLabel, TextPrimary, Modifier.weight(1f))
@@ -461,48 +436,6 @@ private fun donutSlices(expenses: List<MonthlyCategoryTotal>): List<DonutSlice> 
         visible + DonutSlice("Other", otherAmount, palette[3])
     } else {
         visible
-    }
-}
-
-@Composable
-private fun SalarySuggestionCard(
-    state: FinanceUiState,
-    candidate: SalaryCandidate,
-    onConfirm: () -> Unit,
-    onDismiss: () -> Unit
-) {
-    ReportCard {
-        Text("Is this your salary?", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-        Text(
-            "${candidate.displayName} has credited about ${money(candidate.typicalAmount, state.currency)} " +
-                "monthly for ${candidate.monthsObserved} months.",
-            color = TextDim,
-            fontSize = 12.5.sp,
-            modifier = Modifier.padding(top = 6.dp)
-        )
-        Text(
-            "Confirming categorizes these credits as salary, now and for future SMS imports.",
-            color = TextDim,
-            fontSize = 11.5.sp,
-            modifier = Modifier.padding(top = 4.dp)
-        )
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Button(
-                onClick = onConfirm,
-                shape = RoundedCornerShape(12.dp),
-                colors = primaryButtonColors(),
-                modifier = Modifier.weight(1f)
-            ) {
-                Text("Yes, it's salary")
-            }
-            TextButton(onClick = onDismiss, modifier = Modifier.weight(1f)) {
-                Text("Not salary", color = TextMuted)
-            }
-        }
     }
 }
 
