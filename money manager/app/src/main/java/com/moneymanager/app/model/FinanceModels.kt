@@ -249,6 +249,8 @@ data class FinanceUiState(
     val editingTransactionId: Long? = null,
     val showTransactionDetailSheet: Boolean = false,
     val selectedTransactionId: Long? = null,
+    /** Transaction awaiting delete confirmation; the dialog is showing while non-null. */
+    val pendingDeleteTransactionId: Long? = null,
     val budgetWarning: BudgetWarning? = null,
     val bankSmsSetupCompleted: Boolean = false,
     /** When the user completed registration; transactions dated before this never move account balances. */
@@ -258,6 +260,11 @@ data class FinanceUiState(
     val defaultAccountId: Long? = null,
     /** Empty = all accounts on Summary; otherwise filter to these account ids. */
     val summarySelectedAccountIds: Set<Long> = emptySet(),
+    /**
+     * Normalized SMS keys of auto-detected rows the user deleted or ignored. Scans skip
+     * these forever so a deleted transaction never resurrects on the next catch-up scan.
+     */
+    val dismissedSmsKeys: Set<String> = emptySet(),
     /** Distinct SMS bank labels seen in scans/transactions; not persisted. */
     val discoveredSmsBanks: List<String> = emptyList()
 ) {

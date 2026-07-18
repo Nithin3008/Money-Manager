@@ -340,7 +340,7 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
                         state = state,
                         onAcceptDraft = viewModel::acceptDetectedTransaction,
                         onIgnoreDraft = viewModel::ignoreDetectedTransaction,
-                        onDeleteTransaction = viewModel::deleteTransaction,
+                        onDeleteTransaction = viewModel::requestDeleteTransaction,
                         onEditTransaction = viewModel::requestEditTransactionCategory,
                         onDashboardPageSelected = viewModel::selectDashboardTransactionPage,
                         onDraftPageSelected = viewModel::selectDashboardDraftPage,
@@ -349,7 +349,7 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
                     ScreenTab.Activity -> activityContent(
                         state = state,
                         onDateFilterSelected = viewModel::setActivityDateFilter,
-                        onDeleteTransaction = viewModel::deleteTransaction,
+                        onDeleteTransaction = viewModel::requestDeleteTransaction,
                         onEditTransaction = viewModel::requestEditTransactionCategory,
                         onLoadMore = viewModel::loadMoreTransactions,
                         onScanSms = viewModel::scanForNewMessages
@@ -442,7 +442,7 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
                     timestampMillis = timestamp
                 )
             },
-            onDelete = viewModel::deleteTransaction,
+            onDelete = viewModel::requestDeleteTransaction,
             onCreateCategory = { viewModel.setCategorySheet(true) }
         )
     }
@@ -451,6 +451,41 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
         DefaultBankPrompt(
             accounts = state.bankAccounts,
             onSelected = viewModel::setDefaultAccount
+        )
+    }
+
+    state.pendingDeleteTransactionId?.let { pendingId ->
+        val pendingTransaction = state.transactions.firstOrNull { it.id == pendingId }
+        AlertDialog(
+            onDismissRequest = viewModel::cancelDeleteTransaction,
+            title = { Text("Delete this transaction?") },
+            text = {
+                Text(
+                    buildString {
+                        pendingTransaction?.let {
+                            append("${it.name} — ${state.money(it.amount)}. ")
+                        }
+                        append(
+                            "The account balance will be adjusted back. This cannot be undone, " +
+                                "and an SMS-detected transaction will not be re-imported by future scans."
+                        )
+                    },
+                    color = TextMuted
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = viewModel::confirmDeleteTransaction) {
+                    Text("Delete", color = LossRed, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = viewModel::cancelDeleteTransaction) {
+                    Text("Cancel")
+                }
+            },
+            containerColor = Navy850,
+            titleContentColor = TextPrimary,
+            textContentColor = TextMuted
         )
     }
 

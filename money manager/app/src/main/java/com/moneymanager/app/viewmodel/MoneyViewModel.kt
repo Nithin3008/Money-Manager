@@ -433,22 +433,54 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Deleting is irreversible — an auto-detected row's SMS is dismissed forever — so the
+     * UI asks for confirmation first: request shows the dialog, confirm performs the delete.
+     */
+    fun requestDeleteTransaction(id: Long) {
+        _uiState.update { it.copy(pendingDeleteTransactionId = id) }
+    }
+
+    fun cancelDeleteTransaction() {
+        _uiState.update { it.copy(pendingDeleteTransactionId = null) }
+    }
+
+    fun confirmDeleteTransaction() {
+        val id = _uiState.value.pendingDeleteTransactionId ?: return
+        _uiState.update { it.copy(pendingDeleteTransactionId = null) }
+        deleteTransaction(id)
+    }
+
     fun deleteTransaction(id: Long) {
         viewModelScope.launch {
             val state = _uiState.value
             val transaction = state.transactions.firstOrNull { it.id == id }
             val transferRows = TransferMatching.manualTransferRowsFor(transaction, state.transactions)
-            if (transferRows.isNotEmpty()) {
-                transferRows.forEach { tx ->
-                    reverseTransactionBalanceMovement(tx)
-                    repository.deleteTransaction(tx.id)
-                }
-            } else {
-                transaction?.let { reverseTransactionBalanceMovement(it) }
-                repository.deleteTransaction(id)
+            // One shared snapshot for every reversal: sequential balance writes must see
+            // each other, or a later write silently clobbers an earlier one.
+            val accountsSnapshot = state.accounts.associateBy { it.id }.toMutableMap()
+            val rowsToDelete = transferRows.ifEmpty { listOfNotNull(transaction) }
+            rowsToDelete.forEach { tx ->
+                moveAccountBalanceForTransaction(tx, reverse = true, accountsById = accountsSnapshot)
+                repository.deleteTransaction(tx.id)
             }
+            if (rowsToDelete.isEmpty()) repository.deleteTransaction(id)
+            // Remember the SMS behind deleted auto-detected rows so the next catch-up scan
+            // does not resurrect the transaction (and move the balance yet again).
+            rememberDismissedSmsKeys(rowsToDelete.filter { it.isAutoDetected }.map { it.rawMessage })
             reloadState { it.copy(showTransactionDetailSheet = false, selectedTransactionId = null) }
         }
+    }
+
+    /**
+     * Persists the normalized SMS keys of deleted/ignored auto-detected rows; scans treat
+     * them as already imported forever, so user deletions stick.
+     */
+    private suspend fun rememberDismissedSmsKeys(rawMessages: List<String?>) {
+        val keys = rawMessages.flatMap { normalizedSmsKeys(it) }
+        if (keys.isEmpty()) return
+        _uiState.update { it.copy(dismissedSmsKeys = it.dismissedSmsKeys + keys) }
+        repository.persistUserSettings(_uiState.value)
     }
 
     fun requestEditTransactionCategory(transactionId: Long) {
@@ -677,6 +709,9 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
             val existingTransactions = _uiState.value.transactions
             val existingDrafts = _uiState.value.detectedDrafts
             val normalizedExisting = buildSet {
+                // Keys of rows the user deleted or ignored: treat as imported so they never
+                // come back on a rescan.
+                addAll(_uiState.value.dismissedSmsKeys)
                 addAll(existingTransactions.flatMap { normalizedSmsKeys(it.rawMessage) })
                 addAll(existingDrafts.flatMap { normalizedSmsKeys(it.rawMessage) })
             }.toMutableSet()
@@ -977,7 +1012,9 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
 
     fun ignoreDetectedTransaction(draftId: Long) {
         viewModelScope.launch {
+            val draft = _uiState.value.detectedDrafts.firstOrNull { it.id == draftId }
             repository.deleteDraft(draftId)
+            rememberDismissedSmsKeys(listOf(draft?.rawMessage))
             reloadState()
         }
     }
@@ -1241,21 +1278,24 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
         moveAccountBalanceForTransaction(transaction, reverse = false, accountsById = accountsById)
     }
 
-    private suspend fun reverseTransactionBalanceMovement(transaction: LedgerTransaction) {
-        moveAccountBalanceForTransaction(transaction, reverse = true)
-    }
-
     private suspend fun reconcileBalanceForTransactionUpdate(
         oldTransaction: LedgerTransaction,
         newTransaction: LedgerTransaction,
         accountsById: MutableMap<Long, BankAccount>? = null
     ) {
-        balanceMovementsForTransaction(oldTransaction, accountsById).forEach { (accountId, delta) ->
-            updateAccountBalance(accountId, -delta, accountsById)
+        // Net the reversal and re-application per account and write once. Applying them as
+        // two separate writes without a shared snapshot loses the first write (the second
+        // read sees the stale pre-reversal balance), which double-charged the account on
+        // every category edit of an imported transaction.
+        val accounts = accountsById ?: _uiState.value.accounts.associateBy { it.id }.toMutableMap()
+        val netDeltas = LinkedHashMap<Long, Double>()
+        balanceMovementsForTransaction(oldTransaction, accounts).forEach { (accountId, delta) ->
+            netDeltas.merge(accountId, -delta, Double::plus)
         }
-        balanceMovementsForTransaction(newTransaction, accountsById).forEach { (accountId, delta) ->
-            updateAccountBalance(accountId, delta, accountsById)
+        balanceMovementsForTransaction(newTransaction, accounts).forEach { (accountId, delta) ->
+            netDeltas.merge(accountId, delta, Double::plus)
         }
+        netDeltas.forEach { (accountId, delta) -> updateAccountBalance(accountId, delta, accounts) }
     }
 
     private suspend fun updateAccountBalance(

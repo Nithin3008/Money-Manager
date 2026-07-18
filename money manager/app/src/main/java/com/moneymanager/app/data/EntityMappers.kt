@@ -28,7 +28,10 @@ internal fun FinanceUiState.toSettingsEntity(): UserSettingsEntity = UserSetting
     onboardedAtMillis = onboardedAtMillis,
     lastSuccessfulScanMillis = lastSuccessfulScanMillis,
     defaultAccountId = defaultAccountId,
-    summaryAccountFilterIdsCsv = summarySelectedAccountIds.joinToString(",")
+    summaryAccountFilterIdsCsv = summarySelectedAccountIds.joinToString(","),
+    // Cap so years of deletions cannot grow the row unbounded; oldest keys age out first,
+    // and their SMS are far outside any future catch-up scan window anyway.
+    dismissedSmsKeys = dismissedSmsKeys.toList().takeLast(2000).joinToString("\n")
 )
 
 internal fun UserSettingsEntity.applyTo(current: FinanceUiState): FinanceUiState {
@@ -53,7 +56,11 @@ internal fun UserSettingsEntity.applyTo(current: FinanceUiState): FinanceUiState
         summarySelectedAccountIds = summaryAccountFilterIdsCsv
             .split(",")
             .mapNotNull { it.trim().toLongOrNull() }
-            .toSet()
+            .toSet(),
+        dismissedSmsKeys = dismissedSmsKeys
+            .split("\n")
+            .filter { it.isNotBlank() }
+            .toCollection(LinkedHashSet())
     )
 }
 

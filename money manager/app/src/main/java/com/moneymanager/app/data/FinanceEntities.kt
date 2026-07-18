@@ -22,6 +22,8 @@ data class UserSettingsEntity(
     val onboardedAtMillis: Long = 0L,
     val lastSuccessfulScanMillis: Long = 0L,
     val summaryAccountFilterIdsCsv: String = "",
+    // Newline-delimited: SMS keys contain commas, but normalization strips newlines.
+    val dismissedSmsKeys: String = "",
     val uiAccent: String = "Lime",
     val uiSurface: String = "Midnight",
     val defaultAccountId: Long? = null
