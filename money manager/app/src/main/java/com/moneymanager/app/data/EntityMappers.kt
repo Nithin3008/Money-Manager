@@ -4,6 +4,7 @@ import com.moneymanager.app.model.BankAccount
 import com.moneymanager.app.model.AccountType
 import com.moneymanager.app.model.BudgetPlan
 import com.moneymanager.app.model.CategoryItem
+import com.moneymanager.app.model.ColorLibrary
 import com.moneymanager.app.model.CurrencyOption
 import com.moneymanager.app.model.DetectedTransactionDraft
 import com.moneymanager.app.model.FinanceUiState
@@ -19,7 +20,8 @@ internal fun FinanceUiState.toSettingsEntity(): UserSettingsEntity = UserSetting
     userName = userName,
     currencyCode = currency.currencyCode,
     themeMode = themeMode.name,
-    uiAccent = uiAccent.name,
+    // The uiAccent column holds either an enum name or a "#hex" custom accent (no migration).
+    uiAccent = customAccentHex ?: uiAccent.name,
     uiSurface = uiSurface.name,
     bankSmsSetupCompleted = bankSmsSetupCompleted,
     // Legacy salary + offline-LLM columns are kept in the schema (defaults) to avoid a migration.
@@ -31,7 +33,8 @@ internal fun FinanceUiState.toSettingsEntity(): UserSettingsEntity = UserSetting
     summaryAccountFilterIdsCsv = summarySelectedAccountIds.joinToString(","),
     // Cap so years of deletions cannot grow the row unbounded; oldest keys age out first,
     // and their SMS are far outside any future catch-up scan window anyway.
-    dismissedSmsKeys = dismissedSmsKeys.toList().takeLast(2000).joinToString("\n")
+    dismissedSmsKeys = dismissedSmsKeys.toList().takeLast(2000).joinToString("\n"),
+    paletteHexCsv = paletteColors.joinToString(",")
 )
 
 internal fun UserSettingsEntity.applyTo(current: FinanceUiState): FinanceUiState {
@@ -46,6 +49,8 @@ internal fun UserSettingsEntity.applyTo(current: FinanceUiState): FinanceUiState
         uiAccent = uiAccent.let { accent ->
             UiAccent.entries.firstOrNull { it.name == accent }
         } ?: UiAccent.Lime,
+        // A "#hex" value in the column is a custom accent; otherwise it's a preset enum name.
+        customAccentHex = uiAccent.takeIf { it.startsWith("#") },
         uiSurface = uiSurface.let { surface ->
             UiSurface.entries.firstOrNull { it.name == surface }
         } ?: UiSurface.Midnight,
@@ -60,7 +65,13 @@ internal fun UserSettingsEntity.applyTo(current: FinanceUiState): FinanceUiState
         dismissedSmsKeys = dismissedSmsKeys
             .split("\n")
             .filter { it.isNotBlank() }
-            .toCollection(LinkedHashSet())
+            .toCollection(LinkedHashSet()),
+        // Empty column = never seeded (fresh install or pre-v21 upgrade); fall back to defaults.
+        paletteColors = paletteHexCsv
+            .split(",")
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .ifEmpty { ColorLibrary.defaultPalette }
     )
 }
 

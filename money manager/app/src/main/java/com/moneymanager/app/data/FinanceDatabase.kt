@@ -16,7 +16,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         BudgetEntity::class,
         DetectedDraftEntity::class
     ],
-    version = 20
+    version = 21
 )
 abstract class FinanceDatabase : RoomDatabase() {
     abstract fun dao(): FinanceDao
@@ -50,7 +50,8 @@ abstract class FinanceDatabase : RoomDatabase() {
                         Migration16To17,
                         Migration17To18,
                         Migration18To19,
-                        Migration19To20
+                        Migration19To20,
+                        Migration20To21
                     )
                     .build()
                     .also { instance = it }
@@ -236,6 +237,14 @@ abstract class FinanceDatabase : RoomDatabase() {
         private val Migration19To20 = object : Migration(19, 20) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.addColumnIfMissing("user_settings", "dismissedSmsKeys", "TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
+        // The shared color library: one saved palette used for both the app accent and
+        // category colors. Empty means "not seeded yet"; the repository seeds the defaults.
+        private val Migration20To21 = object : Migration(20, 21) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.addColumnIfMissing("user_settings", "paletteHexCsv", "TEXT NOT NULL DEFAULT ''")
             }
         }
 

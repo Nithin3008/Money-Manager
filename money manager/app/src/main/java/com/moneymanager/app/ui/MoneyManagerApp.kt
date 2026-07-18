@@ -141,6 +141,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -371,6 +372,9 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
                         onCurrencySelected = viewModel::selectCurrency,
                         onThemeSelected = viewModel::selectThemeMode,
                         onUiAccentSelected = viewModel::selectUiAccent,
+                        onCustomAccentApplied = viewModel::applyCustomAccent,
+                        onPaletteColorAdded = viewModel::addPaletteColor,
+                        onPaletteColorRemoved = viewModel::removePaletteColor,
                         onUiSurfaceSelected = viewModel::selectUiSurface,
                         onDeleteAccount = viewModel::deleteAccount,
                         onUpdateAccountBalance = viewModel::updateAccountBalance,
@@ -419,6 +423,7 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
 
     if (state.showCategorySheet) {
         AddCategorySheet(
+            palette = state.paletteColors,
             onDismiss = { viewModel.setCategorySheet(false) },
             onAdd = viewModel::addCategory
         )
@@ -581,6 +586,9 @@ private fun androidx.compose.foundation.lazy.LazyListScope.settingsContent(
     onCurrencySelected: (CurrencyOption) -> Unit,
     onThemeSelected: (ThemeMode) -> Unit,
     onUiAccentSelected: (UiAccent) -> Unit,
+    onCustomAccentApplied: (String) -> Unit,
+    onPaletteColorAdded: (String) -> Unit,
+    onPaletteColorRemoved: (String) -> Unit,
     onUiSurfaceSelected: (UiSurface) -> Unit,
     onDeleteAccount: (Long) -> Unit,
     onUpdateAccountBalance: (Long, Double) -> Unit,
@@ -601,6 +609,9 @@ private fun androidx.compose.foundation.lazy.LazyListScope.settingsContent(
             onCurrencySelected = onCurrencySelected,
             onThemeSelected = onThemeSelected,
             onUiAccentSelected = onUiAccentSelected,
+            onCustomAccentApplied = onCustomAccentApplied,
+            onPaletteColorAdded = onPaletteColorAdded,
+            onPaletteColorRemoved = onPaletteColorRemoved,
             onUiSurfaceSelected = onUiSurfaceSelected,
             onDeleteAccount = onDeleteAccount,
             onUpdateAccountBalance = onUpdateAccountBalance,
@@ -632,6 +643,9 @@ private fun ProfileScreen(
     onCurrencySelected: (CurrencyOption) -> Unit,
     onThemeSelected: (ThemeMode) -> Unit,
     onUiAccentSelected: (UiAccent) -> Unit,
+    onCustomAccentApplied: (String) -> Unit,
+    onPaletteColorAdded: (String) -> Unit,
+    onPaletteColorRemoved: (String) -> Unit,
     onUiSurfaceSelected: (UiSurface) -> Unit,
     onDeleteAccount: (Long) -> Unit,
     onUpdateAccountBalance: (Long, Double) -> Unit,
@@ -647,6 +661,7 @@ private fun ProfileScreen(
 ) {
     var detail by remember { mutableStateOf<SettingsDetail?>(null) }
     var showCategories by remember { mutableStateOf(false) }
+    var showColorLibrary by remember { mutableStateOf(false) }
     var editingCategory by remember { mutableStateOf<CategoryItem?>(null) }
     val defaultAccountName = state.accounts.firstOrNull { it.id == state.defaultAccountId }?.name ?: "None"
 
@@ -673,11 +688,14 @@ private fun ProfileScreen(
         AppearanceCard(
             selectedTheme = state.themeMode,
             selectedAccent = state.uiAccent,
+            customAccentHex = state.customAccentHex,
             darkMode = state.themeMode == ThemeMode.Dark,
             surfaceLabel = state.uiSurface.label,
             onThemeSelected = onThemeSelected,
             onAccentSelected = onUiAccentSelected,
-            onOpenSurface = { detail = SettingsDetail.Surface }
+            onCustomAccentApplied = onCustomAccentApplied,
+            onOpenSurface = { detail = SettingsDetail.Surface },
+            onOpenColors = { showColorLibrary = true }
         )
 
         SettingsSectionLabel("Data")
@@ -745,6 +763,7 @@ private fun ProfileScreen(
     editingCategory?.let { category ->
         EditCategorySheet(
             category = category,
+            palette = state.paletteColors,
             onDismiss = { editingCategory = null },
             onSave = { id, name, iconKey, colorHex ->
                 onUpdateCategory(id, name, iconKey, colorHex)
@@ -754,6 +773,19 @@ private fun ProfileScreen(
                 onDeleteCategory(id)
                 editingCategory = null
             }
+        )
+    }
+
+    if (showColorLibrary) {
+        ColorLibrarySheet(
+            palette = state.paletteColors,
+            categories = state.categories,
+            accentHex = state.customAccentHex
+                ?: if (state.themeMode == ThemeMode.Dark) state.uiAccent.darkHex else state.uiAccent.lightHex,
+            onDismiss = { showColorLibrary = false },
+            onAccentApplied = onCustomAccentApplied,
+            onColorCreated = onPaletteColorAdded,
+            onColorRemoved = onPaletteColorRemoved
         )
     }
 }
@@ -2852,12 +2884,16 @@ private fun CategoryIconGridPicker(selectedKey: String, onSelect: (String) -> Un
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun CategoryColorGridPicker(selectedHex: String, onSelect: (String) -> Unit) {
+private fun CategoryColorGridPicker(
+    selectedHex: String,
+    palette: List<String>,
+    onSelect: (String) -> Unit
+) {
     androidx.compose.foundation.layout.FlowRow(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        categoryPalette.forEach { hex ->
+        palette.forEach { hex ->
             val color = colorFromHex(hex)
             val selected = hex == selectedHex
             Box(
@@ -2879,10 +2915,14 @@ private fun CategoryColorGridPicker(selectedHex: String, onSelect: (String) -> U
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-private fun AddCategorySheet(onDismiss: () -> Unit, onAdd: (String, String, String) -> Unit) {
+private fun AddCategorySheet(
+    palette: List<String>,
+    onDismiss: () -> Unit,
+    onAdd: (String, String, String) -> Unit
+) {
     var name by remember { mutableStateOf("") }
     var selectedIconKey by remember { mutableStateOf(MoneyIcons.frequentCategoryIcons.first().key) }
-    var selectedColor by remember { mutableStateOf(categoryPalette.first()) }
+    var selectedColor by remember { mutableStateOf(palette.firstOrNull() ?: "#7EA2FF") }
     var isExpense by remember { mutableStateOf(true) }
     val selectedIcon = remember(selectedIconKey) {
         MoneyIcons.allCategoryIcons.firstOrNull { it.key == selectedIconKey }
@@ -2938,7 +2978,7 @@ private fun AddCategorySheet(onDismiss: () -> Unit, onAdd: (String, String, Stri
                 CategoryIconGridPicker(selectedKey = selectedIconKey, onSelect = { selectedIconKey = it })
 
                 SheetSectionLabel("Color")
-                CategoryColorGridPicker(selectedHex = selectedColor, onSelect = { selectedColor = it })
+                CategoryColorGridPicker(selectedHex = selectedColor, palette = palette, onSelect = { selectedColor = it })
             }
 
             SheetBottomAction(
@@ -2955,6 +2995,7 @@ private fun AddCategorySheet(onDismiss: () -> Unit, onAdd: (String, String, Stri
 @Composable
 private fun EditCategorySheet(
     category: CategoryItem,
+    palette: List<String>,
     onDismiss: () -> Unit,
     onSave: (Long, String, String, String) -> Unit,
     onDelete: (Long) -> Unit
@@ -3002,7 +3043,7 @@ private fun EditCategorySheet(
                 CategoryIconGridPicker(selectedKey = selectedIconKey, onSelect = { selectedIconKey = it })
 
                 SheetSectionLabel("Color")
-                CategoryColorGridPicker(selectedHex = selectedColor, onSelect = { selectedColor = it })
+                CategoryColorGridPicker(selectedHex = selectedColor, palette = palette, onSelect = { selectedColor = it })
             }
 
             Column(
@@ -4001,12 +4042,18 @@ private fun CurrencySelector(
 private fun AppearanceCard(
     selectedTheme: ThemeMode,
     selectedAccent: UiAccent,
+    customAccentHex: String?,
     darkMode: Boolean,
     surfaceLabel: String,
     onThemeSelected: (ThemeMode) -> Unit,
     onAccentSelected: (UiAccent) -> Unit,
-    onOpenSurface: () -> Unit
+    onCustomAccentApplied: (String) -> Unit,
+    onOpenSurface: () -> Unit,
+    onOpenColors: () -> Unit
 ) {
+    var showAccentPicker by remember { mutableStateOf(false) }
+    val currentAccentHex = customAccentHex
+        ?: if (darkMode) selectedAccent.darkHex else selectedAccent.lightHex
     ElevatedPanel {
         Column(Modifier.padding(16.dp)) {
             Text("Theme", color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
@@ -4040,9 +4087,35 @@ private fun AppearanceCard(
                 modifier = Modifier.padding(top = 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
+                item(key = "__custom") {
+                    // Opens the color-wheel picker; ringed when a custom color is active.
+                    Box(
+                        modifier = Modifier
+                            .size(30.dp)
+                            .clip(CircleShape)
+                            .background(
+                                Brush.sweepGradient(
+                                    listOf(
+                                        Color(0xFFFF5A5A), Color(0xFFFFD166), Color(0xFFB4F077),
+                                        Color(0xFF3FE0C4), Color(0xFF7EA2FF), Color(0xFFB794F6),
+                                        Color(0xFFFF6FAE), Color(0xFFFF5A5A)
+                                    )
+                                )
+                            )
+                            .border(
+                                width = 2.5.dp,
+                                color = if (customAccentHex != null) TextPrimary else Color.Transparent,
+                                shape = CircleShape
+                            )
+                            .clickable { showAccentPicker = true },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Rounded.Add, contentDescription = "Custom accent color", tint = Color.White, modifier = Modifier.size(16.dp))
+                    }
+                }
                 items(UiAccent.entries, key = { it.name }) { accent ->
                     val color = colorFromHex(if (darkMode) accent.darkHex else accent.lightHex)
-                    val isSelected = selectedAccent == accent
+                    val isSelected = customAccentHex == null && selectedAccent == accent
                     Box(
                         modifier = Modifier
                             .size(30.dp)
@@ -4062,6 +4135,19 @@ private fun AppearanceCard(
                     .fillMaxWidth()
                     .padding(top = 18.dp)
                     .clip(RoundedCornerShape(12.dp))
+                    .clickable(onClick = onOpenColors),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("My colors", color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                Text("Shared palette", color = TextDim, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
+                Spacer(Modifier.width(6.dp))
+                Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, contentDescription = null, tint = TextDim, modifier = Modifier.size(20.dp))
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 18.dp)
+                    .clip(RoundedCornerShape(12.dp))
                     .clickable(onClick = onOpenSurface),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -4071,6 +4157,17 @@ private fun AppearanceCard(
                 Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, contentDescription = null, tint = TextDim, modifier = Modifier.size(20.dp))
             }
         }
+    }
+
+    if (showAccentPicker) {
+        AccentPickerSheet(
+            initialHex = currentAccentHex,
+            onDismiss = { showAccentPicker = false },
+            onApply = { hex ->
+                showAccentPicker = false
+                onCustomAccentApplied(hex)
+            }
+        )
     }
 }
 

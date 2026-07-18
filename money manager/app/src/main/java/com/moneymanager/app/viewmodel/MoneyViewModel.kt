@@ -21,6 +21,7 @@ import com.moneymanager.app.model.BudgetPlan
 import com.moneymanager.app.model.MessageScanRange
 import java.time.LocalDate
 import com.moneymanager.app.model.CategoryItem
+import com.moneymanager.app.model.ColorLibrary
 import com.moneymanager.app.model.CurrencyOption
 import com.moneymanager.app.model.DetectedTransactionDraft
 import com.moneymanager.app.model.ActivityDateFilter
@@ -167,7 +168,49 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
 
     fun selectUiAccent(uiAccent: UiAccent) {
         viewModelScope.launch {
-            val next = _uiState.value.copy(uiAccent = uiAccent)
+            // Choosing a preset swatch clears any custom color so the preset takes effect.
+            val next = _uiState.value.copy(uiAccent = uiAccent, customAccentHex = null)
+            repository.persistUserSettings(next)
+            _uiState.value = next
+        }
+    }
+
+    fun applyCustomAccent(hex: String) {
+        viewModelScope.launch {
+            val normalized = ColorLibrary.normalize(hex)
+            val current = _uiState.value
+            // Applying a color also files it in the shared library so it's reusable.
+            val palette = if (current.paletteColors.any { it.equals(normalized, true) }) {
+                current.paletteColors
+            } else {
+                current.paletteColors + normalized
+            }
+            val next = current.copy(customAccentHex = normalized, paletteColors = palette)
+            repository.persistUserSettings(next)
+            _uiState.value = next
+        }
+    }
+
+    fun addPaletteColor(hex: String) {
+        viewModelScope.launch {
+            val normalized = ColorLibrary.normalize(hex)
+            val current = _uiState.value
+            if (current.paletteColors.any { it.equals(normalized, true) }) return@launch
+            val next = current.copy(paletteColors = current.paletteColors + normalized)
+            repository.persistUserSettings(next)
+            _uiState.value = next
+        }
+    }
+
+    fun removePaletteColor(hex: String) {
+        viewModelScope.launch {
+            val current = _uiState.value
+            // Keep colors that are in use (accent or a category) so nothing loses its color.
+            if (current.customAccentHex.equals(hex, true)) return@launch
+            if (current.categories.any { it.colorHex.equals(hex, true) }) return@launch
+            val next = current.copy(
+                paletteColors = current.paletteColors.filterNot { it.equals(hex, true) }
+            )
             repository.persistUserSettings(next)
             _uiState.value = next
         }

@@ -26,7 +26,9 @@ data class UserSettingsEntity(
     val dismissedSmsKeys: String = "",
     val uiAccent: String = "Lime",
     val uiSurface: String = "Midnight",
-    val defaultAccountId: Long? = null
+    val defaultAccountId: Long? = null,
+    /** Shared color library, comma-separated "#RRGGBB"; empty until first seeded. */
+    val paletteHexCsv: String = ""
 )
 
 @Entity(tableName = "accounts")

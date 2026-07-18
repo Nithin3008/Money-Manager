@@ -8,6 +8,7 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.unit.dp
 import com.moneymanager.app.model.ThemeMode
 import com.moneymanager.app.model.UiAccent
@@ -43,10 +44,12 @@ fun MoneyManagerTheme(
     themeMode: ThemeMode = ThemeMode.Dark,
     uiAccent: UiAccent = UiAccent.Sky,
     uiSurface: UiSurface = UiSurface.Midnight,
+    customAccentHex: String? = null,
     content: @Composable () -> Unit
 ) {
     val dark = themeMode == ThemeMode.Dark
     applyThemeTokens(dark, uiAccent, uiSurface)
+    customAccentHex?.let { applyCustomAccent(it) }
     val colorScheme = expressiveColorScheme(dark)
 
     MaterialTheme(
@@ -145,4 +148,15 @@ private fun applyThemeTokens(dark: Boolean, uiAccent: UiAccent, uiSurface: UiSur
 
 private fun String.toColorOr(fallback: Color): Color {
     return runCatching { Color(android.graphics.Color.parseColor(this)) }.getOrDefault(fallback)
+}
+
+/**
+ * Overrides the accent tokens with a user-picked color, deriving the on-accent ink from
+ * luminance (dark ink on light accents, white on dark ones) and a soft tint for containers.
+ */
+private fun applyCustomAccent(hex: String) {
+    val accent = hex.toColorOr(PrimaryBlue)
+    PrimaryBlue = accent
+    PrimarySoft = accent
+    OnAccent = if (accent.luminance() > 0.42f) Color(0xFF10131A) else Color(0xFFFFFFFF)
 }

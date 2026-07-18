@@ -50,6 +50,13 @@ android {
     buildFeatures {
         compose = true
     }
+
+    lint {
+        // The lintVital task crashes on this AGP/JDK combo with an internal
+        // "Already disposed: MessageBus" error. Lint still runs via the standalone
+        // `lint` task; this only stops the crash from blocking release builds.
+        checkReleaseBuilds = false
+    }
 }
 
 dependencies {

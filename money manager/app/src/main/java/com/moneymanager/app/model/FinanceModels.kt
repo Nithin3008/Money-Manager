@@ -223,6 +223,10 @@ data class FinanceUiState(
     val currency: CurrencyOption = CurrencyOption.INR,
     val themeMode: ThemeMode = ThemeMode.Dark,
     val uiAccent: UiAccent = UiAccent.Lime,
+    /** When set, a user-picked custom accent hex (e.g. "#7EA2FF") that overrides [uiAccent]. */
+    val customAccentHex: String? = null,
+    /** Shared color library backing both the accent picker and category colors. */
+    val paletteColors: List<String> = ColorLibrary.defaultPalette,
     val uiSurface: UiSurface = UiSurface.Midnight,
     val selectedTab: ScreenTab = ScreenTab.Dashboard,
     val selectedMonth: YearMonth = YearMonth.now(),

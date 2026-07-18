@@ -35,7 +35,8 @@ class MainActivity : ComponentActivity() {
             MoneyManagerTheme(
                 themeMode = state.themeMode,
                 uiAccent = state.uiAccent,
-                uiSurface = state.uiSurface
+                uiSurface = state.uiSurface,
+                customAccentHex = state.customAccentHex
             ) {
                 MoneyManagerApp(viewModel = moneyViewModel)
             }
