@@ -663,12 +663,19 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
             }
             val hasPermission = hasSmsPermission()
             val parsedMessages = if (hasPermission) {
+                // Each state push recomposes the whole tree and invalidates every derived
+                // cache, so throttle progress to ~4 updates/sec instead of every 2 messages.
+                var lastProgressPushMillis = 0L
                 val progressCallback: (SmsScanProgress) -> Unit = { progress ->
-                    _uiState.update {
-                        it.copy(
-                            scanProcessedCount = progress.processed,
-                            scanTotalCount = progress.total
-                        )
+                    val now = android.os.SystemClock.uptimeMillis()
+                    if (progress.processed == progress.total || now - lastProgressPushMillis >= 250L) {
+                        lastProgressPushMillis = now
+                        _uiState.update {
+                            it.copy(
+                                scanProcessedCount = progress.processed,
+                                scanTotalCount = progress.total
+                            )
+                        }
                     }
                 }
                 withContext(Dispatchers.IO) {

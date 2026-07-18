@@ -1521,6 +1521,11 @@ private fun AddTransactionSheet(
         mutableStateOf(state.accounts.firstOrNull { it.id != defaultAccount?.id }?.id)
     }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val sheetScope = rememberCoroutineScope()
+    // Animate the slide-down before the state flag removes the sheet from composition.
+    fun closeSheet(after: () -> Unit) {
+        sheetScope.launch { sheetState.hide() }.invokeOnCompletion { after() }
+    }
     val transactionType = if (mode == AddMoneyMode.Income) TransactionType.Income else TransactionType.Expense
     val investmentCategoryId = remember(state.categories) {
         state.investmentCategoryIds.firstOrNull() ?: categoryId
@@ -1547,7 +1552,7 @@ private fun AddTransactionSheet(
                     .padding(start = 20.dp, top = 8.dp, end = 20.dp, bottom = 96.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                SheetTitleBar(title = "New transaction", onDismiss = onDismiss)
+                SheetTitleBar(title = "New transaction", onDismiss = { closeSheet(onDismiss) })
 
                 FintrackModePicker(selected = mode, onSelected = { mode = it })
 
@@ -1639,10 +1644,12 @@ private fun AddTransactionSheet(
                 onClick = {
                     val timestamp = if (selectedDate == LocalDate.now()) null
                         else selectedDate.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
-                    when (mode) {
-                        AddMoneyMode.Transfer -> onTransfer(name, parsedAmount, fromAccountId, toAccountId)
-                        AddMoneyMode.Investment -> onSave(name, parsedAmount, TransactionType.Expense, investmentCategoryId, null, notes, timestamp)
-                        else -> onSave(name, parsedAmount, transactionType, categoryId, accountId, notes, timestamp)
+                    closeSheet {
+                        when (mode) {
+                            AddMoneyMode.Transfer -> onTransfer(name, parsedAmount, fromAccountId, toAccountId)
+                            AddMoneyMode.Investment -> onSave(name, parsedAmount, TransactionType.Expense, investmentCategoryId, null, notes, timestamp)
+                            else -> onSave(name, parsedAmount, transactionType, categoryId, accountId, notes, timestamp)
+                        }
                     }
                 },
                 modifier = Modifier.align(Alignment.BottomCenter)
@@ -2260,6 +2267,12 @@ private fun TransactionDetailSheet(
         "Auto-added from SMS · $bank · ${transaction.transactionDate().mediumDateLabel()}"
     }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val sheetScope = rememberCoroutineScope()
+    // Button closes must play the slide-down animation before the state flag removes the
+    // sheet; flipping the flag directly yanks it out mid-frame with no exit animation.
+    fun closeSheet(after: () -> Unit) {
+        sheetScope.launch { sheetState.hide() }.invokeOnCompletion { after() }
+    }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -2278,7 +2291,7 @@ private fun TransactionDetailSheet(
                     .padding(start = 20.dp, top = 8.dp, end = 20.dp, bottom = 150.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                SheetTitleBar(title = "Edit transaction", onDismiss = onDismiss) {
+                SheetTitleBar(title = "Edit transaction", onDismiss = { closeSheet(onDismiss) }) {
                     Box(
                         modifier = Modifier
                             .size(40.dp)
@@ -2354,7 +2367,7 @@ private fun TransactionDetailSheet(
                         .clickable(enabled = saveEnabled) {
                             val timestamp = if (selectedDate == originalDate) transaction.timestampMillis
                                 else selectedDate.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
-                            onSave(transaction.id, name, parsedAmount, type, categoryId, accountId, timestamp, notes)
+                            closeSheet { onSave(transaction.id, name, parsedAmount, type, categoryId, accountId, timestamp, notes) }
                         },
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally)

@@ -26,11 +26,15 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            // Debug-signed so the R8-optimized build can be sideloaded during development;
+            // replace with a real signing config before any store distribution.
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 

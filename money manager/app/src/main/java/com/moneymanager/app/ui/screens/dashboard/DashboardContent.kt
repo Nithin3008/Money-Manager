@@ -230,7 +230,9 @@ private fun FintrackBalanceHero(state: FinanceUiState) {
 
 @Composable
 private fun QuickStatGrid(state: FinanceUiState) {
-    val invested = compactMoney(state.investmentTotalFor(YearMonth.now()), state.currency)
+    val invested = remember(state.transactions, state.categories, state.currency) {
+        compactMoney(state.investmentTotalFor(YearMonth.now()), state.currency)
+    }
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             QuickStatTile(Icons.Rounded.AccountBalance, state.accounts.size.toString(), "Accounts", Modifier.weight(1f))
