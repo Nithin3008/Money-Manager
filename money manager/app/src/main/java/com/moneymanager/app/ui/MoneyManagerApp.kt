@@ -2859,25 +2859,63 @@ private fun RowScope.CategoryTypePill(label: String, icon: ImageVector, active: 
 }
 
 @Composable
-private fun CategoryIconGridPicker(selectedKey: String, onSelect: (String) -> Unit) {
-    MoneyIcons.allCategoryIcons.chunked(6).forEach { rowIcons ->
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            rowIcons.forEach { option ->
-                val selected = option.key == selectedKey
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .aspectRatio(1f)
-                        .clip(RoundedCornerShape(15.dp))
-                        .background(if (selected) PrimaryBlue else Navy850)
-                        .border(1.5.dp, if (selected) PrimaryBlue else LineColor, RoundedCornerShape(15.dp))
-                        .clickable { onSelect(option.key) },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(option.icon, contentDescription = option.label, tint = if (selected) OnAccent else TextMuted, modifier = Modifier.size(22.dp))
+private fun CategoryIconGridPicker(
+    selectedKey: String,
+    query: String = "",
+    onSelect: (String) -> Unit
+) {
+    // Icons matching the typed category name float to the top; nothing is filtered out,
+    // so when nothing matches the full grid is still there to pick from.
+    val ordered = remember(query) {
+        val q = query.trim().lowercase()
+        if (q.isEmpty()) {
+            MoneyIcons.allCategoryIcons
+        } else {
+            MoneyIcons.allCategoryIcons.sortedBy { option ->
+                val label = option.label.lowercase()
+                when {
+                    label.startsWith(q) || option.key.startsWith(q) -> 0
+                    label.contains(q) || option.key.contains(q) || q.contains(label) -> 1
+                    else -> 2
                 }
             }
-            repeat(6 - rowIcons.size) { Spacer(Modifier.weight(1f)) }
+        }
+    }
+    // 4-up labeled tiles: the label is what tells users what an icon means.
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        ordered.chunked(4).forEach { rowIcons ->
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                rowIcons.forEach { option ->
+                    val selected = option.key == selectedKey
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(15.dp))
+                            .background(if (selected) PrimaryBlue else Navy850)
+                            .border(1.5.dp, if (selected) PrimaryBlue else LineColor, RoundedCornerShape(15.dp))
+                            .clickable { onSelect(option.key) }
+                            .padding(vertical = 10.dp, horizontal = 4.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(
+                            option.icon,
+                            contentDescription = null,
+                            tint = if (selected) OnAccent else TextMuted,
+                            modifier = Modifier.size(21.dp)
+                        )
+                        Text(
+                            option.label,
+                            color = if (selected) OnAccent else TextDim,
+                            fontSize = 10.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(top = 5.dp)
+                        )
+                    }
+                }
+                repeat(4 - rowIcons.size) { Spacer(Modifier.weight(1f)) }
+            }
         }
     }
 }
@@ -2975,7 +3013,7 @@ private fun AddCategorySheet(
                 }
 
                 SheetSectionLabel("Icon")
-                CategoryIconGridPicker(selectedKey = selectedIconKey, onSelect = { selectedIconKey = it })
+                CategoryIconGridPicker(selectedKey = selectedIconKey, query = name, onSelect = { selectedIconKey = it })
 
                 SheetSectionLabel("Color")
                 CategoryColorGridPicker(selectedHex = selectedColor, palette = palette, onSelect = { selectedColor = it })
@@ -3040,7 +3078,7 @@ private fun EditCategorySheet(
                 CategoryNameField(value = name, onValueChange = { name = it })
 
                 SheetSectionLabel("Icon")
-                CategoryIconGridPicker(selectedKey = selectedIconKey, onSelect = { selectedIconKey = it })
+                CategoryIconGridPicker(selectedKey = selectedIconKey, query = name, onSelect = { selectedIconKey = it })
 
                 SheetSectionLabel("Color")
                 CategoryColorGridPicker(selectedHex = selectedColor, palette = palette, onSelect = { selectedColor = it })

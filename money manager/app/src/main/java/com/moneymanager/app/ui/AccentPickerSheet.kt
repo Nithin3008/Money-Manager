@@ -70,7 +70,9 @@ private val PRESET_HEXES = listOf("#B4F077", "#7EA2FF", "#3FE0C4", "#B794F6", "#
 internal fun AccentPickerSheet(
     initialHex: String,
     onDismiss: () -> Unit,
-    onApply: (String) -> Unit
+    onApply: (String) -> Unit,
+    title: String = "Accent color",
+    applyLabel: String = "Apply accent"
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = rememberCoroutineScope()
@@ -112,7 +114,7 @@ internal fun AccentPickerSheet(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("Accent color", color = TextPrimary, fontSize = 19.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.3).sp)
+                    Text(title, color = TextPrimary, fontSize = 19.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.3).sp)
                     Text("Drag around the wheel", color = TextDim, fontSize = 12.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 2.dp))
                 }
                 Box(
@@ -293,7 +295,7 @@ internal fun AccentPickerSheet(
                     horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally)
                 ) {
                     Icon(Icons.Rounded.Check, contentDescription = null, tint = ink, modifier = Modifier.size(20.dp))
-                    Text("Apply accent", color = ink, fontSize = 14.5.sp, fontWeight = FontWeight.Bold)
+                    Text(applyLabel, color = ink, fontSize = 14.5.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }

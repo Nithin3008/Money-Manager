@@ -1,9 +1,11 @@
 package com.moneymanager.app.model
 
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.CompareArrows
 import androidx.compose.material.icons.automirrored.rounded.ReceiptLong
 import androidx.compose.material.icons.automirrored.rounded.TrendingUp
 import androidx.compose.material.icons.rounded.AccountBalance
+import androidx.compose.material.icons.rounded.CreditCard
 import androidx.compose.material.icons.rounded.BarChart
 import androidx.compose.material.icons.rounded.Category
 import androidx.compose.material.icons.rounded.Dining
@@ -14,6 +16,7 @@ import androidx.compose.material.icons.rounded.Flight
 import androidx.compose.material.icons.rounded.Forum
 import androidx.compose.material.icons.rounded.FitnessCenter
 import androidx.compose.material.icons.rounded.GridView
+import androidx.compose.material.icons.rounded.Handshake
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.LocalCafe
 import androidx.compose.material.icons.rounded.LocalGasStation
@@ -21,6 +24,7 @@ import androidx.compose.material.icons.rounded.LocalGroceryStore
 import androidx.compose.material.icons.rounded.LocalHospital
 import androidx.compose.material.icons.rounded.Movie
 import androidx.compose.material.icons.rounded.MusicNote
+import androidx.compose.material.icons.rounded.Paid
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Pets
 import androidx.compose.material.icons.rounded.Payments
@@ -31,6 +35,7 @@ import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.ShoppingBag
 import androidx.compose.material.icons.rounded.SportsEsports
 import androidx.compose.material.icons.rounded.Subscriptions
+import androidx.compose.material.icons.rounded.VolunteerActivism
 import androidx.compose.material.icons.rounded.Work
 import androidx.compose.runtime.Immutable
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -524,8 +529,11 @@ object MoneyIcons {
         CategoryIconOption("travel", "Travel", Icons.Rounded.Flight),
         CategoryIconOption("world", "International", Icons.Rounded.Public),
         CategoryIconOption("investment", "Investment", Icons.AutoMirrored.Rounded.TrendingUp),
-        CategoryIconOption("credit_card", "Credit Card", Icons.Rounded.Payments),
-        CategoryIconOption("transfer", "Transfer", Icons.Rounded.AccountBalance),
+        CategoryIconOption("credit_card", "Credit Card", Icons.Rounded.CreditCard),
+        CategoryIconOption("transfer", "Transfer", Icons.AutoMirrored.Rounded.CompareArrows),
+        CategoryIconOption("lent", "Lent", Icons.Rounded.VolunteerActivism),
+        CategoryIconOption("borrow", "Borrow", Icons.Rounded.Handshake),
+        CategoryIconOption("money", "Money", Icons.Rounded.Paid),
         CategoryIconOption("bills", "Bills", Icons.Rounded.Payments),
         CategoryIconOption("utilities", "Utilities", Icons.Rounded.ElectricBolt),
         CategoryIconOption("games", "Games", Icons.Rounded.SportsEsports),

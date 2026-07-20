@@ -188,6 +188,7 @@ internal fun ColorLibrarySheet(
                             } else {
                                 val color = colorFromHex(hex)
                                 val isAccent = hex.equals(accent, ignoreCase = true)
+                                val isInspected = inspected == hex
                                 val usedCount = usageByColor[ColorLibrary.normalize(hex)]?.size ?: 0
                                 Box(
                                     modifier = Modifier
@@ -196,11 +197,15 @@ internal fun ColorLibrarySheet(
                                         .clip(RoundedCornerShape(20.dp))
                                         .background(color)
                                         .border(
-                                            width = if (isAccent) 3.dp else 0.dp,
-                                            color = if (isAccent) TextPrimary else Color.Transparent,
+                                            width = when {
+                                                isAccent -> 3.dp
+                                                isInspected -> 2.5.dp
+                                                else -> 0.dp
+                                            },
+                                            color = if (isAccent || isInspected) TextPrimary else Color.Transparent,
                                             shape = RoundedCornerShape(20.dp)
                                         )
-                                        .clickable { inspected = if (inspected == hex) null else hex }
+                                        .clickable { inspected = if (isInspected) null else hex }
                                 ) {
                                     if (isAccent) {
                                         Icon(
@@ -333,7 +338,9 @@ internal fun ColorLibrarySheet(
             onApply = { hex ->
                 pickerMode = null
                 onColorCreated(hex)
-            }
+            },
+            title = "New color",
+            applyLabel = "Save color"
         )
         null -> Unit
     }
