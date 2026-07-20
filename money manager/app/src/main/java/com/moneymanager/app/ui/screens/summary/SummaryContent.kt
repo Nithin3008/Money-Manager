@@ -202,7 +202,7 @@ private fun MetricGrid(state: FinanceUiState) {
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             MetricTile(
                 label = "Spent",
-                value = state.money(state.monthExpense),
+                value = state.money(state.monthExpense).withCurrencyGap(),
                 container = spentTint,
                 labelColor = WarningAmber,
                 valueColor = TextPrimary,
@@ -211,7 +211,7 @@ private fun MetricGrid(state: FinanceUiState) {
             )
             MetricTile(
                 label = "Income",
-                value = state.money(state.monthReportIncome),
+                value = state.money(state.monthReportIncome).withCurrencyGap(),
                 container = incomeTint,
                 labelColor = MoneyGreen,
                 valueColor = TextPrimary,
@@ -223,7 +223,7 @@ private fun MetricGrid(state: FinanceUiState) {
             val net = state.monthReportNet
             MetricTile(
                 label = "Net saved",
-                value = (if (net >= 0) "+" else "-") + state.money(abs(net)),
+                value = ((if (net >= 0) "+" else "-") + state.money(abs(net))).withCurrencyGap(),
                 container = Navy850,
                 labelColor = TextDim,
                 valueColor = if (net >= 0) PrimaryBlue else com.moneymanager.app.ui.theme.LossRed,
@@ -232,7 +232,7 @@ private fun MetricGrid(state: FinanceUiState) {
             )
             MetricTile(
                 label = "Closing bal.",
-                value = state.money(state.balanceAtEndOfSelectedMonth),
+                value = state.money(state.balanceAtEndOfSelectedMonth).withCurrencyGap(),
                 container = Navy850,
                 labelColor = TextDim,
                 valueColor = TextPrimary,
@@ -445,7 +445,7 @@ private fun WhereItWentCard(state: FinanceUiState, totals: List<MonthlyCategoryT
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("SPENT", color = TextDim, fontSize = 9.5.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.4.sp)
                     Text(
-                        compactMoney(total, state.currency).removePrefix(state.currency.symbol),
+                        compactMoney(total, state.currency).removePrefix(state.currency.symbol).trim(),
                         color = TextPrimary,
                         fontSize = 16.sp,
                         fontWeight = FontWeight.ExtraBold,

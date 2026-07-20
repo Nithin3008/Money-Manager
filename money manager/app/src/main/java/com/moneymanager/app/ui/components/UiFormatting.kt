@@ -122,7 +122,14 @@ internal fun compactMoney(value: Double, currency: CurrencyOption): String {
     } else {
         String.format(Locale.US, "%.1f", suffixValue.first).trimEnd('0').trimEnd('.')
     }
-    return "${currency.symbol}$number${suffixValue.second}"
+    return "${currency.symbol} $number${suffixValue.second}"
+}
+
+/** Inserts a space between the currency symbol (or sign) and the first digit: "₹1,635" → "₹ 1,635". */
+internal fun String.withCurrencyGap(): String {
+    val firstDigit = indexOfFirst { it.isDigit() }
+    if (firstDigit <= 0 || this[firstDigit - 1] == ' ') return this
+    return substring(0, firstDigit) + " " + substring(firstDigit)
 }
 
 internal fun LedgerTransaction.signedAmount(currency: CurrencyOption): String {

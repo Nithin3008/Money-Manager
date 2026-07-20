@@ -20,7 +20,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ReceiptLong
 import androidx.compose.material.icons.automirrored.rounded.TrendingUp
 import androidx.compose.material.icons.rounded.AccountBalance
-import androidx.compose.material.icons.rounded.Category
+import androidx.compose.material.icons.rounded.AccountBalanceWallet
+import androidx.compose.material.icons.rounded.CreditCard
 import androidx.compose.material.icons.rounded.NorthEast
 import androidx.compose.material.icons.rounded.PieChart
 import androidx.compose.material.icons.rounded.Rule
@@ -156,7 +157,7 @@ private fun FintrackBalanceHero(state: FinanceUiState) {
                         fontWeight = FontWeight.SemiBold
                     )
                     Text(
-                        state.money(currentBalance),
+                        state.money(currentBalance).withCurrencyGap(),
                         color = OnAccent,
                         fontSize = 40.sp,
                         fontWeight = FontWeight.Bold,
@@ -233,14 +234,17 @@ private fun QuickStatGrid(state: FinanceUiState) {
     val invested = remember(state.transactions, state.categories, state.currency) {
         compactMoney(state.investmentTotalFor(YearMonth.now()), state.currency)
     }
+    val ccSpend = remember(state.transactions, state.currency) {
+        compactMoney(state.creditCardSpendTotalFor(YearMonth.now()), state.currency)
+    }
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            QuickStatTile(Icons.Rounded.AccountBalance, state.accounts.size.toString(), "Accounts", Modifier.weight(1f))
-            QuickStatTile(Icons.Rounded.Category, state.categories.size.toString(), "Categories", Modifier.weight(1f))
+            QuickStatTile(Icons.Rounded.CreditCard, ccSpend, "CC spend · month", Modifier.weight(1f))
+            QuickStatTile(Icons.Rounded.PieChart, state.activeBudgets.size.toString(), "Budgets", Modifier.weight(1f))
         }
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            QuickStatTile(Icons.Rounded.PieChart, state.activeBudgets.size.toString(), "Budgets", Modifier.weight(1f))
             QuickStatTile(Icons.AutoMirrored.Rounded.TrendingUp, invested, "Invested · month", Modifier.weight(1f))
+            QuickStatTile(Icons.Rounded.AccountBalanceWallet, compactMoney(state.creditCardOutstanding, state.currency), "CC outstanding", Modifier.weight(1f))
         }
     }
 }

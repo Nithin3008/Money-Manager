@@ -82,7 +82,7 @@ enum class CurrencyOption(
     val currencyCode: String,
     val symbol: String
 ) {
-    INR("Indian Rupee", "INR", "Rs"),
+    INR("Indian Rupee", "INR", "₹"),
     USD("US Dollar", "USD", "$"),
     EUR("Euro", "EUR", "EUR"),
     GBP("British Pound", "GBP", "GBP")
