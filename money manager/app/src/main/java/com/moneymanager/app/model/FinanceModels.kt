@@ -89,6 +89,7 @@ enum class CurrencyOption(
 }
 
 enum class ThemeMode(val label: String) {
+    System("System"),
     Dark("Dark"),
     Light("Light")
 }

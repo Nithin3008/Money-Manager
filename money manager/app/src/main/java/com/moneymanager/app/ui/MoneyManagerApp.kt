@@ -71,6 +71,7 @@ import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.CurrencyRupee
 import androidx.compose.material.icons.rounded.Bolt
+import androidx.compose.material.icons.rounded.BrightnessAuto
 import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.EditCalendar
@@ -689,7 +690,7 @@ private fun ProfileScreen(
             selectedTheme = state.themeMode,
             selectedAccent = state.uiAccent,
             customAccentHex = state.customAccentHex,
-            darkMode = state.themeMode == ThemeMode.Dark,
+            darkMode = isDarkTheme(),
             surfaceLabel = state.uiSurface.label,
             onThemeSelected = onThemeSelected,
             onAccentSelected = onUiAccentSelected,
@@ -738,7 +739,7 @@ private fun ProfileScreen(
                 )
                 SettingsDetail.Surface -> UiSurfaceSelector(
                     selected = state.uiSurface,
-                    darkMode = state.themeMode == ThemeMode.Dark,
+                    darkMode = isDarkTheme(),
                     onSelected = onUiSurfaceSelected
                 )
                 SettingsDetail.Backup -> BackupRestorePanel(
@@ -781,7 +782,7 @@ private fun ProfileScreen(
             palette = state.paletteColors,
             categories = state.categories,
             accentHex = state.customAccentHex
-                ?: if (state.themeMode == ThemeMode.Dark) state.uiAccent.darkHex else state.uiAccent.lightHex,
+                ?: if (isDarkTheme()) state.uiAccent.darkHex else state.uiAccent.lightHex,
             onDismiss = { showColorLibrary = false },
             onAccentApplied = onCustomAccentApplied,
             onColorCreated = onPaletteColorAdded,
@@ -4123,6 +4124,13 @@ private fun AppearanceCard(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 ThemePill(
+                    label = "System",
+                    icon = Icons.Rounded.BrightnessAuto,
+                    selected = selectedTheme == ThemeMode.System,
+                    onClick = { onThemeSelected(ThemeMode.System) },
+                    modifier = Modifier.weight(1f)
+                )
+                ThemePill(
                     label = "Dark",
                     icon = Icons.Rounded.DarkMode,
                     selected = selectedTheme == ThemeMode.Dark,
@@ -4245,21 +4253,24 @@ private fun ThemePill(
             .height(40.dp)
             .clip(RoundedCornerShape(999.dp))
             .background(if (selected) PrimaryBlue else Navy800)
-            .clickable(onClick = onClick),
+            .clickable(onClick = onClick)
+            .padding(horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally)
+        horizontalArrangement = Arrangement.spacedBy(5.dp, Alignment.CenterHorizontally)
     ) {
         Icon(
             icon,
             contentDescription = null,
             tint = if (selected) OnAccent else TextMuted,
-            modifier = Modifier.size(18.dp)
+            modifier = Modifier.size(17.dp)
         )
         Text(
             label,
             color = if (selected) OnAccent else TextMuted,
-            fontSize = 12.5.sp,
-            fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold
+            fontSize = 12.sp,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
         )
     }
 }

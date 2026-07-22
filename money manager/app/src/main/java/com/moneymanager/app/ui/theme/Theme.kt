@@ -1,5 +1,6 @@
 package com.moneymanager.app.ui.theme
 
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
@@ -47,7 +48,11 @@ fun MoneyManagerTheme(
     customAccentHex: String? = null,
     content: @Composable () -> Unit
 ) {
-    val dark = themeMode == ThemeMode.Dark
+    val dark = when (themeMode) {
+        ThemeMode.Dark -> true
+        ThemeMode.Light -> false
+        ThemeMode.System -> isSystemInDarkTheme()
+    }
     applyThemeTokens(dark, uiAccent, uiSurface)
     customAccentHex?.let { applyCustomAccent(it) }
     val colorScheme = expressiveColorScheme(dark)
