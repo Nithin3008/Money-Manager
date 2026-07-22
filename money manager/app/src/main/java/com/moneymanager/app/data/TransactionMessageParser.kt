@@ -78,6 +78,9 @@ object TransactionMessageParser {
         """(?i)info\s*nrs\*"""
     )
 
+    /** First money amount in the message, for callers that classify non-ledger SMS. */
+    fun firstAmountIn(message: String): Double? = extractAmounts(message).firstOrNull()
+
     fun parse(
         message: String,
         transactionTimestampMillis: Long = System.currentTimeMillis(),
@@ -112,7 +115,11 @@ object TransactionMessageParser {
                 ?.value?.trim()?.uppercase()
             ?: "Bank"
         val isCardSpendAccount = isCreditCardTransaction && !isCreditCardBillPayment
-        val accountHint = extractAccountHint(normalized)
+        // Card spends name the card ("Card x0887", "Card XX0006"); SmsBankKeys.cardHint reads
+        // all those forms, so the stored label carries the card number and resolves to the
+        // right card account even when several cards share an issuer.
+        val accountHint = (if (isCardSpendAccount) SmsBankKeys.cardHint(normalized) else null)
+            ?: extractAccountHint(normalized)
         val bankName = accountHint?.let {
             if (isCardSpendAccount) "$baseBankName CARD $it" else "$baseBankName A/C $it"
         } ?: baseBankName

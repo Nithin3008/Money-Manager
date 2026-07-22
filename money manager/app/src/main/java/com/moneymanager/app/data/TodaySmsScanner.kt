@@ -23,23 +23,39 @@ data class SmsScanProgress(
     val total: Int
 )
 
+/**
+ * A card-side "payment received" SMS. Alone it is a non-ledger artifact, but it names the
+ * card ("...CREDIT CARD ENDING WITH 0887"), which the matching bank debit often does not
+ * ("...debited; PhonePe credited") — pairing the two identifies a credit card bill payment.
+ */
+data class CardPaymentReceipt(
+    val amount: Double,
+    val timestampMillis: Long,
+    val body: String
+)
+
+data class SmsScanBatch(
+    val messages: List<ParsedTransactionMessage>,
+    val cardPaymentReceipts: List<CardPaymentReceipt>
+)
+
 class TodaySmsScanner(private val context: Context) {
 
     fun scanToday(
         onProgress: (SmsScanProgress) -> Unit = {}
-    ): List<ParsedTransactionMessage> =
+    ): SmsScanBatch =
         scanRange(LocalDate.now(), LocalDate.now(), onProgress)
 
     fun scanYesterday(
         onProgress: (SmsScanProgress) -> Unit = {}
-    ): List<ParsedTransactionMessage> {
+    ): SmsScanBatch {
         val yesterday = LocalDate.now().minusDays(1)
         return scanRange(yesterday, yesterday, onProgress)
     }
 
     fun scanLast7Days(
         onProgress: (SmsScanProgress) -> Unit = {}
-    ): List<ParsedTransactionMessage> {
+    ): SmsScanBatch {
         val today = LocalDate.now()
         return scanRange(today.minusDays(6), today, onProgress)
     }
@@ -48,7 +64,7 @@ class TodaySmsScanner(private val context: Context) {
         startDate: LocalDate,
         endDate: LocalDate,
         onProgress: (SmsScanProgress) -> Unit = {}
-    ): List<ParsedTransactionMessage> {
+    ): SmsScanBatch {
         val startMillis = startDate.atStartOfDay(ZoneId.systemDefault())
             .toInstant()
             .toEpochMilli()
@@ -84,13 +100,19 @@ class TodaySmsScanner(private val context: Context) {
         }
 
         val total = rows.size
+        val receipts = mutableListOf<CardPaymentReceipt>()
         onProgress(SmsScanProgress(processed = 0, total = total))
         rows.forEachIndexed { index, row ->
-            TransactionMessageParser.parse(
+            val parsed = TransactionMessageParser.parse(
                 message = row.body,
                 transactionTimestampMillis = row.timestampMillis,
                 sender = row.sender
-            )?.let(messages::add)
+            )
+            if (parsed != null) {
+                messages += parsed
+            } else {
+                cardPaymentReceiptFrom(row)?.let(receipts::add)
+            }
             val processed = index + 1
             if (processed == total || processed % 2 == 0) {
                 onProgress(SmsScanProgress(processed = processed, total = total))
@@ -100,7 +122,18 @@ class TodaySmsScanner(private val context: Context) {
             }
         }
 
-        return messages
+        return SmsScanBatch(messages = messages, cardPaymentReceipts = receipts)
+    }
+
+    private fun cardPaymentReceiptFrom(row: SmsCandidateRow): CardPaymentReceipt? {
+        if (!SmsTransactionNormalizer.isCreditCardSettlementArtifact(row.body)) return null
+        val amount = TransactionMessageParser.firstAmountIn(row.body) ?: return null
+        if (amount <= 0.0) return null
+        return CardPaymentReceipt(
+            amount = amount,
+            timestampMillis = row.timestampMillis,
+            body = row.body
+        )
     }
 
     fun exportDebugMonth(month: YearMonth): SmsDebugExportResult {

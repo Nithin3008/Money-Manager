@@ -8,9 +8,12 @@ import android.os.Process
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.moneymanager.app.data.CardPaymentReceipt
+import com.moneymanager.app.data.PAIRED_TRANSFER_SMS_DELIMITER
 import com.moneymanager.app.data.FinanceDatabase
 import com.moneymanager.app.data.FinanceRepository
 import com.moneymanager.app.data.SmsBankKeys
+import com.moneymanager.app.data.SmsScanBatch
 import com.moneymanager.app.data.SmsScanProgress
 import com.moneymanager.app.data.SmsTransactionNormalizer
 import com.moneymanager.app.data.TodaySmsScanner
@@ -47,7 +50,12 @@ import java.time.YearMonth
 
 class MoneyViewModel(application: Application) : AndroidViewModel(application) {
     private companion object {
-        const val PAIRED_TRANSFER_SMS_DELIMITER = "\n--- paired transfer sms ---\n"
+        /**
+         * How far apart a bank debit and the card's "payment received" SMS may arrive and
+         * still describe the same bill payment. They usually land within seconds; the hour
+         * absorbs delivery lag while keeping unrelated same-amount debits unlikely.
+         */
+        const val CARD_RECEIPT_PAIR_WINDOW_MS = 60 * 60 * 1000L
     }
 
     private val repository = FinanceRepository(FinanceDatabase.get(application).dao())
@@ -315,13 +323,20 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun addCreditCardAccount(name: String, outstanding: Double) {
+    fun addCreditCardAccount(
+        name: String,
+        outstanding: Double,
+        linkedCardNumbers: List<String> = emptyList()
+    ) {
         if (name.isBlank() || outstanding < 0.0) return
         viewModelScope.launch {
             repository.addAccount(
                 name = name.trim(),
                 balance = outstanding,
-                accountType = AccountType.CreditCard
+                accountType = AccountType.CreditCard,
+                linkedCardNumbers = linkedCardNumbers
+                    .mapNotNull { it.filter(Char::isDigit).takeIf { d -> d.length in 3..6 } }
+                    .distinct()
             )
             reloadState()
         }
@@ -347,6 +362,7 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
                         startDate = today.minusDays(120),
                         endDate = today
                     )
+                        .messages
                         .map { it.bankName }
                         .distinct()
                 }
@@ -705,7 +721,7 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
                 )
             }
             val hasPermission = hasSmsPermission()
-            val parsedMessages = if (hasPermission) {
+            val scanBatch = if (hasPermission) {
                 // Each state push recomposes the whole tree and invalidates every derived
                 // cache, so throttle progress to ~4 updates/sec instead of every 2 messages.
                 var lastProgressPushMillis = 0L
@@ -732,7 +748,7 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
                             val start = startDate ?: today
                             val end = endDate?.coerceAtMost(today) ?: today
                             if (start > end) {
-                                emptyList()
+                                SmsScanBatch(emptyList(), emptyList())
                             } else {
                                 TodaySmsScanner(getApplication()).scanRange(start, end, progressCallback)
                             }
@@ -740,7 +756,7 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
             } else {
-                emptyList()
+                SmsScanBatch(emptyList(), emptyList())
             }
 
             if (!hasPermission) {
@@ -756,6 +772,7 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
                 return@launch
             }
 
+            val parsedMessages = scanBatch.messages
             val existingTransactions = _uiState.value.transactions
             val existingDrafts = _uiState.value.detectedDrafts
             val normalizedExisting = buildSet {
@@ -765,7 +782,10 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
                 addAll(existingTransactions.flatMap { normalizedSmsKeys(it.rawMessage) })
                 addAll(existingDrafts.flatMap { normalizedSmsKeys(it.rawMessage) })
             }.toMutableSet()
-            val filteredParsed = SmsTransactionNormalizer.filterImportBatch(parsedMessages)
+            val filteredParsed = attachCardPaymentReceipts(
+                messages = SmsTransactionNormalizer.filterImportBatch(parsedMessages),
+                receipts = scanBatch.cardPaymentReceipts
+            )
             val accountsSnapshot = _uiState.value.accounts.associateBy { it.id }.toMutableMap()
             // Raw keys already locked into a Transfer row: never re-plan those legs.
             val transferRawKeys = existingTransactions
@@ -1075,6 +1095,9 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
                 repository.cleanupCreditCardRepaymentArtifacts()
                 reloadState()
                 ensureTrackingStartAnchored()
+                if (reattachCardTransactionsToMatchingCards() > 0) {
+                    reloadState()
+                }
                 if (mergeExistingCrossAccountTransferPairs() > 0) {
                     reloadState()
                 }
@@ -1084,6 +1107,50 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
                     _uiState.update { state -> state.copy(isAppInitializing = false) }
                 }
         }
+    }
+
+    /**
+     * A card spend imported before its card account existed stays parked on the bank account
+     * (or unassigned). Once the user adds the card, re-point those rows to it so the card is
+     * populated and the bank isn't cluttered with card spends. Balances are untouched: these
+     * rows predate the card's balance anchor, so the outstanding the user typed already
+     * includes them.
+     */
+    private suspend fun reattachCardTransactionsToMatchingCards(): Int {
+        val state = _uiState.value
+        val cardAccounts = state.accounts.filter { it.type == AccountType.CreditCard }
+        if (cardAccounts.isEmpty()) return 0
+        val cardAccountIds = cardAccounts.map { it.id }.toSet()
+        var reattached = 0
+        state.transactions.forEach { tx ->
+            if (!tx.isAutoDetected || !tx.isCreditCardTransaction) return@forEach
+            if (tx.type == TransactionType.Transfer) return@forEach
+            if (tx.accountId in cardAccountIds) return@forEach
+            val targetId = resolveCardAccountForRow(tx, cardAccounts) ?: return@forEach
+            if (targetId == tx.accountId) return@forEach
+            repository.updateTransaction(tx.copy(accountId = targetId))
+            reattached += 1
+        }
+        return reattached
+    }
+
+    /**
+     * The exact card number in the SMS is the strongest signal (older imports stored only the
+     * issuer, e.g. "HDFC", which is ambiguous across two HDFC cards). Try it first, then fall
+     * back to matching the stored/parsed label.
+     */
+    private fun resolveCardAccountForRow(
+        tx: LedgerTransaction,
+        cardAccounts: List<BankAccount>
+    ): Long? {
+        val cardNo = SmsBankKeys.cardHint(tx.rawMessage) ?: SmsBankKeys.cardHint(tx.smsBankLabel)
+        if (cardNo != null) {
+            val byNumber = cardAccounts.filter { cardNo in SmsBankKeys.cardHints(it) }
+            if (byNumber.size == 1) return byNumber.single().id
+        }
+        val label = tx.smsBankLabel?.takeIf { it.isNotBlank() }
+            ?: TransactionMessageParser.parse(tx.rawMessage.orEmpty(), tx.timestampMillis)?.bankName
+        return SmsBankKeys.resolveAccountId(label, cardAccounts)
     }
 
     /**
@@ -1650,6 +1717,41 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
             fromAccountId = plan.fromAccountId,
             toAccountId = plan.toAccountId
         )
+    }
+
+    /**
+     * A bill paid through a payment app produces a bank debit that never names the card
+     * ("...debited for Rs 1748.00; PhonePe credited") plus a card-side receipt ("PAYMENT
+     * OF Rs. 1748.00 RECEIVED TOWARDS YOUR CREDIT CARD ENDING WITH 0887") that alone is a
+     * non-ledger artifact. Attaching the receipt text to the same-amount debit makes the
+     * planner recognize it as a credit card bill payment, so it imports as a transfer to
+     * the card (reducing its outstanding) instead of an expense paid to the payment app.
+     */
+    private fun attachCardPaymentReceipts(
+        messages: List<com.moneymanager.app.data.ParsedTransactionMessage>,
+        receipts: List<CardPaymentReceipt>
+    ): List<com.moneymanager.app.data.ParsedTransactionMessage> {
+        if (messages.isEmpty() || receipts.isEmpty()) return messages
+        val unclaimed = receipts.toMutableList()
+        return messages.map { msg ->
+            if (msg.type != TransactionType.Expense) return@map msg
+            if (msg.isCreditCardTransaction) return@map msg
+            if (PAIRED_TRANSFER_SMS_DELIMITER in msg.rawMessage) return@map msg
+            if (SmsTransactionNormalizer.isCreditCardBillPaymentDebit(msg.rawMessage)) return@map msg
+            val receipt = unclaimed
+                .filter { receipt ->
+                    kotlin.math.abs(receipt.amount - msg.amount) <= 0.02 &&
+                        kotlin.math.abs(receipt.timestampMillis - msg.transactionTimestampMillis) <= CARD_RECEIPT_PAIR_WINDOW_MS
+                }
+                .minByOrNull { kotlin.math.abs(it.timestampMillis - msg.transactionTimestampMillis) }
+                ?: return@map msg
+            unclaimed.remove(receipt)
+            msg.copy(
+                rawMessage = pairedTransferRawMessage(listOf(msg.rawMessage, receipt.body)),
+                name = "Credit Card Payment",
+                counterparty = "Credit Card Payment"
+            )
+        }
     }
 
     private fun pairedTransferRawMessage(rawMessages: List<String>): String {

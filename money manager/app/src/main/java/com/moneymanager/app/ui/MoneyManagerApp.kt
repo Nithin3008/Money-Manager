@@ -593,7 +593,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.settingsContent(
     onDeleteAccount: (Long) -> Unit,
     onUpdateAccountBalance: (Long, Double) -> Unit,
     onAddAccount: (String, Double) -> Unit,
-    onAddCreditCard: (String, Double) -> Unit,
+    onAddCreditCard: (String, Double, List<String>) -> Unit,
     onDefaultAccountSelected: (Long?) -> Unit,
     onDeleteCategory: (Long) -> Unit,
     onUpdateCategory: (Long, String, String, String) -> Unit,
@@ -650,7 +650,7 @@ private fun ProfileScreen(
     onDeleteAccount: (Long) -> Unit,
     onUpdateAccountBalance: (Long, Double) -> Unit,
     onAddAccount: (String, Double) -> Unit,
-    onAddCreditCard: (String, Double) -> Unit,
+    onAddCreditCard: (String, Double, List<String>) -> Unit,
     onDefaultAccountSelected: (Long?) -> Unit,
     onDeleteCategory: (Long) -> Unit,
     onUpdateCategory: (Long, String, String, String) -> Unit,
@@ -3773,7 +3773,7 @@ private fun AccountSettingsGroup(
     onDelete: (Long) -> Unit,
     onUpdateBalance: (Long, Double) -> Unit,
     onAddAccount: (String, Double) -> Unit,
-    onAddCreditCard: (String, Double) -> Unit,
+    onAddCreditCard: (String, Double, List<String>) -> Unit,
     onDefaultAccountSelected: (Long?) -> Unit
 ) {
     var showAdd by remember { mutableStateOf(false) }
@@ -3781,6 +3781,7 @@ private fun AccountSettingsGroup(
     var newAccountName by remember { mutableStateOf("") }
     var newAccountLastDigits by remember { mutableStateOf("") }
     var newAccountBalance by remember { mutableStateOf("") }
+    var newLinkedCards by remember { mutableStateOf("") }
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             LabelText("ACCOUNTS")
@@ -3865,6 +3866,25 @@ private fun AccountSettingsGroup(
                             colors = inputColors(),
                             shape = RoundedCornerShape(12.dp)
                         )
+                        if (newAccountType == AccountType.CreditCard) {
+                            OutlinedTextField(
+                                value = newLinkedCards,
+                                onValueChange = { newLinkedCards = it },
+                                modifier = Modifier.fillMaxWidth(),
+                                label = { Text("Other cards on same bill (last 4, comma-separated)") },
+                                placeholder = { Text("e.g. 0006, 1003") },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                singleLine = true,
+                                colors = inputColors(),
+                                shape = RoundedCornerShape(12.dp)
+                            )
+                            Text(
+                                "For add-on cards billed together (one statement, one payment). " +
+                                    "Spends on any of them count toward this card.",
+                                color = TextDim,
+                                style = MaterialTheme.typography.labelMedium
+                            )
+                        }
                         Button(
                             onClick = {
                                 val displayName = listOf(newAccountName.trim(), newAccountLastDigits.trim())
@@ -3873,11 +3893,14 @@ private fun AccountSettingsGroup(
                                 if (newAccountType == AccountType.Bank) {
                                     onAddAccount(displayName, newAccountBalance.toDoubleOrNull() ?: -1.0)
                                 } else {
-                                    onAddCreditCard(displayName, newAccountBalance.toDoubleOrNull() ?: -1.0)
+                                    val linked = newLinkedCards.split(",")
+                                        .mapNotNull { it.filter(Char::isDigit).takeIf { d -> d.isNotEmpty() } }
+                                    onAddCreditCard(displayName, newAccountBalance.toDoubleOrNull() ?: -1.0, linked)
                                 }
                                 newAccountName = ""
                                 newAccountLastDigits = ""
                                 newAccountBalance = ""
+                                newLinkedCards = ""
                                 newAccountType = AccountType.Bank
                                 showAdd = false
                             },

@@ -305,10 +305,18 @@ internal object SmsImportPlanner {
         if (creditCardAccounts.isEmpty()) return null
         if (creditCardAccounts.size == 1) return creditCardAccounts.first().id
 
-        val cardHint = SmsBankKeys.cardHint(message.rawMessage)
+        // In a paired bill payment the bank leg names the PAYING account while the attached
+        // card receipt names the card — resolve from the part that carries the card hint, so
+        // an ICICI-account payment towards an HDFC card lands on the HDFC card account.
+        val hintedPart = message.rawMessage
+            .split(com.moneymanager.app.data.PAIRED_TRANSFER_SMS_DELIMITER)
+            .firstOrNull { SmsBankKeys.cardHint(it) != null }
+        val cardHint = SmsBankKeys.cardHint(hintedPart)
             ?: SmsBankKeys.cardHint(message.bankName)
             ?: return null
-        val bankRoot = SmsBankKeys.bankRoot(message.bankName).ifBlank { "CARD" }
+        val issuerRoot = hintedPart?.let { SmsBankKeys.issuerRoot(it) }
+        val bankRoot = issuerRoot
+            ?: SmsBankKeys.bankRoot(message.bankName).ifBlank { "CARD" }
         return SmsBankKeys.resolveAccountId("$bankRoot CARD $cardHint", creditCardAccounts)
     }
 

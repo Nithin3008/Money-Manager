@@ -144,7 +144,13 @@ data class BankAccount(
     val smsMatchKey: String? = null,
     val type: AccountType = AccountType.Bank,
     /** When this account's balance was last set as ground truth; older transactions never move it. */
-    val balanceAnchorAtMillis: Long = 0L
+    val balanceAnchorAtMillis: Long = 0L,
+    /**
+     * Extra card last-4s billed under this one account (add-on cards on a shared statement,
+     * e.g. ICICI's 0006/1003 billed under primary 8010). Spends on any of these map here, and
+     * the single consolidated bill payment clears this one account.
+     */
+    val linkedCardNumbers: List<String> = emptyList()
 )
 
 data class RegistrationAccountInput(

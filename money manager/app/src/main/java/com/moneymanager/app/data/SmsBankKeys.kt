@@ -31,10 +31,34 @@ object SmsBankKeys {
 
         val lower = raw.lowercase(Locale.US)
         if (!lower.contains("card") && !lower.contains("cc")) return null
+        // ICICI consolidated statement/payment identifiers: "...Account 4xxx8010" and
+        // "ICICI Bank XXXX-8010" name the billing account's last-4 without a card keyword.
+        val maskedAccountHint = Regex("""(?i)\b\d?x{2,}[-\s]?([0-9]{3,6})\b""")
+            .find(raw)?.groupValues?.getOrNull(1)
+        if (maskedAccountHint != null) return maskedAccountHint
         return Regex("""(?i)\b(?:ending|ended|no\.?)\s*(?:with|in)?\s*([0-9]{3,6})\b""")
             .find(raw)
             ?.groupValues
             ?.getOrNull(1)
+    }
+
+    private val knownIssuerRegex = Regex(
+        """(?i)\b(hdfc|icici|sbi|axis|kotak|yes bank|idfc|indusind|canara|union bank|pnb|bank of baroda|""" +
+            """indian bank|federal|bandhan|rbl|hsbc|standard chartered|onecard|slice)"""
+    )
+
+    /**
+     * The bank named inside a card-side SMS ("DEAR HDFCBANK CARDMEMBER..."), used to pick
+     * the right card account when the paying bank differs from the card's issuer.
+     */
+    fun issuerRoot(text: String?): String? =
+        knownIssuerRegex.find(text.orEmpty())?.groupValues?.getOrNull(1)?.uppercase(Locale.US)
+
+    /** Every card last-4 that maps to this account: the one in its name plus any linked cards. */
+    fun cardHints(account: BankAccount): Set<String> {
+        val fromName = accountHint(account.name)
+            ?: Regex("""\b(\d{3,6})\b""").find(account.name)?.groupValues?.getOrNull(1)
+        return (listOfNotNull(fromName) + account.linkedCardNumbers).toSet()
     }
 
     fun accountNameMatchesLabel(account: BankAccount, smsBankLabel: String?): Boolean {
@@ -45,7 +69,9 @@ object SmsBankKeys {
         val hint = accountHint(smsBankLabel)
         val accountName = normalize(account.name)
         val hintMatchesName = hint != null && hint in accountName
+        val hintMatchesLinkedCard = hint != null && hint in cardHints(account)
         return hintMatchesName ||
+            hintMatchesLinkedCard ||
             (accountRoot.isNotBlank() && (root in accountRoot || accountRoot in root)) ||
             (explicitKeyRoot.isNotBlank() && (root in explicitKeyRoot || explicitKeyRoot in root))
     }
@@ -68,7 +94,8 @@ object SmsBankKeys {
         if (hint != null) {
             val hintMatches = accounts.filter { account ->
                 hint in normalize(account.name) ||
-                    hint in normalize(account.smsMatchKey.orEmpty())
+                    hint in normalize(account.smsMatchKey.orEmpty()) ||
+                    hint in cardHints(account)
             }
             if (hintMatches.size == 1) return hintMatches.first().id
         }

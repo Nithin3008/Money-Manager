@@ -16,7 +16,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         BudgetEntity::class,
         DetectedDraftEntity::class
     ],
-    version = 21
+    version = 22
 )
 abstract class FinanceDatabase : RoomDatabase() {
     abstract fun dao(): FinanceDao
@@ -51,7 +51,8 @@ abstract class FinanceDatabase : RoomDatabase() {
                         Migration17To18,
                         Migration18To19,
                         Migration19To20,
-                        Migration20To21
+                        Migration20To21,
+                        Migration21To22
                     )
                     .build()
                     .also { instance = it }
@@ -245,6 +246,12 @@ abstract class FinanceDatabase : RoomDatabase() {
         private val Migration20To21 = object : Migration(20, 21) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.addColumnIfMissing("user_settings", "paletteHexCsv", "TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
+        private val Migration21To22 = object : Migration(21, 22) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.addColumnIfMissing("accounts", "linkedCardsCsv", "TEXT NOT NULL DEFAULT ''")
             }
         }
 

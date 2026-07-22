@@ -102,6 +102,22 @@ class TransactionMessageParserSafetyTest {
     }
 
     @Test
+    fun cardSpendLabelCarriesCardNumberFromLowercaseSingleXFormat() {
+        val message = "Rs.1748 spent on HDFC Bank Card x0887 at PYU*FSN ECOMMERCE VENT on 2026-07-18:17:49:01. " +
+            "Not U? To Block & Reissue Call 18002586161/SMS BLOCK CC 0887 to 7308080808"
+
+        val parsed = TransactionMessageParser.parse(
+            message = message,
+            transactionTimestampMillis = 1_000L,
+            sender = "HDFCBK"
+        )
+
+        assertTrue(parsed?.isCreditCardTransaction ?: false)
+        // The stored label must include the card number so it resolves to the right HDFC card.
+        assertEquals("HDFC CARD 0887", parsed?.bankName)
+    }
+
+    @Test
     fun failedTransactionSmsIsIgnored() {
         val parsed = TransactionMessageParser.parse(
             message = "Rs.1250 transaction failed on your HDFC card ending 4321 at AMAZON",

@@ -3,6 +3,9 @@ package com.moneymanager.app.data
 import com.moneymanager.app.model.TransactionType
 import kotlin.math.abs
 
+/** Joins the raw SMS texts of the legs stored together on one transfer row. */
+internal const val PAIRED_TRANSFER_SMS_DELIMITER = "\n--- paired transfer sms ---\n"
+
 /**
  * Post-parse filtering for SMS imports: drops paired transfer/CC-leg duplicates before DB insert.
  */

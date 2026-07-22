@@ -42,7 +42,8 @@ class FinanceRepository(private val dao: FinanceDao) {
         name: String,
         balance: Double,
         smsMatchKey: String? = null,
-        accountType: AccountType = AccountType.Bank
+        accountType: AccountType = AccountType.Bank,
+        linkedCardNumbers: List<String> = emptyList()
     ): Long {
         return dao.saveAccount(
             AccountEntity(
@@ -52,7 +53,8 @@ class FinanceRepository(private val dao: FinanceDao) {
                 accountType = accountType.name,
                 // The typed starting balance is ground truth as of this moment; older
                 // transactions are already inside it and must not move the balance.
-                balanceAnchorAtMillis = System.currentTimeMillis()
+                balanceAnchorAtMillis = System.currentTimeMillis(),
+                linkedCardsCsv = linkedCardNumbers.joinToString(",")
             )
         )
     }
@@ -65,7 +67,8 @@ class FinanceRepository(private val dao: FinanceDao) {
                 balance = account.balance,
                 smsMatchKey = account.smsMatchKey?.trim()?.takeIf { it.isNotEmpty() },
                 accountType = account.type.name,
-                balanceAnchorAtMillis = account.balanceAnchorAtMillis
+                balanceAnchorAtMillis = account.balanceAnchorAtMillis,
+                linkedCardsCsv = account.linkedCardNumbers.joinToString(",")
             )
         )
     }
@@ -389,7 +392,6 @@ class FinanceRepository(private val dao: FinanceDao) {
     private fun sameAmount(a: Double, b: Double): Boolean = abs(a - b) <= AMOUNT_EPSILON
 
     private companion object {
-        const val PAIRED_TRANSFER_SMS_DELIMITER = "\n--- paired transfer sms ---\n"
         const val TRANSFER_PAIR_WINDOW_MS = 8 * 60 * 1000L
         const val AMOUNT_EPSILON = 0.02
     }

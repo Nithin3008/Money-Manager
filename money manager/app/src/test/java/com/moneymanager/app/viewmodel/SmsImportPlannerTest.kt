@@ -1,5 +1,6 @@
 package com.moneymanager.app.viewmodel
 
+import com.moneymanager.app.data.PAIRED_TRANSFER_SMS_DELIMITER
 import com.moneymanager.app.data.ParsedTransactionMessage
 import com.moneymanager.app.data.SmsBankKeys
 import com.moneymanager.app.data.TransactionMessageParser
@@ -492,6 +493,121 @@ class SmsImportPlannerTest {
 
         assertEquals(2, planned.size)
         assertTrue(planned.all { it is PlannedSmsImport.Message })
+    }
+
+    @Test
+    fun payAppBillPaymentRoutesFromPayingBankToCorrectIssuerCard() {
+        // The bank debit names only the payment app; the attached card receipt (as
+        // MoneyViewModel.attachCardPaymentReceipts joins it) carries the card + issuer.
+        val iciciBank317 = BankAccount(id = 10L, name = "ICICI Bank 317", balance = 60_000.0)
+        val hdfcCard0887 = BankAccount(
+            id = 12L,
+            name = "HDFC Card 0887",
+            balance = 1_748.0,
+            type = AccountType.CreditCard
+        )
+        val bankDebit = "ICICI Bank Acct XX317 debited for Rs 1748.00 on 21-Jul-26; " +
+            "PhonePe credited. UPI:441675027689. Call 18002662 for dispute."
+        val cardReceipt = "DEAR HDFCBANK CARDMEMBER, PAYMENT OF Rs. 1748.00 RECEIVED TOWARDS " +
+            "YOUR CREDIT CARD ENDING WITH 0887 ON 21-7-2026.YOUR AVAILABLE LIMIT IS RS. 141000.00"
+        val paired = parsed(
+            bankName = "ICICI A/C 317",
+            amount = 1_748.0,
+            type = TransactionType.Expense,
+            raw = bankDebit + PAIRED_TRANSFER_SMS_DELIMITER + cardReceipt,
+            accountHint = "317",
+            timestamp = 1_000L,
+            counterparty = "Credit Card Payment"
+        )
+
+        val planned = SmsImportPlanner.plan(listOf(paired), listOf(iciciBank317, hdfcCard0887, hdfcBank))
+
+        assertEquals(1, planned.size)
+        val transfer = planned.single() as PlannedSmsImport.Transfer
+        assertEquals(SmsTransferSource.CreditCardPayment, transfer.source)
+        assertEquals(iciciBank317.id, transfer.fromAccountId)
+        assertEquals(hdfcCard0887.id, transfer.toAccountId)
+    }
+
+    @Test
+    fun spendOnLinkedAddOnCardResolvesToBillingGroupAccount() {
+        // ICICI bills 3 cards (0006/1003/8010) under one account; user models it as a single
+        // account whose primary is 8010 with 0006 and 1003 linked.
+        val iciciGroup = BankAccount(
+            id = 20L,
+            name = "ICICI 8010",
+            balance = 41_128.0,
+            type = AccountType.CreditCard,
+            linkedCardNumbers = listOf("0006", "1003")
+        )
+        val hdfcCard0887 = BankAccount(
+            id = 21L,
+            name = "HDFC 0887",
+            balance = 0.0,
+            type = AccountType.CreditCard
+        )
+
+        // A spend on the add-on card 0006 must land on the ICICI group, not the HDFC card.
+        assertEquals(
+            iciciGroup.id,
+            SmsBankKeys.resolveAccountId("ICICI CARD 0006", listOf(iciciGroup, hdfcCard0887))
+        )
+        // A spend on 1003 too.
+        assertEquals(
+            iciciGroup.id,
+            SmsBankKeys.resolveAccountId("ICICI CARD 1003", listOf(iciciGroup, hdfcCard0887))
+        )
+        // The primary card's own spends still resolve.
+        assertEquals(
+            iciciGroup.id,
+            SmsBankKeys.resolveAccountId("ICICI CARD 8010", listOf(iciciGroup, hdfcCard0887))
+        )
+        // HDFC card spends stay on the HDFC account.
+        assertEquals(
+            hdfcCard0887.id,
+            SmsBankKeys.resolveAccountId("HDFC CARD 0887", listOf(iciciGroup, hdfcCard0887))
+        )
+    }
+
+    @Test
+    fun anyIciciCardPoolsToTheSingleIciciCreditCardAccount() {
+        val iciciGroup = BankAccount(
+            id = 20L,
+            name = "ICICI 0006",
+            balance = 18_160.0,
+            type = AccountType.CreditCard,
+            linkedCardNumbers = listOf("1003", "8010", "5002")
+        )
+        val hdfcFreedom = BankAccount(id = 21L, name = "HDFC FREEDOM 0175", balance = 0.0, type = AccountType.CreditCard)
+        val hdfcSwiggy = BankAccount(id = 22L, name = "HDFC SWIGGY 0887", balance = 0.0, type = AccountType.CreditCard)
+        val cards = listOf(iciciGroup, hdfcFreedom, hdfcSwiggy)
+
+        // A linked card (1003) pools to the ICICI account.
+        assertEquals(iciciGroup.id, SmsBankKeys.resolveAccountId("ICICI CARD 1003", cards))
+        // The primary card (0006) too.
+        assertEquals(iciciGroup.id, SmsBankKeys.resolveAccountId("ICICI CARD 0006", cards))
+        // Even an ICICI card number the user never listed still pools to the single ICICI
+        // credit-card account, matched by issuer.
+        assertEquals(iciciGroup.id, SmsBankKeys.resolveAccountId("ICICI CARD 4444", cards))
+    }
+
+    @Test
+    fun cardHintReadsIciciConsolidatedAccountFormats() {
+        assertEquals(
+            "8010",
+            SmsBankKeys.cardHint("Payment of INR 41128.00 received on your ICICI Bank Credit Card Account 4xxx8010")
+        )
+        assertEquals(
+            "8010",
+            SmsBankKeys.cardHint("Your credit card bill for ICICI Bank XXXX-8010 has been generated.")
+        )
+    }
+
+    @Test
+    fun issuerRootReadsBankNamedInsideCardReceipt() {
+        val receipt = "DEAR HDFCBANK CARDMEMBER, PAYMENT OF Rs. 1748.00 RECEIVED TOWARDS " +
+            "YOUR CREDIT CARD ENDING WITH 0887"
+        assertEquals("HDFC", SmsBankKeys.issuerRoot(receipt))
     }
 
     private fun parsed(

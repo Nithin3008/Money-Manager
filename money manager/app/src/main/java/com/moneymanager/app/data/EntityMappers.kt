@@ -81,7 +81,8 @@ internal fun AccountEntity.toModel() = BankAccount(
     balance = balance,
     smsMatchKey = smsMatchKey,
     type = AccountType.entries.firstOrNull { it.name == accountType } ?: AccountType.Bank,
-    balanceAnchorAtMillis = balanceAnchorAtMillis
+    balanceAnchorAtMillis = balanceAnchorAtMillis,
+    linkedCardNumbers = linkedCardsCsv.split(",").mapNotNull { it.trim().takeIf(String::isNotEmpty) }
 )
 
 internal fun CategoryEntity.toModel() = CategoryItem(

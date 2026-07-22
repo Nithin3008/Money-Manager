@@ -38,7 +38,9 @@ data class AccountEntity(
     val balance: Double,
     val smsMatchKey: String? = null,
     val accountType: String = "Bank",
-    val balanceAnchorAtMillis: Long = 0L
+    val balanceAnchorAtMillis: Long = 0L,
+    // Comma-separated extra card last-4s billed under this account (consolidated statement).
+    val linkedCardsCsv: String = ""
 )
 
 @Entity(tableName = "categories")
