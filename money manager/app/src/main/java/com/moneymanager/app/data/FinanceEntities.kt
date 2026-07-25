@@ -68,7 +68,10 @@ data class TransactionEntity(
     val isCreditCardTransaction: Boolean = false,
     val description: String? = null,
     val fromAccountId: Long? = null,
-    val toAccountId: Long? = null
+    val toAccountId: Long? = null,
+    // Second tag on CC rows only ("CC + Shopping"); null everywhere else. Max one, so a
+    // transaction never carries more than two categories.
+    val secondaryCategoryId: Long? = null
 )
 
 @Entity(tableName = "budgets")

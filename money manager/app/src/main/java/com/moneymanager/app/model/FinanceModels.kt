@@ -177,6 +177,12 @@ data class LedgerTransaction(
     val amount: Double,
     val type: TransactionType,
     val categoryId: Long,
+    /**
+     * Optional second tag, allowed only while [categoryId] is the CC category (see
+     * [FinanceUiState.allowsSecondaryCategory]). "CC" says how it was paid, not what it was
+     * for, so this carries the real spend category — a card swipe at a mall is CC + Shopping.
+     */
+    val secondaryCategoryId: Long? = null,
     val accountId: Long?,
     val timestampMillis: Long,
     val isAutoDetected: Boolean = false,
@@ -344,6 +350,37 @@ data class FinanceUiState(
         monthReportIncome - monthExpense
     }
 
+    val creditCardCategoryId: Long? by lazy(LazyThreadSafetyMode.NONE) {
+        categories.firstOrNull { it.isCreditCardCategory() }?.id
+    }
+
+    /**
+     * Only CC rows may carry a second tag, and only one — so a transaction never holds more
+     * than two categories. Every other category already describes what the money was for.
+     */
+    fun allowsSecondaryCategory(primaryCategoryId: Long, isCreditCardTransaction: Boolean): Boolean {
+        return isCreditCardTransaction || (creditCardCategoryId != null && primaryCategoryId == creditCardCategoryId)
+    }
+
+    /** Second-tag choices: anything except CC itself and whatever the primary already is. */
+    fun secondaryCategoryOptions(primaryCategoryId: Long): List<CategoryItem> {
+        return categories.filter { it.id != primaryCategoryId && !it.isCreditCardCategory() }
+    }
+
+    /**
+     * Drops a second tag that is no longer legal — the primary moved off CC, the category was
+     * deleted, or it duplicates the primary. Both persistence and the sheets go through this so
+     * they can never disagree about what is stored.
+     */
+    fun normalizeSecondaryCategory(transaction: LedgerTransaction): LedgerTransaction {
+        val current = transaction.secondaryCategoryId
+        val valid = current
+            ?.takeIf { allowsSecondaryCategory(transaction.categoryId, transaction.isCreditCardTransaction) }
+            ?.takeIf { it != transaction.categoryId }
+            ?.takeIf { id -> categories.any { it.id == id } }
+        return if (valid == current) transaction else transaction.copy(secondaryCategoryId = valid)
+    }
+
     val investmentCategoryIds: Set<Long> by lazy(LazyThreadSafetyMode.NONE) {
         categories
             .filter { it.isInvestmentCategoryName() }
@@ -489,6 +526,14 @@ data class FinanceUiState(
     val hasMoreTransactions: Boolean by lazy(LazyThreadSafetyMode.NONE) {
         pagedTransactions.size < activityTransactions.size
     }
+}
+
+internal fun CategoryItem.isCreditCardCategory(): Boolean {
+    val normalized = name.trim().lowercase()
+    return normalized == "cc" ||
+        normalized == "credit card" ||
+        normalized == "credit cards" ||
+        iconKey.equals("credit_card", ignoreCase = true)
 }
 
 private fun CategoryItem.isInvestmentCategoryName(): Boolean {

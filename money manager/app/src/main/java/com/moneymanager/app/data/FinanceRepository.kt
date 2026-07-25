@@ -122,7 +122,10 @@ class FinanceRepository(private val dao: FinanceDao) {
     suspend fun deleteTransaction(id: Long) = dao.deleteTransaction(id)
     suspend fun deleteBudget(id: Long) = dao.deleteBudget(id)
     suspend fun deleteAccount(id: Long) = dao.deleteAccount(id)
-    suspend fun deleteCustomCategory(id: Long) = dao.deleteCustomCategory(id)
+    suspend fun deleteCustomCategory(id: Long) {
+        dao.deleteCustomCategory(id)
+        dao.clearSecondaryCategory(id)
+    }
 
     suspend fun clearAllSavedData() {
         dao.deleteDrafts()
@@ -304,6 +307,7 @@ class FinanceRepository(private val dao: FinanceDao) {
             val relocated = defaultIdHolder.copy(id = nextCategoryId(existing))
             dao.saveCategory(relocated)
             dao.moveTransactionsToCategory(defaultIdHolder.id, relocated.id)
+            dao.moveSecondaryCategory(defaultIdHolder.id, relocated.id)
             dao.deleteCategory(defaultIdHolder.id)
             existing[existing.indexOf(defaultIdHolder)] = relocated
         }

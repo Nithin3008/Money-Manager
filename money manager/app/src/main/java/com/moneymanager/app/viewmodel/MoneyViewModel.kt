@@ -420,7 +420,8 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
         rawMessage: String? = null,
         isAutoDetected: Boolean = false,
         description: String? = null,
-        timestampMillis: Long? = null
+        timestampMillis: Long? = null,
+        secondaryCategoryId: Long? = null
     ) {
         if (name.isBlank() || amount <= 0.0) return
         viewModelScope.launch {
@@ -430,6 +431,7 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
                 amount = amount,
                 type = type,
                 categoryId = categoryId,
+                secondaryCategoryId = secondaryCategoryId,
                 accountId = accountId,
                 timestampMillis = timestampMillis ?: System.currentTimeMillis(),
                 isAutoDetected = isAutoDetected,
@@ -439,7 +441,9 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
                 isCreditCardTransaction = false,
                 description = description?.trim()?.takeIf { it.isNotBlank() }
             )
-            val transaction = normalizeInvestmentTransaction(draftTransaction)
+            val transaction = _uiState.value.normalizeSecondaryCategory(
+                normalizeInvestmentTransaction(draftTransaction)
+            )
             repository.addTransaction(transaction)
             applyTransactionBalanceMovement(transaction)
             val warning = BudgetWarningCalculator.findBudgetWarning(_uiState.value, transaction)
@@ -553,9 +557,11 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
     fun editTransactionCategory(transactionId: Long, categoryId: Long) {
         viewModelScope.launch {
             val transaction = _uiState.value.transactions.firstOrNull { it.id == transactionId } ?: return@launch
-            val updatedTransaction = normalizeInvestmentTransaction(
-                transaction.copy(categoryId = categoryId),
-                originalTransaction = transaction
+            val updatedTransaction = _uiState.value.normalizeSecondaryCategory(
+                normalizeInvestmentTransaction(
+                    transaction.copy(categoryId = categoryId),
+                    originalTransaction = transaction
+                )
             )
             reconcileBalanceForTransactionUpdate(transaction, updatedTransaction)
             repository.updateTransaction(updatedTransaction)
@@ -571,21 +577,25 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
         name: String? = null,
         amount: Double? = null,
         accountId: Long? = null,
-        timestampMillis: Long? = null
+        timestampMillis: Long? = null,
+        secondaryCategoryId: Long? = null
     ) {
         viewModelScope.launch {
             val transaction = _uiState.value.transactions.firstOrNull { it.id == transactionId } ?: return@launch
-            val updatedTransaction = normalizeInvestmentTransaction(
-                transaction.copy(
-                    name = name?.trim()?.takeIf { it.isNotBlank() } ?: transaction.name,
-                    amount = amount?.takeIf { it > 0.0 } ?: transaction.amount,
-                    type = type,
-                    categoryId = categoryId,
-                    accountId = accountId,
-                    timestampMillis = timestampMillis ?: transaction.timestampMillis,
-                    description = description?.trim()?.takeIf { it.isNotBlank() }
-                ),
-                originalTransaction = transaction
+            val updatedTransaction = _uiState.value.normalizeSecondaryCategory(
+                normalizeInvestmentTransaction(
+                    transaction.copy(
+                        name = name?.trim()?.takeIf { it.isNotBlank() } ?: transaction.name,
+                        amount = amount?.takeIf { it > 0.0 } ?: transaction.amount,
+                        type = type,
+                        categoryId = categoryId,
+                        secondaryCategoryId = secondaryCategoryId,
+                        accountId = accountId,
+                        timestampMillis = timestampMillis ?: transaction.timestampMillis,
+                        description = description?.trim()?.takeIf { it.isNotBlank() }
+                    ),
+                    originalTransaction = transaction
+                )
             )
             reconcileBalanceForTransactionUpdate(transaction, updatedTransaction)
             repository.updateTransaction(updatedTransaction)

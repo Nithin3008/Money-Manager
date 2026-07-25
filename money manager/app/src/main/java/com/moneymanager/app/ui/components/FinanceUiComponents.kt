@@ -47,6 +47,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.moneymanager.app.model.BankAccount
 import com.moneymanager.app.model.CategoryItem
+import com.moneymanager.app.model.isCreditCardCategory
 import com.moneymanager.app.model.CurrencyOption
 import com.moneymanager.app.model.LedgerTransaction
 import com.moneymanager.app.model.MoneyIcons
@@ -163,6 +164,28 @@ internal fun LegendDot(color: Color, label: String) {
     }
 }
 
+/** One category tag in a transaction row, tinted with that category's own colour. */
+@Composable
+private fun CategoryPill(label: String, ink: Color) {
+    Box(
+        modifier = Modifier
+            .height(20.dp)
+            .clip(RoundedCornerShape(7.dp))
+            .background(ink.copy(alpha = if (isDarkTheme()) 0.18f else 0.13f))
+            .padding(horizontal = 9.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            label,
+            color = ink,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            style = pillLabelStyle
+        )
+    }
+}
+
 @Composable
 internal fun TransactionRow(
     transaction: LedgerTransaction,
@@ -173,9 +196,13 @@ internal fun TransactionRow(
     modifier: Modifier = Modifier
 ) {
     val category = categoriesById[transaction.categoryId]
+    // A CC row shows both of its tags: "CC" for how it was paid, then the second tag for what it
+    // was for. The icon tile follows the second tag, since that is the part worth recognising.
+    val secondaryCategory = transaction.secondaryCategoryId?.let { categoriesById[it] }
     val isTransfer = transaction.type == TransactionType.Transfer
     val rowIcon = when {
         isTransfer -> MoneyIcons.Account
+        secondaryCategory != null -> secondaryCategory.icon
         transaction.isCreditCardTransaction -> MoneyIcons.resolveCategoryIcon("credit_card")
         else -> category?.icon ?: MoneyIcons.Category
     }
@@ -184,11 +211,14 @@ internal fun TransactionRow(
     val categoryLabel = if (isTransfer) "Transfer" else category?.name ?: "Set category"
     val accountLabel = buildList {
         accountName?.takeIf { it.isNotBlank() }?.let(::add)
-        if (transaction.isCreditCardTransaction) add("CC")
+        // Only when no pill already says it, so "CC" never appears twice on one row.
+        if (transaction.isCreditCardTransaction && category?.isCreditCardCategory() != true) add("CC")
     }.joinToString(" · ")
 
     // Category-tinted icon tile + pill, per the Activity design.
-    val ink = if (isTransfer) TransferBlue else categoryColor(category, transaction.type)
+    val primaryInk = if (isTransfer) TransferBlue else categoryColor(category, transaction.type)
+    val secondaryInk = secondaryCategory?.let { categoryColor(it, transaction.type) }
+    val ink = secondaryInk ?: primaryInk
     val tint = ink.copy(alpha = if (isDarkTheme()) 0.18f else 0.13f)
 
     Row(
@@ -248,22 +278,9 @@ internal fun TransactionRow(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(7.dp)
             ) {
-                Box(
-                    modifier = Modifier
-                        .height(20.dp)
-                        .clip(RoundedCornerShape(7.dp))
-                        .background(tint)
-                        .padding(horizontal = 9.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        categoryLabel,
-                        color = ink,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        style = pillLabelStyle
-                    )
+                CategoryPill(label = categoryLabel, ink = primaryInk)
+                secondaryCategory?.let {
+                    CategoryPill(label = it.name, ink = secondaryInk ?: primaryInk)
                 }
                 if (accountLabel.isNotBlank()) {
                     Text(

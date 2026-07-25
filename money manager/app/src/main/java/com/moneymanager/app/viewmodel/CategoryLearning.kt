@@ -5,6 +5,7 @@ import com.moneymanager.app.data.SmsTransactionNormalizer
 import com.moneymanager.app.model.CategoryItem
 import com.moneymanager.app.model.LedgerTransaction
 import com.moneymanager.app.model.TransactionType
+import com.moneymanager.app.model.isCreditCardCategory
 
 internal object CategoryLearning {
     fun inferCategoryId(
@@ -133,13 +134,5 @@ internal object CategoryLearning {
         if (tokens.isEmpty()) return ""
         if (tokens.size == 1 && tokens.first() in setOf("hdfc", "icici", "axis", "kotak", "indian", "sbi")) return ""
         return tokens.joinToString(" ")
-    }
-
-    private fun CategoryItem.isCreditCardCategory(): Boolean {
-        val normalizedName = name.trim().lowercase()
-        return normalizedName == "cc" ||
-            normalizedName == "credit card" ||
-            normalizedName == "credit cards" ||
-            iconKey.equals("credit_card", ignoreCase = true)
     }
 }

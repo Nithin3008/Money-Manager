@@ -398,7 +398,7 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
         AddTransactionSheet(
             state = state,
             onDismiss = { viewModel.setTransactionSheet(false) },
-            onSave = { name, amount, type, categoryId, accountId, description, timestamp ->
+            onSave = { name, amount, type, categoryId, accountId, description, timestamp, secondaryCategoryId ->
                 viewModel.addTransaction(
                     name = name,
                     amount = amount,
@@ -406,7 +406,8 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
                     categoryId = categoryId,
                     accountId = accountId,
                     description = description,
-                    timestampMillis = timestamp
+                    timestampMillis = timestamp,
+                    secondaryCategoryId = secondaryCategoryId
                 )
             },
             onTransfer = viewModel::addTransfer,
@@ -436,7 +437,7 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
             state = state,
             transaction = selectedTransaction,
             onDismiss = viewModel::cancelEditTransactionCategory,
-            onSave = { id, name, amount, type, categoryId, accountId, timestamp, description ->
+            onSave = { id, name, amount, type, categoryId, accountId, timestamp, description, secondaryCategoryId ->
                 viewModel.updateTransactionDetails(
                     transactionId = id,
                     type = type,
@@ -445,7 +446,8 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
                     name = name,
                     amount = amount,
                     accountId = accountId,
-                    timestampMillis = timestamp
+                    timestampMillis = timestamp,
+                    secondaryCategoryId = secondaryCategoryId
                 )
             },
             onDelete = viewModel::requestDeleteTransaction,
@@ -1537,7 +1539,7 @@ private fun AccountDraftRow(
 private fun AddTransactionSheet(
     state: FinanceUiState,
     onDismiss: () -> Unit,
-    onSave: (String, Double, TransactionType, Long, Long?, String?, Long?) -> Unit,
+    onSave: (String, Double, TransactionType, Long, Long?, String?, Long?, Long?) -> Unit,
     onTransfer: (String, Double, Long?, Long?) -> Unit,
     onCreateCategory: () -> Unit
 ) {
@@ -1546,6 +1548,7 @@ private fun AddTransactionSheet(
     var notes by remember { mutableStateOf("") }
     var mode by remember { mutableStateOf(AddMoneyMode.Expense) }
     var categoryId by remember { mutableStateOf(state.categories.first().id) }
+    var secondaryCategoryId by remember { mutableStateOf<Long?>(null) }
     var selectedDate by remember { mutableStateOf(LocalDate.now()) }
     val defaultAccount = state.accounts.firstOrNull { it.id == state.defaultAccountId } ?: state.accounts.firstOrNull()
     var accountId by remember(state.defaultAccountId, state.accounts) { mutableStateOf(defaultAccount?.id) }
@@ -1657,6 +1660,22 @@ private fun AddTransactionSheet(
                             onSelect = { categoryId = it },
                             onNew = onCreateCategory
                         )
+                        // Manual rows are never flagged as card spends, so the second tag opens
+                        // up only once CC itself is picked as the category.
+                        if (state.allowsSecondaryCategory(categoryId, isCreditCardTransaction = false)) {
+                            SheetSectionLabel("Also tag as")
+                            Text(
+                                "CC says how you paid. Add one more tag for what it was for.",
+                                color = TextDim,
+                                fontSize = 12.sp,
+                                lineHeight = 17.sp
+                            )
+                            TxSecondaryCategoryChips(
+                                options = state.secondaryCategoryOptions(categoryId),
+                                selectedId = secondaryCategoryId,
+                                onSelect = { secondaryCategoryId = it }
+                            )
+                        }
                     }
                 }
 
@@ -1680,8 +1699,8 @@ private fun AddTransactionSheet(
                     closeSheet {
                         when (mode) {
                             AddMoneyMode.Transfer -> onTransfer(name, parsedAmount, fromAccountId, toAccountId)
-                            AddMoneyMode.Investment -> onSave(name, parsedAmount, TransactionType.Expense, investmentCategoryId, null, notes, timestamp)
-                            else -> onSave(name, parsedAmount, transactionType, categoryId, accountId, notes, timestamp)
+                            AddMoneyMode.Investment -> onSave(name, parsedAmount, TransactionType.Expense, investmentCategoryId, null, notes, timestamp, null)
+                            else -> onSave(name, parsedAmount, transactionType, categoryId, accountId, notes, timestamp, secondaryCategoryId)
                         }
                     }
                 },
@@ -1836,6 +1855,54 @@ private fun TxCategoryChips(
         ) {
             Icon(Icons.Rounded.Add, contentDescription = null, tint = TextDim, modifier = Modifier.size(18.dp))
             Text("New", color = TextDim, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
+        }
+    }
+}
+
+/**
+ * The one extra tag a CC row may carry. "CC" only records how it was paid, so this says what it
+ * was for — at most one, keeping a transaction to two categories.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun TxSecondaryCategoryChips(
+    options: List<CategoryItem>,
+    selectedId: Long?,
+    onSelect: (Long?) -> Unit
+) {
+    androidx.compose.foundation.layout.FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        val noneSelected = selectedId == null
+        Row(
+            modifier = Modifier
+                .height(38.dp)
+                .clip(RoundedCornerShape(999.dp))
+                .background(if (noneSelected) PrimaryBlue else Navy850)
+                .border(1.dp, if (noneSelected) PrimaryBlue else LineColor, RoundedCornerShape(999.dp))
+                .clickable { onSelect(null) }
+                .padding(horizontal = 14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("None", color = if (noneSelected) OnAccent else TextMuted, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
+        }
+        options.forEach { category ->
+            val selected = category.id == selectedId
+            Row(
+                modifier = Modifier
+                    .height(38.dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(if (selected) PrimaryBlue else Navy850)
+                    .border(1.dp, if (selected) PrimaryBlue else LineColor, RoundedCornerShape(999.dp))
+                    .clickable { onSelect(if (selected) null else category.id) }
+                    .padding(horizontal = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(7.dp)
+            ) {
+                Icon(category.icon, contentDescription = null, tint = if (selected) OnAccent else TextMuted, modifier = Modifier.size(18.dp))
+                Text(category.name, color = if (selected) OnAccent else TextMuted, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
+            }
         }
     }
 }
@@ -2278,7 +2345,7 @@ private fun TransactionDetailSheet(
     state: FinanceUiState,
     transaction: LedgerTransaction?,
     onDismiss: () -> Unit,
-    onSave: (Long, String, Double, TransactionType, Long, Long?, Long?, String?) -> Unit,
+    onSave: (Long, String, Double, TransactionType, Long, Long?, Long?, String?, Long?) -> Unit,
     onDelete: (Long) -> Unit,
     onCreateCategory: () -> Unit
 ) {
@@ -2287,6 +2354,7 @@ private fun TransactionDetailSheet(
     var amount by remember(transaction.id) { mutableStateOf(editableAmount(transaction.amount)) }
     var type by remember(transaction.id) { mutableStateOf(transaction.type) }
     var categoryId by remember(transaction.id) { mutableStateOf(transaction.categoryId) }
+    var secondaryCategoryId by remember(transaction.id) { mutableStateOf(transaction.secondaryCategoryId) }
     var accountId by remember(transaction.id) { mutableStateOf(transaction.accountId) }
     var selectedDate by remember(transaction.id) { mutableStateOf(transaction.transactionDate()) }
     var notes by remember(transaction.id) { mutableStateOf(transaction.description.orEmpty()) }
@@ -2373,6 +2441,22 @@ private fun TransactionDetailSheet(
                     onNew = onCreateCategory
                 )
 
+                // Only CC rows get a second tag; switching the primary off CC hides and drops it.
+                if (state.allowsSecondaryCategory(categoryId, transaction.isCreditCardTransaction)) {
+                    SheetSectionLabel("Also tag as")
+                    Text(
+                        "CC says how you paid. Add one more tag for what it was for.",
+                        color = TextDim,
+                        fontSize = 12.sp,
+                        lineHeight = 17.sp
+                    )
+                    TxSecondaryCategoryChips(
+                        options = state.secondaryCategoryOptions(categoryId),
+                        selectedId = secondaryCategoryId,
+                        onSelect = { secondaryCategoryId = it }
+                    )
+                }
+
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     AccountTile(state = state, accountId = accountId, onSelect = { accountId = it }, modifier = Modifier.weight(1f))
                     DateTile(date = selectedDate, onDateSelected = { selectedDate = it }, modifier = Modifier.weight(1f))
@@ -2400,7 +2484,9 @@ private fun TransactionDetailSheet(
                         .clickable(enabled = saveEnabled) {
                             val timestamp = if (selectedDate == originalDate) transaction.timestampMillis
                                 else selectedDate.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
-                            closeSheet { onSave(transaction.id, name, parsedAmount, type, categoryId, accountId, timestamp, notes) }
+                            closeSheet {
+                                onSave(transaction.id, name, parsedAmount, type, categoryId, accountId, timestamp, notes, secondaryCategoryId)
+                            }
                         },
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally)

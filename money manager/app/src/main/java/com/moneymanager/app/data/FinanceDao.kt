@@ -37,6 +37,13 @@ interface FinanceDao {
     @Query("UPDATE transactions SET categoryId = :toCategoryId WHERE categoryId = :fromCategoryId")
     suspend fun moveTransactionsToCategory(fromCategoryId: Long, toCategoryId: Long)
 
+    @Query("UPDATE transactions SET secondaryCategoryId = :toCategoryId WHERE secondaryCategoryId = :fromCategoryId")
+    suspend fun moveSecondaryCategory(fromCategoryId: Long, toCategoryId: Long)
+
+    /** Untags CC rows whose second category was deleted, so no row points at a missing category. */
+    @Query("UPDATE transactions SET secondaryCategoryId = NULL WHERE secondaryCategoryId = :categoryId")
+    suspend fun clearSecondaryCategory(categoryId: Long)
+
     @Query("SELECT * FROM categories ORDER BY isDefault DESC, id ASC")
     suspend fun getCategories(): List<CategoryEntity>
 
