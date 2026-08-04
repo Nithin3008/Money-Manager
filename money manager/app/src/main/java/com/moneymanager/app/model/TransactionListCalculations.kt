@@ -2,7 +2,12 @@ package com.moneymanager.app.model
 
 internal object TransactionListCalculations {
     fun todayTransactions(state: FinanceUiState): List<LedgerTransaction> {
-        val activeIds = SummaryCalculations.activeAccountIds(state)
+        // Home mirrors the default-account balance hero, so its "today" list stays scoped
+        // to the default account (falls back to all accounts when there's no default).
+        val activeIds = state.defaultAccountId
+            ?.takeIf { id -> state.bankAccounts.any { it.id == id } }
+            ?.let { setOf(it) }
+            ?: emptySet()
         return state.transactions.filter {
             it.transactionDate() == java.time.LocalDate.now() &&
                 (

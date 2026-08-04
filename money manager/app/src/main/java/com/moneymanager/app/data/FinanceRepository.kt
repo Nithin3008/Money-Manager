@@ -74,27 +74,61 @@ class FinanceRepository(private val dao: FinanceDao) {
     }
 
     suspend fun remapTransactionAccountsFromSmsLabels() {
-        val accounts = dao.getAccounts().map { it.toModel() }
-        if (accounts.isEmpty()) return
+        // Kept in a mutable map so balance edits within this pass see each other; the reassignment
+        // below moves the account balance, which earlier only happened at insert time — a row that
+        // got its account here (typically null -> account) would otherwise never reach the balance.
+        val accountsById = dao.getAccounts().map { it.toModel() }.associateBy { it.id }.toMutableMap()
+        if (accountsById.isEmpty()) return
+        val onboardedAtMillis = dao.getSettings()?.onboardedAtMillis ?: 0L
         for (entity in dao.getTransactions()) {
             val tx = entity.toModel()
-            if (tx.type == com.moneymanager.app.model.TransactionType.Transfer) continue
+            if (tx.type == TransactionType.Transfer) continue
             val parsedLabel = tx.rawMessage
                 ?.let { TransactionMessageParser.parse(it, tx.timestampMillis)?.bankName }
             val label = parsedLabel ?: tx.smsBankLabel ?: continue
-            val resolved = SmsBankKeys.resolveAccountId(label, accounts)
+            val resolved = SmsBankKeys.resolveAccountId(label, accountsById.values.toList())
             if (resolved != null) {
-                accounts.firstOrNull { it.id == resolved && it.smsMatchKey.isNullOrBlank() }
-                    ?.let { updateAccount(it.copy(smsMatchKey = SmsBankKeys.normalize(label))) }
+                accountsById[resolved]?.takeIf { it.smsMatchKey.isNullOrBlank() }?.let { acc ->
+                    val relabeled = acc.copy(smsMatchKey = SmsBankKeys.normalize(label))
+                    updateAccount(relabeled)
+                    accountsById[resolved] = relabeled
+                }
             }
-            val next = tx.copy(
-                smsBankLabel = label,
-                accountId = resolved ?: tx.accountId
-            )
-            if (next.accountId != tx.accountId || next.smsBankLabel != tx.smsBankLabel) {
-                dao.saveTransaction(next.toEntity(tx.id))
+            val newAccountId = resolved ?: tx.accountId
+            val accountChanged = newAccountId != tx.accountId
+            if (accountChanged) {
+                // Take the balance off the account the row used to belong to and put it on the new
+                // one, respecting each account's anchor guard so pre-anchor history stays frozen.
+                tx.accountId?.let { moveBalanceForReassignment(tx, accountsById, it, onboardedAtMillis, add = false) }
+                newAccountId?.let { moveBalanceForReassignment(tx, accountsById, it, onboardedAtMillis, add = true) }
+            }
+            if (accountChanged || label != tx.smsBankLabel) {
+                dao.saveTransaction(tx.copy(smsBankLabel = label, accountId = newAccountId).toEntity(tx.id))
             }
         }
+    }
+
+    /** Applies (or reverses) a single transaction's balance movement on one account, mirroring the
+     *  ViewModel's insert-time rule: skip pre-anchor rows and card spends that never touch cash. */
+    private suspend fun moveBalanceForReassignment(
+        tx: LedgerTransaction,
+        accountsById: MutableMap<Long, BankAccount>,
+        accountId: Long,
+        onboardedAtMillis: Long,
+        add: Boolean
+    ) {
+        val account = accountsById[accountId] ?: return
+        if (tx.amount <= 0.0) return
+        if (tx.isCreditCardTransaction && account.type == AccountType.Bank) return
+        val cutoff = maxOf(onboardedAtMillis, account.balanceAnchorAtMillis)
+        if (tx.timestampMillis < cutoff) return
+        val movement = when (account.type) {
+            AccountType.Bank -> if (tx.type == TransactionType.Income) tx.amount else -tx.amount
+            AccountType.CreditCard -> if (tx.type == TransactionType.Income) -tx.amount else tx.amount
+        }
+        val updated = account.copy(balance = account.balance + if (add) movement else -movement)
+        updateAccount(updated)
+        accountsById[accountId] = updated
     }
 
     suspend fun addCategory(category: CategoryItem) {

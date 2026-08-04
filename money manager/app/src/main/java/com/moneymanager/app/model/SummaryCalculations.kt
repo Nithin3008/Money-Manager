@@ -12,12 +12,13 @@ internal object SummaryCalculations {
             tx.toAccountId in activeIds
     }
 
+    /**
+     * The accounts the Reports summary is scoped to. An empty set means "All accounts" —
+     * i.e. no filter, so every bank account is included (credit cards are excluded later
+     * by the Bank-type checks in [signedMovement]/[selectedAccounts]).
+     */
     fun activeAccountIds(state: FinanceUiState): Set<Long> {
-        return when {
-            state.summarySelectedAccountIds.isNotEmpty() -> state.summarySelectedAccountIds
-            state.defaultAccountId != null && state.bankAccounts.any { it.id == state.defaultAccountId } -> setOf(state.defaultAccountId)
-            else -> emptySet()
-        }
+        return state.summarySelectedAccountIds
     }
 
     fun selectedAccounts(state: FinanceUiState): List<BankAccount> {
@@ -34,10 +35,12 @@ internal object SummaryCalculations {
     }
 
     fun balanceTransactions(state: FinanceUiState): List<LedgerTransaction> {
+        // Investments are cash that actually left the bank, so they belong in balance
+        // reconstruction (their zero-movement, account-less legacy rows drop out via
+        // signedMovement == 0.0). They stay out of the income/expense/budget metrics elsewhere.
         return state.transactions.filter {
             passesAccountFilter(state, it) &&
-                signedMovement(state, it) != 0.0 &&
-                !state.isInvestmentTransaction(it)
+                signedMovement(state, it) != 0.0
         }
     }
 

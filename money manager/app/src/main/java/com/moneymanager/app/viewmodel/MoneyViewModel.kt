@@ -1534,9 +1534,10 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
     ): LedgerTransaction {
         val state = _uiState.value
         if (state.isInvestmentTransaction(transaction)) {
+            // Keep the source account: investing moves real cash out of that bank. It stays
+            // excludeFromSummary so it never counts as income/expense, only as a cash outflow.
             return transaction.copy(
                 type = TransactionType.Expense,
-                accountId = null,
                 excludeFromSummary = true
             )
         }

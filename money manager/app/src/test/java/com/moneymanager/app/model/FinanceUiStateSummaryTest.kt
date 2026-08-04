@@ -23,9 +23,10 @@ class FinanceUiStateSummaryTest {
     )
 
     @Test
-    fun summaryUsesCalendarMonthDepositsAndExpensesForDefaultAccount() {
+    fun summaryUsesCalendarMonthDepositsAndExpensesForSelectedAccount() {
         val state = state(
             defaultAccountId = bankA.id,
+            summarySelectedAccountIds = setOf(bankA.id),
             transactions = listOf(
                 tx(1, 65_000.0, TransactionType.Income, "2026-04-30", bankA.id, name = "ACME Corp"),
                 tx(2, 16_000.0, TransactionType.Income, "2026-04-12", bankA.id, name = "Refund"),
@@ -60,22 +61,24 @@ class FinanceUiStateSummaryTest {
 
     @Test
     fun currentBalanceUsesOnlySelectedBankAccount() {
-        val defaultState = state(
+        val selectedBankAState = state(
             defaultAccountId = bankA.id,
+            summarySelectedAccountIds = setOf(bankA.id),
             transactions = emptyList()
         )
-        val selectedBankState = state(
+        val selectedBankBState = state(
             defaultAccountId = bankA.id,
             summarySelectedAccountIds = setOf(bankB.id),
             transactions = emptyList()
         )
+        // No selection now means "All accounts", so the anchor spans every bank account.
         val allBanksState = state(
             defaultAccountId = null,
             transactions = emptyList()
         )
 
-        assertEquals(50_000.0, defaultState.currentBalanceAnchor, 0.001)
-        assertEquals(25_000.0, selectedBankState.currentBalanceAnchor, 0.001)
+        assertEquals(50_000.0, selectedBankAState.currentBalanceAnchor, 0.001)
+        assertEquals(25_000.0, selectedBankBState.currentBalanceAnchor, 0.001)
         assertEquals(75_000.0, allBanksState.currentBalanceAnchor, 0.001)
     }
 
@@ -83,6 +86,7 @@ class FinanceUiStateSummaryTest {
     fun bankScopedSummaryExcludesUnmappedTransactions() {
         val state = state(
             defaultAccountId = bankA.id,
+            summarySelectedAccountIds = setOf(bankA.id),
             transactions = listOf(
                 tx(1, 65_000.0, TransactionType.Income, "2026-04-30", bankA.id),
                 tx(2, 50_000.0, TransactionType.Income, "2026-04-15", null),
@@ -128,6 +132,7 @@ class FinanceUiStateSummaryTest {
     fun transferTransactionMovesCashForSelectedBankWithoutIncomeOrExpense() {
         val state = state(
             defaultAccountId = bankA.id,
+            summarySelectedAccountIds = setOf(bankA.id),
             accounts = listOf(bankA.copy(balance = 50_000.0), bankB),
             transactions = listOf(
                 LedgerTransaction(
@@ -155,6 +160,7 @@ class FinanceUiStateSummaryTest {
     fun balanceReconstructionBacktracksFromCurrentBalance() {
         val state = state(
             defaultAccountId = bankA.id,
+            summarySelectedAccountIds = setOf(bankA.id),
             accounts = listOf(bankA.copy(balance = 50_000.0), bankB),
             transactions = listOf(
                 tx(1, 20_000.0, TransactionType.Income, "2026-04-10", bankA.id),
@@ -175,6 +181,7 @@ class FinanceUiStateSummaryTest {
     fun creditCardSpendIsSeparatedFromCashExpenseWithoutMovingBankBalance() {
         val state = state(
             defaultAccountId = bankA.id,
+            summarySelectedAccountIds = setOf(bankA.id),
             accounts = listOf(bankA.copy(balance = 50_000.0), bankB),
             transactions = listOf(
                 tx(1, 2_500.0, TransactionType.Expense, "2026-04-10", bankA.id, creditCard = true),
@@ -265,7 +272,7 @@ class FinanceUiStateSummaryTest {
     }
 
     @Test
-    fun investmentRowsStayOutOfIncomeExpenseAndBankBalance() {
+    fun investmentRowsStayOutOfIncomeAndExpenseButReduceBankBalance() {
         val state = state(
             defaultAccountId = null,
             accounts = listOf(bankA.copy(balance = 50_000.0), bankB),
@@ -286,11 +293,32 @@ class FinanceUiStateSummaryTest {
             )
         )
 
+        // Still never counted as income or spending, and kept in its own bucket...
         assertEquals(0.0, state.monthIncome, 0.001)
         assertEquals(0.0, state.monthExpense, 0.001)
         assertEquals(27_500.0, state.monthInvestment, 0.001)
+        // ...but the cash left the bank, so it drives calendar cashflow and balance reconstruction.
         assertEquals(75_000.0, state.currentBalanceAnchor, 0.001)
+        assertEquals(-27_500.0, state.calendarMonthNet, 0.001)
+        assertEquals(102_500.0, state.balanceAtStartOfSelectedMonth, 0.001)
+        assertEquals(0.0, state.selectedMonthReconciliationGap, 0.001)
+    }
+
+    @Test
+    fun legacyAccountlessInvestmentRowsStayBalanceNeutral() {
+        // Investments created before the account picker have no account, so they must not move
+        // any balance even though they are now included in reconstruction.
+        val state = state(
+            defaultAccountId = null,
+            accounts = listOf(bankA.copy(balance = 50_000.0), bankB),
+            transactions = listOf(
+                tx(1, 12_000.0, TransactionType.Expense, "2026-04-10", accountId = null, categoryId = 6L)
+            )
+        )
+
+        assertEquals(12_000.0, state.monthInvestment, 0.001)
         assertEquals(0.0, state.calendarMonthNet, 0.001)
+        assertEquals(75_000.0, state.balanceAtStartOfSelectedMonth, 0.001)
     }
 
     @Test

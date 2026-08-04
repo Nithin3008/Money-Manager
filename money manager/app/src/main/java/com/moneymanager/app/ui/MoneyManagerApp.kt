@@ -1646,7 +1646,7 @@ private fun AddTransactionSheet(
                     }
                 } else if (mode == AddMoneyMode.Investment) {
                     Text(
-                        "Saved separately from income, spending, budgets, and bank balances.",
+                        "Kept out of income, spending, and budgets — but the cash is deducted from the account you pick below.",
                         color = TextDim,
                         fontSize = 12.5.sp,
                         lineHeight = 18.sp
@@ -1680,7 +1680,7 @@ private fun AddTransactionSheet(
                 }
 
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    if (mode != AddMoneyMode.Transfer && mode != AddMoneyMode.Investment) {
+                    if (mode != AddMoneyMode.Transfer) {
                         AccountTile(state = state, accountId = accountId, onSelect = { accountId = it }, modifier = Modifier.weight(1f))
                     }
                     DateTile(date = selectedDate, onDateSelected = { selectedDate = it }, modifier = Modifier.weight(1f))
@@ -1699,7 +1699,7 @@ private fun AddTransactionSheet(
                     closeSheet {
                         when (mode) {
                             AddMoneyMode.Transfer -> onTransfer(name, parsedAmount, fromAccountId, toAccountId)
-                            AddMoneyMode.Investment -> onSave(name, parsedAmount, TransactionType.Expense, investmentCategoryId, null, notes, timestamp, null)
+                            AddMoneyMode.Investment -> onSave(name, parsedAmount, TransactionType.Expense, investmentCategoryId, accountId, notes, timestamp, null)
                             else -> onSave(name, parsedAmount, transactionType, categoryId, accountId, notes, timestamp, secondaryCategoryId)
                         }
                     }
