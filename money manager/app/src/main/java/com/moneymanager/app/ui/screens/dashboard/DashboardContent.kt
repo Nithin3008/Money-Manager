@@ -26,6 +26,8 @@ import androidx.compose.material.icons.rounded.NorthEast
 import androidx.compose.material.icons.rounded.PieChart
 import androidx.compose.material.icons.rounded.Rule
 import androidx.compose.material.icons.rounded.SouthWest
+import androidx.compose.material.icons.rounded.Visibility
+import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material.icons.rounded.Wallet
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -81,13 +83,14 @@ internal fun LazyListScope.dashboardContent(
     onEditTransaction: (Long) -> Unit,
     onDashboardPageSelected: (Int) -> Unit,
     onDraftPageSelected: (Int) -> Unit,
-    onSeeAllTransactions: () -> Unit = {}
+    onSeeAllTransactions: () -> Unit = {},
+    onToggleStatsHidden: (Boolean) -> Unit = {}
 ) {
     item {
         FintrackBalanceHero(state)
     }
     item {
-        QuickStatGrid(state)
+        QuickStatGrid(state, onToggleStatsHidden)
     }
     if (state.todayDetectedDrafts.isNotEmpty()) {
         item {
@@ -229,22 +232,49 @@ private fun FintrackBalanceHero(state: FinanceUiState) {
     }
 }
 
+private const val MASKED_STAT = "••••"
+
 @Composable
-private fun QuickStatGrid(state: FinanceUiState) {
-    val invested = remember(state.transactions, state.categories, state.currency) {
-        compactMoney(state.investmentTotalFor(YearMonth.now()), state.currency)
+private fun QuickStatGrid(state: FinanceUiState, onToggleStatsHidden: (Boolean) -> Unit) {
+    val masked = state.hideDashboardStats
+    val invested = remember(state.transactions, state.categories, state.currency, masked) {
+        if (masked) MASKED_STAT else compactMoney(state.investmentTotalFor(YearMonth.now()), state.currency)
     }
-    val ccSpend = remember(state.transactions, state.currency) {
-        compactMoney(state.creditCardSpendTotalFor(YearMonth.now()), state.currency)
+    val ccSpend = remember(state.transactions, state.currency, masked) {
+        if (masked) MASKED_STAT else compactMoney(state.creditCardSpendTotalFor(YearMonth.now()), state.currency)
     }
+    val ccOutstanding = if (masked) MASKED_STAT else compactMoney(state.creditCardOutstanding, state.currency)
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "THIS MONTH",
+                color = TextDim,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 0.4.sp,
+                modifier = Modifier.weight(1f)
+            )
+            Icon(
+                if (masked) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
+                contentDescription = if (masked) "Show amounts" else "Hide amounts",
+                tint = TextDim,
+                modifier = Modifier
+                    .size(28.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable { onToggleStatsHidden(!masked) }
+                    .padding(5.dp)
+            )
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             QuickStatTile(Icons.Rounded.CreditCard, ccSpend, "CC spend · month", Modifier.weight(1f))
             QuickStatTile(Icons.Rounded.PieChart, state.activeBudgets.size.toString(), "Budgets", Modifier.weight(1f))
         }
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             QuickStatTile(Icons.AutoMirrored.Rounded.TrendingUp, invested, "Invested · month", Modifier.weight(1f))
-            QuickStatTile(Icons.Rounded.AccountBalanceWallet, compactMoney(state.creditCardOutstanding, state.currency), "CC outstanding", Modifier.weight(1f))
+            QuickStatTile(Icons.Rounded.AccountBalanceWallet, ccOutstanding, "CC outstanding", Modifier.weight(1f))
         }
     }
 }

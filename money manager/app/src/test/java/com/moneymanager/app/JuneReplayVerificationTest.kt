@@ -165,15 +165,15 @@ class JuneReplayVerificationTest {
             assertTrue(rows.any { it.counterparty == "GANESH D BHAT" && it.type == TransactionType.Income })
             assertTrue(rows.any { it.counterparty == "TEJA S N" && it.type == TransactionType.Income })
             assertTrue(rows.any { it.counterparty == "FUTUREOL PRIVAT" && it.type == TransactionType.Expense })
-            // RD auto-debit is a transfer-review, forex needs review as expense
-            assertTrue(reviews.any { it.debit.counterparty == "RD/FD Deposit" })
+            // RD auto-debit is a plain categorizable expense now (not a transfer); forex needs review
+            assertTrue(rows.any { it.counterparty == "RD/FD Deposit" && it.type == TransactionType.Expense })
             assertTrue(rows.any { it.counterparty == "Foreign Remittance" && it.requiresUserReview })
             // ordinary income/expense survives untouched
             assertTrue(rows.any { "HEMALATHA PONN" in it.counterparty && it.type == TransactionType.Expense })
             assertTrue(rows.any { it.amount == 64_629.0 && it.type == TransactionType.Income })
             // bank interest stays income, never a transfer leg
             assertTrue(rows.any { it.amount == 414.0 && it.type == TransactionType.Income })
-            assertEquals(2, reviews.size) // cc bill payment (card ambiguous) + RD deposit only
+            assertEquals(1, reviews.size) // cc bill payment (card ambiguous) only; RD is now a normal expense row
         } finally {
             TransactionMessageParser.selfName = null
         }

@@ -10,6 +10,7 @@ import com.moneymanager.app.model.DetectedTransactionDraft
 import com.moneymanager.app.model.FinanceUiState
 import com.moneymanager.app.model.LedgerTransaction
 import com.moneymanager.app.model.MoneyIcons
+import com.moneymanager.app.model.ScreenTab
 import com.moneymanager.app.model.ThemeMode
 import com.moneymanager.app.model.TransactionType
 import com.moneymanager.app.model.UiAccent
@@ -34,7 +35,9 @@ internal fun FinanceUiState.toSettingsEntity(): UserSettingsEntity = UserSetting
     // Cap so years of deletions cannot grow the row unbounded; oldest keys age out first,
     // and their SMS are far outside any future catch-up scan window anyway.
     dismissedSmsKeys = dismissedSmsKeys.toList().takeLast(2000).joinToString("\n"),
-    paletteHexCsv = paletteColors.joinToString(",")
+    paletteHexCsv = paletteColors.joinToString(","),
+    hiddenNavTabsCsv = hiddenNavTabs.joinToString(",") { it.name },
+    hideDashboardStats = hideDashboardStats
 )
 
 internal fun UserSettingsEntity.applyTo(current: FinanceUiState): FinanceUiState {
@@ -71,7 +74,12 @@ internal fun UserSettingsEntity.applyTo(current: FinanceUiState): FinanceUiState
             .split(",")
             .map { it.trim() }
             .filter { it.isNotBlank() }
-            .ifEmpty { ColorLibrary.defaultPalette }
+            .ifEmpty { ColorLibrary.defaultPalette },
+        hiddenNavTabs = hiddenNavTabsCsv
+            .split(",")
+            .mapNotNull { name -> ScreenTab.entries.firstOrNull { it.name == name.trim() } }
+            .toSet(),
+        hideDashboardStats = hideDashboardStats
     )
 }
 

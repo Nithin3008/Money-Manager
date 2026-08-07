@@ -246,6 +246,10 @@ data class FinanceUiState(
     /** Shared color library backing both the accent picker and category colors. */
     val paletteColors: List<String> = ColorLibrary.defaultPalette,
     val uiSurface: UiSurface = UiSurface.Midnight,
+    /** Tabs the user removed from the bottom bar; Home and Profile can never be hidden. */
+    val hiddenNavTabs: Set<ScreenTab> = emptySet(),
+    /** Masks the money figures in the home-screen quick stats (CC spend/outstanding, invested). */
+    val hideDashboardStats: Boolean = false,
     val selectedTab: ScreenTab = ScreenTab.Dashboard,
     val selectedMonth: YearMonth = YearMonth.now(),
     val accounts: List<BankAccount> = emptyList(),

@@ -104,9 +104,11 @@ object TransactionMessageParser {
         val isCreditCardTransaction = SmsTransactionNormalizer.isCreditCardSpend(normalized) ||
             SmsTransactionNormalizer.isCreditCardRefund(normalized)
         val isCreditCardBillPayment = SmsTransactionNormalizer.isCreditCardBillPaymentDebit(normalized)
+        // A recurring/fixed-deposit auto-debit is real money leaving the bank into a deposit the
+        // user thinks of as an investment, not a self-transfer between tracked accounts. Keep the
+        // "RD/FD Deposit" label but leave it a normal, categorizable expense (often "Investment").
         val isOwnDepositDebit = ownDepositAutoDebitRegex.containsMatchIn(normalized)
         val baseInternalTransfer = isCreditCardBillPayment ||
-            isOwnDepositDebit ||
             looksLikeInternalTransferMessage(normalized)
 
         val senderLabel = sender?.let(::bankNameFromSender)

@@ -28,7 +28,11 @@ data class UserSettingsEntity(
     val uiSurface: String = "Midnight",
     val defaultAccountId: Long? = null,
     /** Shared color library, comma-separated "#RRGGBB"; empty until first seeded. */
-    val paletteHexCsv: String = ""
+    val paletteHexCsv: String = "",
+    /** Comma-separated ScreenTab names the user removed from the bottom bar. */
+    val hiddenNavTabsCsv: String = "",
+    /** Masks the money figures in the home-screen quick stats (CC spend/outstanding, invested). */
+    val hideDashboardStats: Boolean = false
 )
 
 @Entity(tableName = "accounts")

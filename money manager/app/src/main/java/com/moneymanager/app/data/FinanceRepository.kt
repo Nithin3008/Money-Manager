@@ -1,6 +1,9 @@
 package com.moneymanager.app.data
 
 import com.google.gson.Gson
+import com.google.gson.Strictness
+import com.google.gson.stream.JsonReader
+import java.io.StringReader
 import com.moneymanager.app.model.AccountType
 import com.moneymanager.app.model.AppBackupData
 import com.moneymanager.app.model.BankAccount
@@ -267,14 +270,17 @@ class FinanceRepository(private val dao: FinanceDao) {
             accounts = dao.getAccounts(),
             categories = dao.getCategories(),
             transactions = dao.getTransactions(),
-            budgets = dao.getBudgets()
+            budgets = dao.getBudgets(),
+            drafts = dao.getDrafts()
         )
         return Gson().toJson(data)
     }
 
     suspend fun importData(jsonString: String) {
-        val data = Gson().fromJson(jsonString, AppBackupData::class.java)
+        // Parse and validate before touching the database, so a bad file never wipes data.
+        val data = parseBackup(jsonString)
 
+        dao.deleteDrafts()
         dao.deleteTransactions()
         dao.deleteBudgets()
         dao.deleteAccounts()
@@ -286,6 +292,34 @@ class FinanceRepository(private val dao: FinanceDao) {
         data.categories.forEach { dao.saveCategory(it) }
         data.transactions.forEach { dao.saveTransaction(it) }
         data.budgets.forEach { dao.saveBudget(it) }
+        data.drafts.forEach { dao.saveDraft(it) }
+    }
+
+    private fun parseBackup(jsonString: String): AppBackupData {
+        val raw = try {
+            Gson().fromJson(jsonString, AppBackupData::class.java)
+        } catch (e: Exception) {
+            // Files overwritten through SAF without truncation can carry trailing bytes after
+            // the JSON object; a lenient reader still recovers the leading object.
+            val reader = JsonReader(StringReader(jsonString)).apply { strictness = Strictness.LENIENT }
+            Gson().fromJson<AppBackupData>(reader, AppBackupData::class.java)
+        } ?: throw IllegalArgumentException("This file is not a Money Manager backup")
+        // Gson bypasses constructors for shapes it can't match, so guard non-null fields.
+        @Suppress("USELESS_ELVIS")
+        val data = AppBackupData(
+            version = raw.version,
+            settings = raw.settings,
+            accounts = raw.accounts ?: emptyList(),
+            categories = raw.categories ?: emptyList(),
+            transactions = raw.transactions ?: emptyList(),
+            budgets = raw.budgets ?: emptyList(),
+            drafts = raw.drafts ?: emptyList()
+        )
+        require(
+            data.settings != null || data.accounts.isNotEmpty() ||
+                data.categories.isNotEmpty() || data.transactions.isNotEmpty()
+        ) { "This file is not a Money Manager backup" }
+        return data
     }
 
     private suspend fun seedDefaultCategories() {

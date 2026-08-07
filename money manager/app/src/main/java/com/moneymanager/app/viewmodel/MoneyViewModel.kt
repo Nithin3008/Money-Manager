@@ -224,6 +224,28 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun setNavTabHidden(tab: ScreenTab, hidden: Boolean) {
+        // Home and Profile stay pinned so the app is always navigable.
+        if (tab == ScreenTab.Dashboard || tab == ScreenTab.Settings) return
+        viewModelScope.launch {
+            val current = _uiState.value
+            val next = current.copy(
+                hiddenNavTabs = if (hidden) current.hiddenNavTabs + tab else current.hiddenNavTabs - tab,
+                selectedTab = if (hidden && current.selectedTab == tab) ScreenTab.Dashboard else current.selectedTab
+            )
+            repository.persistUserSettings(next)
+            _uiState.value = next
+        }
+    }
+
+    fun setDashboardStatsHidden(hidden: Boolean) {
+        viewModelScope.launch {
+            val next = _uiState.value.copy(hideDashboardStats = hidden)
+            repository.persistUserSettings(next)
+            _uiState.value = next
+        }
+    }
+
     fun selectUiSurface(uiSurface: UiSurface) {
         viewModelScope.launch {
             val next = _uiState.value.copy(uiSurface = uiSurface)
@@ -1387,15 +1409,10 @@ class MoneyViewModel(application: Application) : AndroidViewModel(application) {
         return repository.exportData()
     }
 
-    fun importData(jsonString: String) {
-        viewModelScope.launch {
-            try {
-                repository.importData(jsonString)
-                reloadState()
-            } catch (e: Exception) {
-                // handle error or add to a state error message
-            }
-        }
+    /** Throws when the file isn't a valid backup so the caller can tell the user. */
+    suspend fun importBackup(jsonString: String) {
+        repository.importData(jsonString)
+        reloadState()
     }
 
     private suspend fun applyTransactionBalanceMovement(

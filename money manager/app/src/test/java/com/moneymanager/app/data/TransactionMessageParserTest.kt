@@ -229,7 +229,7 @@ class TransactionMessageParserTest {
     }
 
     @Test
-    fun rdAutoDebitIsInternalTransferWithCleanCounterparty() {
+    fun rdAutoDebitIsCategorizableExpenseNotInternalTransfer() {
         val parsed = TransactionMessageParser.parse(
             message = "ICICI Bank Acc XX317 debited Rs. 6,000.00 on 05-Jun-26 InfoTo RD Ac no 7.Avl Bal Rs. 9,680.34.To dispute call 18002662 or SMS BLOCK 317 to 9215676766",
             transactionTimestampMillis = millis("2026-06-06"),
@@ -240,9 +240,10 @@ class TransactionMessageParserTest {
         requireNotNull(parsed)
         assertEquals(TransactionType.Expense, parsed.type)
         assertEquals(6_000.0, parsed.amount, 0.001)
+        // Keeps the descriptive name, but is a plain expense the user can tag (e.g. Investment).
         assertEquals("RD/FD Deposit", parsed.counterparty)
-        assertTrue(parsed.isInternalTransfer)
-        assertTrue(parsed.excludeFromSummary)
+        assertFalse(parsed.isInternalTransfer)
+        assertFalse(parsed.excludeFromSummary)
     }
 
     @Test

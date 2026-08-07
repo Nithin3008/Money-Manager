@@ -1,5 +1,6 @@
 package com.moneymanager.app.ui
 
+import android.widget.Toast
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.SizeTransform
@@ -222,11 +223,18 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
             scope.launch {
                 try {
                     val json = viewModel.getExportData()
-                    context.contentResolver.openOutputStream(uri)?.use { 
-                        it.write(json.toByteArray()) 
-                    }
+                    // "wt" truncates when overwriting an existing backup; plain "w" can leave
+                    // stale trailing bytes on some providers, corrupting the file. Not every
+                    // provider accepts "wt", so fall back to "w".
+                    val stream = try {
+                        context.contentResolver.openOutputStream(uri, "wt")
+                    } catch (e: Exception) {
+                        context.contentResolver.openOutputStream(uri)
+                    } ?: throw IllegalStateException("Could not open the selected file")
+                    stream.use { it.write(json.toByteArray()) }
+                    Toast.makeText(context, "Backup exported", Toast.LENGTH_LONG).show()
                 } catch (e: Exception) {
-                    // Ignore
+                    Toast.makeText(context, "Export failed: ${e.message}", Toast.LENGTH_LONG).show()
                 }
             }
         }
@@ -239,11 +247,11 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
             scope.launch {
                 try {
                     val json = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
-                    if (json != null) {
-                        viewModel.importData(json)
-                    }
+                        ?: throw IllegalStateException("Could not read the selected file")
+                    viewModel.importBackup(json)
+                    Toast.makeText(context, "Backup restored", Toast.LENGTH_LONG).show()
                 } catch (e: Exception) {
-                    // Ignore
+                    Toast.makeText(context, "Restore failed: ${e.message}", Toast.LENGTH_LONG).show()
                 }
             }
         }
@@ -255,7 +263,12 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
     }
 
     if (!state.hasCompletedRegistration) {
-        RegistrationScreen(onComplete = viewModel::completeRegistration)
+        // A restored backup carries the user name, which is what flips
+        // hasCompletedRegistration — so a successful import skips onboarding entirely.
+        RegistrationScreen(
+            onComplete = viewModel::completeRegistration,
+            onRestoreBackup = { importLauncher.launch(arrayOf("*/*")) }
+        )
         return
     }
 
@@ -276,6 +289,7 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
         bottomBar = {
             BottomNavigation(
                 selectedTab = state.selectedTab,
+                hiddenTabs = state.hiddenNavTabs,
                 onTabSelected = viewModel::selectTab
             )
         },
@@ -346,7 +360,8 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
                         onEditTransaction = viewModel::requestEditTransactionCategory,
                         onDashboardPageSelected = viewModel::selectDashboardTransactionPage,
                         onDraftPageSelected = viewModel::selectDashboardDraftPage,
-                        onSeeAllTransactions = { viewModel.selectTab(ScreenTab.Activity) }
+                        onSeeAllTransactions = { viewModel.selectTab(ScreenTab.Activity) },
+                        onToggleStatsHidden = viewModel::setDashboardStatsHidden
                     )
                     ScreenTab.Activity -> activityContent(
                         state = state,
@@ -386,8 +401,12 @@ fun MoneyManagerApp(viewModel: MoneyViewModel) {
                         onUpdateCategory = viewModel::updateCategory,
                         onDeleteAllData = viewModel::deleteAllSavedData,
                         onExportData = { exportLauncher.launch("MoneyManager_Backup_${LocalDate.now()}.json") },
-                        onImportData = { importLauncher.launch(arrayOf("application/json")) },
-                        onExportSmsDebug = viewModel::exportPreviousMonthSmsDebug
+                        // Backups forwarded via Drive/WhatsApp/downloads often lose the JSON mime
+                        // type and would be greyed out under a strict filter; import validates
+                        // the content anyway, so accept any file.
+                        onImportData = { importLauncher.launch(arrayOf("*/*")) },
+                        onExportSmsDebug = viewModel::exportPreviousMonthSmsDebug,
+                        onNavTabToggled = viewModel::setNavTabHidden
                     )
                 }
             }
@@ -603,7 +622,8 @@ private fun androidx.compose.foundation.lazy.LazyListScope.settingsContent(
     onDeleteAllData: () -> Unit,
     onExportData: () -> Unit,
     onImportData: () -> Unit,
-    onExportSmsDebug: () -> Unit
+    onExportSmsDebug: () -> Unit,
+    onNavTabToggled: (ScreenTab, Boolean) -> Unit
 ) {
     item {
         ProfileScreen(
@@ -626,7 +646,8 @@ private fun androidx.compose.foundation.lazy.LazyListScope.settingsContent(
             onDeleteAllData = onDeleteAllData,
             onExportData = onExportData,
             onImportData = onImportData,
-            onExportSmsDebug = onExportSmsDebug
+            onExportSmsDebug = onExportSmsDebug,
+            onNavTabToggled = onNavTabToggled
         )
     }
 }
@@ -660,7 +681,8 @@ private fun ProfileScreen(
     onDeleteAllData: () -> Unit,
     onExportData: () -> Unit,
     onImportData: () -> Unit,
-    onExportSmsDebug: () -> Unit
+    onExportSmsDebug: () -> Unit,
+    onNavTabToggled: (ScreenTab, Boolean) -> Unit
 ) {
     var detail by remember { mutableStateOf<SettingsDetail?>(null) }
     var showCategories by remember { mutableStateOf(false) }
@@ -700,6 +722,21 @@ private fun ProfileScreen(
             onOpenSurface = { detail = SettingsDetail.Surface },
             onOpenColors = { showColorLibrary = true }
         )
+
+        SettingsSectionLabel("Navigation")
+        SettingsCard {
+            val hideableTabs = listOf(ScreenTab.Activity, ScreenTab.Budget, ScreenTab.Summary)
+            hideableTabs.forEachIndexed { index, tab ->
+                SettingsToggleRow(
+                    icon = tab.icon,
+                    label = "${tab.label} tab",
+                    subtitle = if (tab in state.hiddenNavTabs) "Hidden from the bottom bar" else "Shown in the bottom bar",
+                    checked = tab !in state.hiddenNavTabs,
+                    onCheckedChange = { shown -> onNavTabToggled(tab, !shown) },
+                    showDivider = index != hideableTabs.lastIndex
+                )
+            }
+        }
 
         SettingsSectionLabel("Data")
         SettingsCard {
@@ -1140,7 +1177,10 @@ private fun DeleteDataPanel(onDeleteAllData: () -> Unit) {
 }
 
 @Composable
-private fun RegistrationScreen(onComplete: (String, List<RegistrationAccountInput>, Int) -> Unit) {
+private fun RegistrationScreen(
+    onComplete: (String, List<RegistrationAccountInput>, Int) -> Unit,
+    onRestoreBackup: () -> Unit
+) {
     var name by remember { mutableStateOf("") }
     val accounts = remember { mutableStateListOf(AccountDraft()) }
     var defaultAccountIndex by remember { mutableStateOf(0) }
@@ -1203,6 +1243,39 @@ private fun RegistrationScreen(onComplete: (String, List<RegistrationAccountInpu
                     lineHeight = 22.sp,
                     modifier = Modifier.padding(top = 10.dp)
                 )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 18.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Navy850)
+                        .clickable(onClick = onRestoreBackup)
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Icon(Icons.Rounded.FileDownload, contentDescription = null, tint = PrimaryBlue, modifier = Modifier.size(22.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            "Reinstalling? Restore your data",
+                            color = TextPrimary,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            "Import a Money Manager backup file and skip this setup.",
+                            color = TextDim,
+                            fontSize = 12.sp,
+                            lineHeight = 17.sp
+                        )
+                    }
+                    Icon(
+                        Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+                        contentDescription = null,
+                        tint = TextDim,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
             }
             item {
                 Text(
@@ -4495,7 +4568,11 @@ private fun AddModeChip(mode: AddMoneyMode, selected: Boolean, enabled: Boolean,
 }
 
 @Composable
-private fun BottomNavigation(selectedTab: ScreenTab, onTabSelected: (ScreenTab) -> Unit) {
+private fun BottomNavigation(
+    selectedTab: ScreenTab,
+    hiddenTabs: Set<ScreenTab>,
+    onTabSelected: (ScreenTab) -> Unit
+) {
     Card(
         modifier = Modifier
             .navigationBarsPadding()
@@ -4510,7 +4587,7 @@ private fun BottomNavigation(selectedTab: ScreenTab, onTabSelected: (ScreenTab) 
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            ScreenTab.entries.forEach { tab ->
+            ScreenTab.entries.filter { it !in hiddenTabs }.forEach { tab ->
                 val selected = selectedTab == tab
                 val pillWidth by animateFloatAsState(
                     targetValue = if (selected) 52f else 30f,
