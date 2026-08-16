@@ -40,13 +40,11 @@ import com.moneymanager.app.model.MessageScanRange
 import com.moneymanager.app.ui.theme.LossRed
 import com.moneymanager.app.ui.theme.Navy900
 import com.moneymanager.app.ui.theme.Navy850
-import com.moneymanager.app.ui.theme.Navy950
 import com.moneymanager.app.ui.theme.PrimaryBlue
 import com.moneymanager.app.ui.theme.TextMuted
 import com.moneymanager.app.ui.theme.TextPrimary
 import java.time.LocalDate
 import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 
 @Composable
 fun MessageScanPanel(onScan: (MessageScanRange, LocalDate, LocalDate) -> Unit) {
@@ -56,26 +54,25 @@ fun MessageScanPanel(onScan: (MessageScanRange, LocalDate, LocalDate) -> Unit) {
     var endDate by remember { mutableStateOf(today) }
     var showStartPicker by remember { mutableStateOf(false) }
     var showEndPicker by remember { mutableStateOf(false) }
-    val formatter = DateTimeFormatter.ofPattern("MMM d, yyyy")
     val isCustomValid = selectedRange != MessageScanRange.Custom || !startDate.isAfter(endDate)
     val buttonLabel = when (selectedRange) {
-        MessageScanRange.Today -> "Scan Today"
-        MessageScanRange.Yesterday -> "Scan Yesterday"
-        MessageScanRange.Week -> "Scan Last 7 Days"
-        MessageScanRange.Custom -> "Scan Range"
+        MessageScanRange.Today -> "Update Today"
+        MessageScanRange.Yesterday -> "Update Yesterday"
+        MessageScanRange.Week -> "Update Last 7 Days"
+        MessageScanRange.Custom -> "Update Range"
     }
 
-    val dark = Navy950 == Color(0xFF000000)
+    val dark = isDarkTheme()
 
     Card(
         modifier = Modifier
             .fillMaxWidth(),
-        shape = RoundedCornerShape(if (dark) 16.dp else 10.dp),
+        shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = Navy850),
         border = BorderStroke(1.dp, if (dark) Color(0xFF33363D) else Color(0xFFC9CEDD))
     ) {
         Column(Modifier.padding(16.dp)) {
-            Text("Message Scanner", fontWeight = FontWeight.Bold, color = TextPrimary, fontSize = 16.sp)
+            Text("Manual Update", fontWeight = FontWeight.Bold, color = TextPrimary, fontSize = 16.sp)
             Spacer(modifier = Modifier.height(12.dp))
             Row(
                 modifier = Modifier
@@ -89,8 +86,8 @@ fun MessageScanPanel(onScan: (MessageScanRange, LocalDate, LocalDate) -> Unit) {
                         onClick = { selectedRange = range },
                         label = { Text(range.label) },
                         colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = if (dark) PrimaryBlue else Color(0xFFEAF2FF),
-                            selectedLabelColor = if (dark) Color(0xFF001A42) else PrimaryBlue,
+                            selectedContainerColor = PrimaryBlue,
+                            selectedLabelColor = primaryContentColor(),
                             containerColor = if (dark) Navy900 else Color.White,
                             labelColor = TextMuted
                         )
@@ -106,7 +103,7 @@ fun MessageScanPanel(onScan: (MessageScanRange, LocalDate, LocalDate) -> Unit) {
                     ) {
                         Icon(Icons.Rounded.CalendarMonth, contentDescription = null)
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Start: ${formatter.format(startDate)}")
+                        Text("Start: ${startDate.mediumDateLabel()}")
                     }
                     OutlinedButton(
                         onClick = { showEndPicker = true },
@@ -114,7 +111,7 @@ fun MessageScanPanel(onScan: (MessageScanRange, LocalDate, LocalDate) -> Unit) {
                     ) {
                         Icon(Icons.Rounded.CalendarMonth, contentDescription = null)
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("End: ${formatter.format(endDate)}")
+                        Text("End: ${endDate.mediumDateLabel()}")
                     }
                 }
                 if (!isCustomValid) {
@@ -130,7 +127,7 @@ fun MessageScanPanel(onScan: (MessageScanRange, LocalDate, LocalDate) -> Unit) {
                 shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = PrimaryBlue,
-                    contentColor = if (dark) Color(0xFF001A42) else Color.White
+                    contentColor = primaryContentColor()
                 )
             ) {
                 Text(buttonLabel, fontWeight = FontWeight.Bold)

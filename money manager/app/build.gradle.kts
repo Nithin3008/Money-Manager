@@ -13,8 +13,10 @@ android {
         applicationId = "com.moneymanager.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
+        manifestPlaceholders["appLabel"] = "Money Manager"
+        manifestPlaceholders["transactionDetectionLabel"] = "Money Manager Transaction Detection"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -24,11 +26,15 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            // Debug-signed so the R8-optimized build can be sideloaded during development;
+            // replace with a real signing config before any store distribution.
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 
@@ -43,6 +49,13 @@ android {
 
     buildFeatures {
         compose = true
+    }
+
+    lint {
+        // The lintVital task crashes on this AGP/JDK combo with an internal
+        // "Already disposed: MessageBus" error. Lint still runs via the standalone
+        // `lint` task; this only stops the crash from blocking release builds.
+        checkReleaseBuilds = false
     }
 }
 
@@ -67,6 +80,10 @@ dependencies {
     implementation("androidx.room:room-runtime:2.6.1")
     implementation("androidx.room:room-ktx:2.6.1")
     ksp("androidx.room:room-compiler:2.6.1")
+
+    implementation("com.google.code.gson:gson:2.14.0")
+
+    implementation("androidx.glance:glance-appwidget:1.1.1")
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 

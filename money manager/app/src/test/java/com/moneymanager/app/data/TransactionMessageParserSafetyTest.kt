@@ -1,0 +1,131 @@
+package com.moneymanager.app.data
+
+import com.moneymanager.app.model.TransactionType
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class TransactionMessageParserSafetyTest {
+    @Test
+    fun creditCardUpiMerchantDoesNotIncludeDisputeText() {
+        val message = "ICICI Bank Credit Card XX1003 debited for INR 250.00 on 11-Jun-26 for UPI-135909178578-AMAR SER. To dispute call 18001080/SMS BLOCK 1003 to 9215676766"
+
+        val parsed = TransactionMessageParser.parse(
+            message = message,
+            transactionTimestampMillis = 1_000L,
+            sender = "ICICI"
+        )
+
+        assertTrue(SmsTransactionNormalizer.isCreditCardSpend(message))
+        assertTrue(parsed != null)
+        assertTrue(parsed?.isCreditCardTransaction ?: false)
+        assertEquals(TransactionType.Expense, parsed?.type)
+        assertEquals("ICICI CARD 1003", parsed?.bankName)
+        assertEquals("AMAR SER", parsed?.counterparty)
+    }
+
+    @Test
+    fun creditCardOtpSmsIsIgnored() {
+        val message = "123456 is the OTP for txn of Rs.12171.00 at AMAZON on your HDFC Bank Credit Card xx4321. " +
+            "Valid till 13:45. Do not share OTP with anyone."
+
+        val parsed = TransactionMessageParser.parse(
+            message = message,
+            transactionTimestampMillis = 1_000L,
+            sender = "HDFC"
+        )
+
+        assertTrue(SmsTransactionNormalizer.isOtpVerificationArtifact(message))
+        assertTrue(parsed == null)
+    }
+
+    @Test
+    fun realWorldCreditCardOtpSmsIsIgnored() {
+        val message = "890876 is One-Time Password for INR 12171.92 transaction towards HDFC ERGO G " +
+            "using ICICI Bank Credit Card XX0006. OTPs are SECRET. DO NOT disclose"
+
+        val parsed = TransactionMessageParser.parse(
+            message = message,
+            transactionTimestampMillis = 1_000L,
+            sender = "ICICI"
+        )
+
+        assertTrue(SmsTransactionNormalizer.isOtpVerificationArtifact(message))
+        assertTrue(parsed == null)
+    }
+
+    @Test
+    fun otpSmsWithoutAnyBankNameIsIgnored() {
+        val message = "456789 is your One Time Password for a purchase of Rs.2,500.00 on your card ending 9876. " +
+            "Valid for 10 minutes. Do not share it with anyone."
+
+        val parsed = TransactionMessageParser.parse(
+            message = message,
+            transactionTimestampMillis = 1_000L,
+            sender = "AX-UNKNWN"
+        )
+
+        assertTrue(SmsTransactionNormalizer.isOtpVerificationArtifact(message))
+        assertTrue(parsed == null)
+    }
+
+    @Test
+    fun otpSmsWithFutureDebitWordingIsIgnored() {
+        val message = "Use OTP 111222 to complete payment of Rs.12171.00 at FLIPKART. " +
+            "Amount will be debited from your ICICI Bank Credit Card XX1003."
+
+        val parsed = TransactionMessageParser.parse(
+            message = message,
+            transactionTimestampMillis = 1_000L,
+            sender = "ICICI"
+        )
+
+        assertTrue(SmsTransactionNormalizer.isOtpVerificationArtifact(message))
+        assertTrue(parsed == null)
+    }
+
+    @Test
+    fun spendAlertWarningAboutOtpSharingIsStillParsed() {
+        val message = "You've spent Rs.12171.00 on HDFC Bank Credit Card xx4321 at AMAZON on 14-Jul-26. " +
+            "Never share OTP/CVV/PIN with anyone."
+
+        val parsed = TransactionMessageParser.parse(
+            message = message,
+            transactionTimestampMillis = 1_000L,
+            sender = "HDFC"
+        )
+
+        assertTrue(!SmsTransactionNormalizer.isOtpVerificationArtifact(message))
+        assertTrue(parsed != null)
+        assertEquals(TransactionType.Expense, parsed?.type)
+        assertTrue(parsed?.isCreditCardTransaction ?: false)
+    }
+
+    @Test
+    fun cardSpendLabelCarriesCardNumberFromLowercaseSingleXFormat() {
+        val message = "Rs.1748 spent on HDFC Bank Card x0887 at PYU*FSN ECOMMERCE VENT on 2026-07-18:17:49:01. " +
+            "Not U? To Block & Reissue Call 18002586161/SMS BLOCK CC 0887 to 7308080808"
+
+        val parsed = TransactionMessageParser.parse(
+            message = message,
+            transactionTimestampMillis = 1_000L,
+            sender = "HDFCBK"
+        )
+
+        assertTrue(parsed?.isCreditCardTransaction ?: false)
+        // The stored label must include the card number so it resolves to the right HDFC card.
+        assertEquals("HDFC CARD 0887", parsed?.bankName)
+    }
+
+    @Test
+    fun failedTransactionSmsIsIgnored() {
+        val parsed = TransactionMessageParser.parse(
+            message = "Rs.1250 transaction failed on your HDFC card ending 4321 at AMAZON",
+            transactionTimestampMillis = 1_000L,
+            sender = "HDFC"
+        )
+
+        assertTrue(SmsTransactionNormalizer.isFailedTransactionArtifact("Rs.1250 transaction failed on your card"))
+        assertTrue(parsed == null)
+    }
+}

@@ -1,0 +1,471 @@
+package com.moneymanager.app.data
+
+import com.moneymanager.app.model.TransactionType
+import kotlin.math.abs
+
+/** Joins the raw SMS texts of the legs stored together on one transfer row. */
+internal const val PAIRED_TRANSFER_SMS_DELIMITER = "\n--- paired transfer sms ---\n"
+
+/**
+ * Post-parse filtering for SMS imports: drops paired transfer/CC-leg duplicates before DB insert.
+ */
+object SmsTransactionNormalizer {
+
+    private const val PAIR_WINDOW_MS = 8 * 60 * 1000L
+    private const val EXTENDED_PAIR_WINDOW_MS = 24 * 60 * 60 * 1000L
+    private const val AMOUNT_EPSILON = 0.02
+
+    fun filterImportBatch(messages: List<ParsedTransactionMessage>): List<ParsedTransactionMessage> {
+        val withoutCardArtifacts = messages.filterNot { isNonLedgerTransactionArtifact(it.rawMessage, it.type) }
+        if (withoutCardArtifacts.size <= 1) return withoutCardArtifacts
+        val sorted = withoutCardArtifacts.sortedBy { it.transactionTimestampMillis }
+        val normalized = sorted.toMutableList()
+        val droppedIndices = mutableSetOf<Int>()
+
+        for (i in sorted.indices) {
+            if (i in droppedIndices) continue
+            val a = normalized[i]
+            for (j in i + 1 until sorted.size) {
+                if (j in droppedIndices) continue
+                val b = normalized[j]
+                val gap = b.transactionTimestampMillis - a.transactionTimestampMillis
+                if (gap > EXTENDED_PAIR_WINDOW_MS) break
+                // Self-marked legs may pair across the extended window (SMS delivery can lag
+                // between banks); everything else keeps the tight window.
+                val withinBaseWindow = gap <= PAIR_WINDOW_MS
+                val withinSelfWindow = withinBaseWindow || a.isInternalTransfer || b.isInternalTransfer
+                if (sameAmount(a.amount, b.amount) && a.type != b.type) {
+                    when {
+                        withinBaseWindow && looksLikeCreditCardBillPair(a, b) -> {
+                            val dropIncomeIdx = if (a.type == TransactionType.Income) i else j
+                            droppedIndices.add(dropIncomeIdx)
+                        }
+                        withinSelfWindow && looksLikeInternalTransfer(a, b) -> {
+                            normalized[i] = a.asInternalTransfer()
+                            normalized[j] = b.asInternalTransfer()
+                        }
+                    }
+                }
+            }
+        }
+
+        return normalized.filterIndexed { idx, msg ->
+            idx !in droppedIndices && !isNonLedgerTransactionArtifact(msg.rawMessage, msg.type)
+        }
+    }
+
+    fun isNonLedgerTransactionArtifact(rawMessage: String?, type: TransactionType): Boolean {
+        if (type == TransactionType.Transfer) return false
+        return isFailedTransactionArtifact(rawMessage) ||
+            isOtpVerificationArtifact(rawMessage) ||
+            isCreditCardRepaymentArtifact(rawMessage, type) ||
+            isCreditCardSettlementArtifact(rawMessage) ||
+            isCreditCardStatementArtifact(rawMessage) ||
+            isCreditCardDueReminder(rawMessage) ||
+            isPaymentAppCardConfirmation(rawMessage)
+    }
+
+    /**
+     * OTP prompts sent before a card/net-banking transaction completes ("123456 is the OTP
+     * for txn of Rs.12171.00 at MERCHANT on your Credit Card XX1234"). They quote the amount
+     * and card, so they parse like a spend, but no money has moved yet — the bank sends a
+     * separate success alert with a completed verb (debited/spent/credited). Success alerts
+     * that merely warn "never share OTP/PIN" carry such a verb and are deliberately kept.
+     */
+    fun isOtpVerificationArtifact(rawMessage: String?): Boolean {
+        val raw = rawMessage?.lowercase().orEmpty()
+        if (raw.isBlank()) return false
+        val hasOtpWord = listOf(
+            "otp",
+            "one time password",
+            "one-time password",
+            "onetime password",
+            "verification code",
+            "security code",
+            "auth code",
+            "authentication code",
+            "2fa code",
+            "do not share this code",
+            "code to complete"
+        ).any { it in raw }
+        if (!hasOtpWord) return false
+        // "will be debited from your a/c" in an OTP prompt is still future tense, not a
+        // completed movement, so neutralize it before looking for completed verbs.
+        val withoutFutureTense = raw.replace(
+            Regex("""\bwill\s+be\s+(?:debited|credited|charged|deducted)\b"""),
+            ""
+        )
+        val hasCompletedAction = listOf(
+            "debited",
+            "credited",
+            "spent",
+            "withdrawn",
+            "deposited",
+            "payment received",
+            "payment made"
+        ).any { it in withoutFutureTense }
+        return !hasCompletedAction
+    }
+
+    /**
+     * Payment-app receipts like "Paid Rs. 5000 to MERCHANT ... using ICICI Bank Credit Card"
+     * (Paytm/PhonePe/GPay) duplicate the bank's own card alert, which always carries a masked
+     * card number. Counting both double-counts the purchase.
+     */
+    fun isPaymentAppCardConfirmation(rawMessage: String?): Boolean {
+        val raw = rawMessage?.lowercase().orEmpty()
+        if (raw.isBlank()) return false
+        val paidUsingCard = Regex("""\bpaid\b.+\busing\b.+\b(?:credit|debit)\s+card\b""").containsMatchIn(raw)
+        if (!paidUsingCard) return false
+        val hasMaskedCardNumber = Regex("""\b(?:card|cc)\s*(?:no\.?|number|ending)?\s*(?:x+|[*]+)\s*\d{3,6}\b""")
+            .containsMatchIn(raw)
+        return !hasMaskedCardNumber
+    }
+
+    private val transactionReferenceRegexes = listOf(
+        Regex("""(?i)\bupi[:\s-]+(\d{10,14})\b"""),
+        Regex("""(?i)\bref(?:erence)?\.?\s*(?:no\.?)?\s*[:.]?\s*(\d{10,14})\b""")
+    )
+
+    /**
+     * The UPI/IMPS reference number both banks stamp on the same transaction
+     * ("UPI:616319308338", "Ref 618758297125", "IMPS Ref. no. 615384166398").
+     * Two messages carrying the same reference describe the same money movement,
+     * even when the wording differs.
+     */
+    fun transactionReference(rawMessage: String?): String? {
+        val raw = rawMessage.orEmpty()
+        if (raw.isBlank()) return null
+        return transactionReferenceRegexes.firstNotNullOfOrNull { regex ->
+            regex.find(raw)?.groupValues?.getOrNull(1)
+        }
+    }
+
+    /**
+     * The receiving-bank leg of a self transfer often names no sender at all
+     * ("Rs.X credited to your A/c XX6170 ... -Federal Bank"). Such a credit may be
+     * the other side of a same-amount debit to the user's own name.
+     */
+    fun isNamelessOwnAccountCredit(rawMessage: String?): Boolean {
+        val raw = rawMessage?.lowercase().orEmpty()
+        if (raw.isBlank()) return false
+        val creditedToOwnAccount = listOf("credited to your a/c", "credited to your account")
+            .any { it in raw }
+        if (!creditedToOwnAccount) return false
+        if ("interest" in raw) return false
+        return !Regex("""\b(?:from|by)\s+[a-z]{3,}""").containsMatchIn(raw)
+    }
+
+    fun isFailedTransactionArtifact(rawMessage: String?): Boolean {
+        val raw = rawMessage?.lowercase().orEmpty()
+        if (raw.isBlank()) return false
+        val hasFailure = listOf(
+            "transaction failed",
+            "txn failed",
+            "payment failed",
+            "transfer failed",
+            "declined",
+            "unsuccessful",
+            "not successful",
+            "could not be completed",
+            "couldn't be completed",
+            "has failed",
+            "was failed"
+        ).any { it in raw }
+        val hasTransactionContext = listOf(
+            "transaction",
+            "txn",
+            "payment",
+            "transfer",
+            "upi",
+            "card",
+            "a/c",
+            "account"
+        ).any { it in raw }
+        return hasFailure && hasTransactionContext
+    }
+
+    fun isCreditCardRepaymentArtifact(rawMessage: String?, type: TransactionType): Boolean {
+        if (type != TransactionType.Income) return false
+        return isCreditCardSettlementArtifact(rawMessage)
+    }
+
+    fun isCreditCardBillPaymentDebit(rawMessage: String?): Boolean {
+        val raw = rawMessage?.lowercase().orEmpty()
+        if (raw.isBlank()) return false
+        val hasDebit = listOf("debited", "debit", "paid", "payment made").any { it in raw }
+        if (!hasDebit) return false
+        // ICICI tags card-bill payments from the bank account with an InfoBIL*INFT* code
+        // and no other card wording; the spend was already counted purchase by purchase.
+        if ("infobil*inft" in raw || "info bil*inft" in raw) return true
+        val hasBankAccount = listOf("a/c", "account", "acct", "acc ").any { it in raw }
+        return hasBankAccount && hasCreditCardPaymentContext(raw)
+    }
+
+    fun isCreditCardSettlementArtifact(rawMessage: String?): Boolean {
+        val raw = rawMessage?.lowercase().orEmpty()
+        if (isCreditCardRefund(raw)) return false
+        if (isCreditCardSpend(raw)) return false
+        val hasCard = listOf(
+            "credit card",
+            "cardmember",
+            "card bill",
+            "card payment",
+            "cc payment",
+            "card ending",
+            "card no",
+            "your card ending",
+            "statement"
+        ).any { it in raw }
+        val hasPayment = listOf(
+            "payment made",
+            "payment received",
+            "payment of",
+            "bill payment",
+            "bill paid",
+            "thank you for payment",
+            "received towards",
+            "credited towards",
+            "credited to credit card",
+            "credited to your card",
+            "credited in your card",
+            "credited to card",
+            "credited to your card ending",
+            "limit restored",
+            "outstanding"
+        ).any { it in raw }
+        return hasCard && hasPayment
+    }
+
+    fun isCreditCardRefund(rawMessage: String?): Boolean {
+        val raw = rawMessage?.lowercase().orEmpty()
+        if (raw.isBlank()) return false
+        val hasCard = listOf(
+            "credit card",
+            "cardmember",
+            "card ending",
+            "card no",
+            "your card ending",
+            "cc "
+        ).any { it in raw } || Regex("""(?i)\b(?:card|cc)\s*(?:no\.?|number|ending|x+|[*]+)?\s*(?:x+|[*]+)?\d{3,6}\b""")
+            .containsMatchIn(raw)
+        val hasRefund = listOf(
+            "refund",
+            "refunded",
+            "reversal",
+            "reversed",
+            "chargeback",
+            "cashback",
+            "cash back"
+        ).any { it in raw }
+        return hasCard && hasRefund
+    }
+
+    fun isCreditCardStatementArtifact(rawMessage: String?): Boolean {
+        val raw = rawMessage?.lowercase().orEmpty()
+        if (raw.isBlank()) return false
+        if (isCreditCardSpend(raw)) return false
+        val hasCard = listOf(
+            "credit card",
+            "cardmember",
+            "card ending",
+            "card no",
+            "cc "
+        ).any { it in raw }
+        val hasStatement = listOf(
+            "statement generated",
+            "statement is generated",
+            "statement has been generated",
+            "statement is sent",
+            "statement sent",
+            "statement ready",
+            "statement for",
+            "monthly statement",
+            "card statement",
+            "bill generated",
+            "bill is generated",
+            "bill has been generated",
+            "bill statement",
+            "total amount due",
+            "minimum amount due",
+            "amount due",
+            "amt due",
+            "minimum of",
+            "outstanding",
+            "due date",
+            "pay by",
+            "pay before"
+        ).any { it in raw }
+        return hasCard && hasStatement
+    }
+
+    fun isCreditCardDueReminder(rawMessage: String?): Boolean {
+        val raw = rawMessage?.lowercase().orEmpty()
+        if (raw.isBlank()) return false
+        val hasCard = listOf(
+            "credit card",
+            "cardmember",
+            "card ending",
+            "card no",
+            "cc "
+        ).any { it in raw }
+        val hasDueReminder = listOf(
+            "amount due",
+            "total amount due",
+            "minimum amount due",
+            "amt due",
+            "due date",
+            "pay by",
+            "pay instantly",
+            "pay before",
+            "payment due",
+            "bill due"
+        ).any { it in raw }
+        val hasReminderAction = listOf(
+            "payzapp",
+            "bill pay",
+            "statement",
+            "https://",
+            "http://"
+        ).any { it in raw }
+        return hasCard && hasDueReminder && (hasReminderAction || "pay" in raw)
+    }
+
+    private fun looksLikeCreditCardBillPair(a: ParsedTransactionMessage, b: ParsedTransactionMessage): Boolean {
+        val texts = listOf(a.rawMessage.lowercase(), b.rawMessage.lowercase())
+        val hasCc = texts.any {
+            it.contains("credit card") ||
+                it.contains("card bill") ||
+                it.contains("card payment") ||
+                it.contains("cc payment") ||
+                it.contains("card ending")
+        }
+        return hasCc && (a.type != b.type)
+    }
+
+    fun isCreditCardSpend(rawMessage: String?): Boolean {
+        val raw = rawMessage?.lowercase().orEmpty()
+        val hasCardText = listOf(
+            "credit card",
+            "bank card",
+            "hdfc bank card",
+            "icici bank card",
+            "card xx",
+            "card ",
+            "card ending",
+            "card no",
+            "card number"
+        ).any { it in raw }
+        val hasCardNumberHint = Regex("""(?i)\b(?:card|cc)\s*(?:no\.?|number|ending|x+|[*]+)?\s*(?:x+|[*]+)?\d{3,6}\b""")
+            .containsMatchIn(raw)
+        if (!hasCardText && !hasCardNumberHint) return false
+        if (hasCreditCardPaymentContext(raw)) return false
+
+        val hasSpendVerb = listOf(
+            "spent",
+            "purchase",
+            "used at",
+            "transaction at",
+            "txn at",
+            "transaction done",
+            "has been made",
+            "made at",
+            "charged",
+            "swiped"
+        ).any { it in raw }
+        val hasCardDebitPurchase = Regex("""(?i)\bcredit card\b.*\bdebited\b.*\bfor\s+(?:upi|[a-z0-9*_-]+)""")
+            .containsMatchIn(raw)
+        val hasCardDebitAtMerchant = Regex("""(?i)\b(?:card|cc)\b.*\b(?:debited|charged|used|paid)\b.*\b(?:at|for|on)\b""")
+            .containsMatchIn(raw) ||
+            Regex("""(?i)\b(?:debited|charged|used|paid)\b.*\b(?:card|cc)\b.*\b(?:at|for|on)\b""")
+                .containsMatchIn(raw)
+        return hasSpendVerb || hasCardDebitPurchase || hasCardDebitAtMerchant
+    }
+
+    private fun hasCreditCardPaymentContext(raw: String): Boolean {
+        return listOf(
+            "card payment",
+            "cc payment",
+            "credit card payment",
+            "card bill",
+            "bill payment",
+            "bill paid",
+            "amount due",
+            "total amount due",
+            "minimum amount due",
+            "amt due",
+            "payment received",
+            "received towards",
+            "credited towards",
+            "thank you for payment",
+            "payment due",
+            "outstanding"
+        ).any { it in raw }
+    }
+
+    /**
+     * True when a leg clearly names a third party (a person or merchant), so it must not be
+     * absorbed as the opposite side of a self transfer that coincidentally shares the amount.
+     */
+    fun namesExternalParty(message: ParsedTransactionMessage): Boolean {
+        if (message.isInternalTransfer) return false
+        if (isNamelessOwnAccountCredit(message.rawMessage)) return false
+        val party = message.counterparty.lowercase()
+        if (party.isBlank()) return false
+        val genericHints = listOf("bank", "transfer", "self", "credit", "account", "a/c")
+        return genericHints.none { it in party }
+    }
+
+    private fun looksLikeInternalTransfer(a: ParsedTransactionMessage, b: ParsedTransactionMessage): Boolean {
+        if (a.isInternalTransfer && b.isInternalTransfer) return true
+        if (a.isInternalTransfer || b.isInternalTransfer) {
+            val other = if (a.isInternalTransfer) b else a
+            return !namesExternalParty(other)
+        }
+
+        val combined = a.rawMessage.lowercase() + " " + b.rawMessage.lowercase()
+        val transferHints = listOf(
+            "transfer to own",
+            "transfer from own",
+            "own account",
+            "own a/c",
+            "internal transfer",
+            "txn-a2a",
+            "a2a transfer",
+            "a/c transfer",
+            "account transfer",
+            "account to account",
+            "a/c to a/c",
+            "to self",
+            "from self",
+            "neft to",
+            "imps to",
+            "between your accounts"
+        )
+        if (transferHints.any { it in combined }) return true
+        val sameNamedBankDifferentAccounts =
+            a.bankName.substringBefore(" A/C ") == b.bankName.substringBefore(" A/C ") &&
+                a.accountHint != null &&
+                b.accountHint != null &&
+                a.accountHint != b.accountHint
+        val bankLikeCounterparties = listOf(a.counterparty.lowercase(), b.counterparty.lowercase())
+            .all { it.contains("bank") || it.contains("transfer") || it.contains("self") }
+        return sameNamedBankDifferentAccounts && (bankLikeCounterparties || hasTransferRail(combined))
+    }
+
+    private fun ParsedTransactionMessage.asInternalTransfer(): ParsedTransactionMessage {
+        return copy(
+            name = "Internal Transfer",
+            counterparty = "Internal Transfer",
+            requiresUserReview = false,
+            isInternalTransfer = true,
+            excludeFromSummary = true
+        )
+    }
+
+    private fun hasTransferRail(message: String): Boolean {
+        return listOf("transfer", "neft", "rtgs", "imps", "upi").any { it in message }
+    }
+
+    private fun sameAmount(a: Double, b: Double): Boolean = abs(a - b) <= AMOUNT_EPSILON
+}
